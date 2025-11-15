@@ -157,7 +157,10 @@ Second subtitle text
 - `--language, -l`: Language hint for transcription (optional, e.g., 'en', 'fr')
 - `--model, -m`: Transcription model (default: voxtral-mini-latest)
 - `--config`: Configuration file for batch processing
-- `--verbose, -v`: Verbose output
+- `--progress`: Show detailed progress (audio upload, transcription segments)
+- `--quiet, -q`: Suppress all text output (silent mode)
+- `--before-exec`: Script or command to run before processing starts
+- `--after-exec`: Script or command to run after successful completion
 - `--debug`: Debug mode with detailed logging
 
 **Example Usage**:

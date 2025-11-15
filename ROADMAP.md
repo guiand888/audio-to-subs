@@ -124,6 +124,52 @@
 - [ ] Test in clean virtual environment
 - [ ] Prepare for PyPI (future)
 
+## Phase 4: Enhanced Features (Planned)
+
+### Step 13: Progress Reporting
+**Status**: In Development
+
+- [ ] Implement `--progress` flag for detailed progress reporting
+- [ ] Track audio upload progress (bytes sent / total bytes)
+- [ ] Show segment transcription progress (Segment X of Y)
+- [ ] Update progress callback mechanism in Pipeline
+- [ ] Extend TranscriptionClient to report upload progress
+- [ ] Tests: Verify progress callbacks are triggered
+
+### Step 14: Silent Mode
+**Status**: Planned
+
+- [ ] Implement `--quiet` flag for silent operation
+- [ ] Suppress all stdout output when enabled
+- [ ] Preserve error logging (stderr only)
+- [ ] Useful for scripting and automation
+
+**Implementation**:
+- Add conditional output wrapping in CLI
+- Progress callback becomes no-op when quiet mode active
+- Errors still reported to stderr
+
+### Step 15: Hook Scripts
+**Status**: Planned
+
+- [ ] Implement `--before-exec` flag (pre-run hook)
+  - Execute script/command before processing starts
+  - Exit with error if script fails
+  - Use case: Validate environment, create directories, etc.
+
+- [ ] Implement `--after-exec` flag (post-run hook)
+  - Execute script/command after successful completion
+  - Has access to output file path via environment variable
+  - Exit code doesn't affect overall success (informational only)
+  - Use case: Copy files, send notifications, cleanup, etc.
+
+**Implementation**:
+- CLI accepts command string for both flags
+- Parse and execute via subprocess.run()
+- Set AUDIO_TO_SUBS_OUTPUT env var in after-exec context
+- Proper error handling and reporting
+- Tests: Mock subprocess, verify execution and error handling
+
 ## Immediate Next Steps (Oscar Mike!)
 
 ### 1. ✅ Create Project Structure
