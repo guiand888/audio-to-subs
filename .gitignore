@@ -148,3 +148,7 @@ tests/fixtures/*.mkv
 
 # Local test configuration (not committed)
 test_resources.local.md
+
+# API keys (never commit these)
+.mistral_api_key
+.api_key
