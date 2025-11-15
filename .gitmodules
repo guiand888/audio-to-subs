@@ -1,0 +1,4 @@
+[submodule "dev"]
+	path = dev
+	url = git@github.com:guiand888/audio-to-subs-dev.git
+	branch = main
