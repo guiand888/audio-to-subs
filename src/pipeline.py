@@ -5,7 +5,6 @@ Supports single video processing and batch processing of multiple videos.
 
 import logging
 import os
-import re
 import tempfile
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -13,7 +12,6 @@ from typing import Callable, Dict, List, Optional
 from src.audio_extractor import extract_audio, FFmpegNotFoundError, AudioExtractionError
 from src.transcription_client import TranscriptionClient, TranscriptionError
 from src.audio_splitter import (
-    get_audio_duration,
     split_audio,
     needs_splitting,
 )
@@ -241,37 +239,12 @@ class Pipeline:
                     ),
                 )
 
-                # Fallback: if no timestamped segments, get plain text and segment by sentences
+                # Reject if no timestamped segments
                 if not segments:
-                    logger.warning(
-                        f"No timestamped segments returned for segment {idx}; "
-                        f"falling back to sentence-based segmentation."
+                    raise PipelineError(
+                        f"Transcription failed: AI service did not return timestamp data for segment {idx}. "
+                        f"Cannot generate accurate subtitles without timestamps."
                     )
-                    text = self.transcription_client.transcribe_audio(
-                        segment_path,
-                        segment_number=idx if self.verbose_progress else None,
-                        total_segments=(
-                            len(audio_segments) if self.verbose_progress else None
-                        ),
-                    )
-                    # Determine audio duration
-                    seg_duration = get_audio_duration(segment_path)
-                    # Split by sentence boundaries (period, exclamation, question mark)
-                    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
-                    if not sentences:
-                        sentences = [text]
-                    # Distribute sentences evenly across duration
-                    per_sentence_duration = seg_duration / max(len(sentences), 1)
-                    cur_start = 0.0
-                    for sent in sentences:
-                        start = cur_start
-                        end = min(seg_duration, start + per_sentence_duration)
-                        segments.append({
-                            "start": start,
-                            "end": end,
-                            "text": sent,
-                        })
-                        cur_start = end
 
                 # Adjust timestamps based on position in overall audio
                 for segment in segments:
@@ -286,6 +259,9 @@ class Pipeline:
             return all_segments
         except TranscriptionError as e:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
+        except PipelineError:
+            # Bubble up explicit pipeline errors (e.g., missing timestamps)
+            raise
         except Exception as e:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
 
