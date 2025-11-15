@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  audio-to-subs:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: audio-to-subs:latest
+    container_name: audio-to-subs
+    
+    # Use Podman secrets for API key
+    secrets:
+      - mistral_api_key
+    
+    # Environment variables
+    environment:
+      - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
+      - PYTHONUNBUFFERED=1
+    
+    # Volume mounts
+    volumes:
+      # Input videos (read-only)
+      - ./videos:/input:ro
+      # Output subtitles
+      - ./subtitles:/output:rw
+      # Temporary processing (tmpfs for performance)
+      - type: tmpfs
+        target: /tmp/audio-to-subs
+        tmpfs:
+          size: 1G
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '2.0'
+          memory: 2G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Command (override with docker-compose run)
+    command: ["--help"]
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # Read-only root filesystem (except writable mounts)
+    read_only: false  # Set to true after testing
+    
+    # User
+    user: "1000:1000"
+
+secrets:
+  mistral_api_key:
+    external: true

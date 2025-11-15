@@ -1,0 +1,36 @@
+# Development container with all tools
+FROM python:3.11-alpine
+
+# Install system dependencies
+RUN apk add --no-cache \
+    ffmpeg \
+    gcc \
+    musl-dev \
+    linux-headers \
+    git \
+    make
+
+# Set working directory
+WORKDIR /app
+
+# Copy dependency files
+COPY requirements.txt requirements-dev.txt ./
+
+# Install Python dependencies
+RUN pip install --no-cache-dir -r requirements-dev.txt
+
+# Copy source code (mounted as volume in development)
+# COPY is minimal here, actual code comes from volume mount
+COPY pyproject.toml ./
+
+# Install package in editable mode
+RUN pip install -e .
+
+# Create non-root user for development
+RUN adduser -D -u 1000 developer && \
+    chown -R developer:developer /app
+
+USER developer
+
+# Default command: interactive shell
+CMD ["/bin/sh"]

@@ -1,0 +1,65 @@
+# Git
+.git/
+.gitignore
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+*.egg-info/
+dist/
+build/
+.eggs/
+*.egg
+
+# Virtual environments
+venv/
+env/
+ENV/
+.venv
+
+# Testing
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.hypothesis/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Documentation (not needed in container)
+*.md
+!README.md
+
+# Videos and subtitles (mounted as volumes)
+videos/
+subtitles/
+*.mp4
+*.mkv
+*.avi
+*.mov
+*.srt
+*.mp3
+*.wav
+*.flac
+
+# Environment files
+.env
+.env.*
+
+# Development
+STATUS.md
+ROADMAP.md
+work.md
