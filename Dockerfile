@@ -59,10 +59,10 @@ ENV TMPDIR=/tmp/audio-to-subs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "import audio_to_subs; print('OK')" || exit 1
+    CMD python -c "from src import cli; print('OK')" || exit 1
 
 # Entry point
-ENTRYPOINT ["python", "-m", "audio_to_subs"]
+ENTRYPOINT ["python", "-m", "src"]
 
 # Default arguments
 CMD ["--help"]

@@ -32,5 +32,8 @@ RUN adduser -D -u 1000 developer && \
 
 USER developer
 
-# Default command: interactive shell
-CMD ["/bin/sh"]
+# Entry point for CLI
+ENTRYPOINT ["python", "-m", "src"]
+
+# Default command: show help
+CMD ["--help"]
