@@ -1,4 +1,5 @@
 """Transcription client for Mistral AI Voxtral Mini."""
+
 from pathlib import Path
 from typing import Any
 
@@ -8,46 +9,64 @@ from mistralai.models import File
 
 class TranscriptionError(Exception):
     """Raised when transcription fails."""
+
     pass
 
 
 class AudioFileError(Exception):
     """Raised when audio file is invalid or not found."""
+
     pass
 
 
 class TranscriptionClient:
     """Client for transcribing audio using Mistral AI Voxtral Mini."""
 
-    def __init__(self, api_key: str, model: str = "voxtral-mini-latest", language: str | None = None):
+    def __init__(
+        self,
+        api_key: str,
+        model: str = "voxtral-mini-latest",
+        language: str | None = None,
+        progress_callback: Any | None = None,
+    ):
         """Initialize transcription client.
-        
+
         Args:
             api_key: Mistral AI API key
             model: Transcription model to use (default: voxtral-mini-latest per Mistral docs)
             language: Optional language code for transcription (e.g., 'en', 'fr'). Default: None (auto-detect)
-            
+            progress_callback: Optional callback for progress updates (receives progress messages)
+
         Raises:
             ValueError: If API key is not provided
         """
         if not api_key:
             raise ValueError("API key is required")
-        
+
         self.api_key = api_key
         self.model = model
         self.language = language
+        self.progress_callback = progress_callback
         self.client = Mistral(api_key=api_key)
 
-    def transcribe_audio(self, audio_path: str, language: str | None = None) -> str:
+    def transcribe_audio(
+        self,
+        audio_path: str,
+        language: str | None = None,
+        segment_number: int | None = None,
+        total_segments: int | None = None,
+    ) -> str:
         """Transcribe audio file to text.
-        
+
         Args:
             audio_path: Path to audio file
             language: Optional language code. Overrides instance default if provided.
-            
+            segment_number: Optional segment number (for progress reporting)
+            total_segments: Optional total segments (for progress reporting)
+
         Returns:
             Transcribed text
-            
+
         Raises:
             AudioFileError: If audio file not found
             TranscriptionError: If transcription fails
@@ -55,15 +74,32 @@ class TranscriptionClient:
         audio_file = Path(audio_path)
         if not audio_file.exists():
             raise AudioFileError(f"Audio file not found: {audio_path}")
-        
+
         try:
             lang = language or self.language
             with open(audio_path, "rb") as audio_file:
-                file_obj = File(content=audio_file.read(), fileName=Path(audio_path).name, contentType="audio/wav")
-                kwargs = {
-                    "model": self.model,
-                    "file": file_obj
-                }
+                file_content = audio_file.read()
+                file_size = len(file_content)
+
+                # Report upload start if progress tracking enabled
+                if self.progress_callback and segment_number and total_segments:
+                    self.progress_callback(
+                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size} bytes (0%)"
+                    )
+
+                file_obj = File(
+                    content=file_content,
+                    fileName=Path(audio_path).name,
+                    contentType="audio/wav",
+                )
+
+                # Report upload complete
+                if self.progress_callback and segment_number and total_segments:
+                    self.progress_callback(
+                        f"Uploading segment {segment_number}/{total_segments}: {file_size} / {file_size} bytes (100%)"
+                    )
+
+                kwargs = {"model": self.model, "file": file_obj}
                 if lang:
                     kwargs["language"] = lang
                 response = self.client.audio.transcriptions.complete(**kwargs)
@@ -71,16 +107,24 @@ class TranscriptionClient:
         except Exception as e:
             raise TranscriptionError(f"Transcription failed: {str(e)}") from e
 
-    def transcribe_audio_with_timestamps(self, audio_path: str, language: str | None = None) -> list[dict[str, Any]]:
+    def transcribe_audio_with_timestamps(
+        self,
+        audio_path: str,
+        language: str | None = None,
+        segment_number: int | None = None,
+        total_segments: int | None = None,
+    ) -> list[dict[str, Any]]:
         """Transcribe audio with timestamp information.
-        
+
         Args:
             audio_path: Path to audio file
             language: Optional language code. Overrides instance default if provided.
-            
+            segment_number: Optional segment number (for progress reporting)
+            total_segments: Optional total segments (for progress reporting)
+
         Returns:
             List of segments with start, end times and text
-            
+
         Raises:
             AudioFileError: If audio file not found
             TranscriptionError: If transcription fails
@@ -89,31 +133,53 @@ class TranscriptionClient:
         audio_file = Path(audio_path)
         if not audio_file.exists():
             raise AudioFileError(f"Audio file not found: {audio_path}")
-        
+
         try:
             lang = language or self.language
             with open(audio_path, "rb") as audio_file:
-                file_obj = File(content=audio_file.read(), fileName=Path(audio_path).name, contentType="audio/wav")
+                file_content = audio_file.read()
+                file_size = len(file_content)
+
+                # Report upload start if progress tracking enabled
+                if self.progress_callback and segment_number and total_segments:
+                    self.progress_callback(
+                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size} bytes (0%)"
+                    )
+
+                file_obj = File(
+                    content=file_content,
+                    fileName=Path(audio_path).name,
+                    contentType="audio/wav",
+                )
+
+                # Report upload complete
+                if self.progress_callback and segment_number and total_segments:
+                    self.progress_callback(
+                        f"Uploading segment {segment_number}/{total_segments}: {file_size} / {file_size} bytes (100%)"
+                    )
+
                 kwargs = {
                     "model": self.model,
                     "file": file_obj,
-                    "timestamp_granularities": ["segment"]
+                    "timestamp_granularities": ["segment"],
                 }
                 # Note: language and timestamp_granularities are mutually exclusive per Mistral docs
                 if lang:
                     kwargs.pop("timestamp_granularities", None)
                     kwargs["language"] = lang
                 response = self.client.audio.transcriptions.complete(**kwargs)
-            
+
             segments = []
-            if hasattr(response, 'segments'):
+            if hasattr(response, "segments"):
                 for segment in response.segments:
-                    segments.append({
-                        "start": segment.start,
-                        "end": segment.end,
-                        "text": segment.text
-                    })
-            
+                    segments.append(
+                        {
+                            "start": segment.start,
+                            "end": segment.end,
+                            "text": segment.text,
+                        }
+                    )
+
             return segments
         except Exception as e:
             raise TranscriptionError(f"Transcription failed: {str(e)}") from e
