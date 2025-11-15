@@ -19,9 +19,9 @@ COPY requirements.txt requirements-dev.txt ./
 # Install Python dependencies
 RUN pip install --no-cache-dir -r requirements-dev.txt
 
-# Copy source code (mounted as volume in development)
-# COPY is minimal here, actual code comes from volume mount
-COPY pyproject.toml ./
+# Copy source code and metadata for package installation
+COPY pyproject.toml README.md ./
+COPY src/ ./src/
 
 # Install package in editable mode
 RUN pip install -e .

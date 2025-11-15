@@ -102,5 +102,6 @@
 
 ---
 
-**Ready for**: Step 3 - Container Build & Verification  
-**Next Command**: `make build-dev`
+**Ready for**: Step 4 - Audio Extractor TDD  
+**Next Command**: Write first test in `tests/test_audio_extractor.py`  
+**Progress**: Phase 1 Complete (~20%)
