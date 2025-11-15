@@ -3,7 +3,7 @@ import pytest
 from pathlib import Path
 from src.subtitle_generator import (
     SubtitleGenerator,
-    format_timestamp,
+    format_timestamp_srt,
     SubtitleFormatError
 )
 
@@ -14,7 +14,7 @@ class TestTimestampFormatting:
     def test_format_timestamp_zero(self):
         """Test formatting timestamp at 0 seconds."""
         # Act
-        result = format_timestamp(0.0)
+        result = format_timestamp_srt(0.0)
         
         # Assert
         assert result == "00:00:00,000"
@@ -22,7 +22,7 @@ class TestTimestampFormatting:
     def test_format_timestamp_basic(self):
         """Test formatting basic timestamp."""
         # Act
-        result = format_timestamp(65.5)
+        result = format_timestamp_srt(65.5)
         
         # Assert
         assert result == "00:01:05,500"
@@ -30,7 +30,7 @@ class TestTimestampFormatting:
     def test_format_timestamp_with_hours(self):
         """Test formatting timestamp with hours."""
         # Act
-        result = format_timestamp(3661.123)
+        result = format_timestamp_srt(3661.123)
         
         # Assert
         assert result == "01:01:01,123"
@@ -38,7 +38,7 @@ class TestTimestampFormatting:
     def test_format_timestamp_large_value(self):
         """Test formatting large timestamp."""
         # Act
-        result = format_timestamp(36000.999)
+        result = format_timestamp_srt(36000.999)
         
         # Assert
         assert result == "10:00:00,999"
@@ -46,7 +46,7 @@ class TestTimestampFormatting:
     def test_format_timestamp_rounds_milliseconds(self):
         """Test that milliseconds are rounded correctly."""
         # Act
-        result = format_timestamp(5.9999)
+        result = format_timestamp_srt(5.9999)
         
         # Assert
         assert result == "00:00:05,999"

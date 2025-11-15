@@ -7,7 +7,7 @@ from src.pipeline import Pipeline
 
 @pytest.fixture
 def mistral_api_key():
-    \"\"\"Load Mistral API key from .mistral_api_key file or env.\"\"\"
+    """Load Mistral API key from .mistral_api_key file or env."""
     api_key = os.getenv('MISTRAL_API_KEY')
     
     if not api_key:
@@ -23,29 +23,29 @@ def mistral_api_key():
 
 @pytest.fixture
 def test_video_file(tmp_path):
-    \"\"\"Create or use test video file.\"\"\"
+    """Create or use test video file."""
     # In real test, would use actual video file
     # For now, skip if no real video available
     return None
 
 
 class TestIntegration:
-    \"\"\"Integration tests with real Mistral API.\"\"\"
+    """Integration tests with real Mistral API."""
 
     @pytest.mark.integration
     def test_pipeline_with_real_api(self, mistral_api_key, tmp_path):
-        \"\"\"Test full pipeline with real Mistral API.
+        """Test full pipeline with real Mistral API.
         
         IMPORTANT: This test requires:
         - Valid Mistral API key in .mistral_api_key or MISTRAL_API_KEY env var
         - FFmpeg installed
         - Real audio file for transcription
-        \"\"\"
+        """
         pytest.skip('Requires real video file for integration test')
 
     @pytest.mark.integration
     def test_transcription_client_real_api(self, mistral_api_key, tmp_path):
-        \"\"\"Test TranscriptionClient with real Mistral API.\"\"\"
+        """Test TranscriptionClient with real Mistral API."""
         from src.transcription_client import TranscriptionClient
         
         client = TranscriptionClient(api_key=mistral_api_key)
@@ -56,7 +56,7 @@ class TestIntegration:
 
     @pytest.mark.integration
     def test_pipeline_end_to_end_mock_api(self, mistral_api_key, tmp_path):
-        \"\"\"Test pipeline end-to-end with mocked transcription.\"\"\"
+        """Test pipeline end-to-end with mocked transcription."""
         from unittest.mock import patch, MagicMock
         
         # Create test video file

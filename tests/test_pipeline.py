@@ -33,7 +33,7 @@ class TestPipeline:
         
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_generator.generate_srt.return_value = str(output_file)
+        mock_generator.generate.return_value = str(output_file)
         
         pipeline = Pipeline(api_key="test_key")
         
@@ -44,7 +44,7 @@ class TestPipeline:
         assert result == str(output_file)
         mock_extract.assert_called_once()
         mock_transcription.transcribe_audio_with_timestamps.assert_called_once()
-        mock_generator.generate_srt.assert_called_once()
+        mock_generator.generate.assert_called_once()
 
     @patch('src.pipeline.extract_audio')
     def test_process_video_video_not_found(self, mock_extract, tmp_path):
@@ -117,7 +117,7 @@ class TestPipeline:
         
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_generator.generate_srt.side_effect = Exception("Write failed")
+        mock_generator.generate.side_effect = Exception("Write failed")
         
         pipeline = Pipeline(api_key="test_key")
         
@@ -155,7 +155,7 @@ class TestPipeline:
         
         mock_generator = MagicMock()
         mock_generator_class.return_value = mock_generator
-        mock_generator.generate_srt.return_value = str(output_file)
+        mock_generator.generate.return_value = str(output_file)
         
         progress_callback = MagicMock()
         pipeline = Pipeline(api_key="test_key", progress_callback=progress_callback)
