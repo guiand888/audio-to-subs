@@ -145,3 +145,6 @@ Thumbs.db
 tests/fixtures/*.mp4
 tests/fixtures/*.mkv
 !tests/fixtures/sample*.mp4
+
+# Local test configuration (not committed)
+test_resources.local.md
