@@ -51,20 +51,24 @@ export MISTRAL_API_KEY=your_api_key
 #### Single Video
 
 ```bash
-# Convert single video
+# Convert single video (preserves your UID/GID for output files)
 podman run --rm \
-  --secret mistral_api_key \
-  -v ./videos:/input:ro \
-  -v ./subtitles:/output \
+  --userns=keep-id \
+  --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
+  -v ./videos:/input:ro,Z \
+  -v ./subtitles:/output:Z \
   audio-to-subs:latest -i /input/video.mp4 -o /output/video.srt
 
 # Specify output format (default: srt)
 podman run --rm \
-  --secret mistral_api_key \
-  -v ./videos:/input:ro \
-  -v ./subtitles:/output \
+  --userns=keep-id \
+  --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
+  -v ./videos:/input:ro,Z \
+  -v ./subtitles:/output:Z \
   audio-to-subs:latest -i /input/video.mp4 -o /output/video.vtt --format vtt
 ```
+
+**Important**: Use `--userns=keep-id` to preserve your user ID/GID on output files, preventing permission issues.
 
 #### Batch Processing
 
@@ -83,8 +87,9 @@ Then run:
 
 ```bash
 podman run --rm \
-  --secret mistral_api_key \
-  -v $(pwd):/work \
+  --userns=keep-id \
+  --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
+  -v $(pwd):/work:Z,rslave \
   audio-to-subs:latest --config /work/.audio-to-subs.yaml
 ```
 

@@ -54,9 +54,10 @@ clean:  ## Clean up containers and images
 
 run:  ## Run production container (requires videos/ directory and Podman secret)
 	podman run --rm \
-		--secret mistral_api_key \
-		-v ./videos:/input:ro \
-		-v ./subtitles:/output \
+		--userns=keep-id \
+		--secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
+		-v ./videos:/input:ro,Z \
+		-v ./subtitles:/output:Z \
 		$(PROD_IMAGE) -i /input/sample.mp4 -o /output
 
 shell:  ## Open shell in development container

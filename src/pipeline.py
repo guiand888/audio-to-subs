@@ -5,6 +5,7 @@ Supports single video processing and batch processing of multiple videos.
 
 import logging
 import os
+import re
 import tempfile
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
@@ -239,6 +240,38 @@ class Pipeline:
                         len(audio_segments) if self.verbose_progress else None
                     ),
                 )
+
+                # Fallback: if no timestamped segments, get plain text and segment by sentences
+                if not segments:
+                    logger.warning(
+                        f"No timestamped segments returned for segment {idx}; "
+                        f"falling back to sentence-based segmentation."
+                    )
+                    text = self.transcription_client.transcribe_audio(
+                        segment_path,
+                        segment_number=idx if self.verbose_progress else None,
+                        total_segments=(
+                            len(audio_segments) if self.verbose_progress else None
+                        ),
+                    )
+                    # Determine audio duration
+                    seg_duration = get_audio_duration(segment_path)
+                    # Split by sentence boundaries (period, exclamation, question mark)
+                    sentences = [s.strip() for s in re.split(r"(?<=[.!?])\s+", text) if s.strip()]
+                    if not sentences:
+                        sentences = [text]
+                    # Distribute sentences evenly across duration
+                    per_sentence_duration = seg_duration / max(len(sentences), 1)
+                    cur_start = 0.0
+                    for sent in sentences:
+                        start = cur_start
+                        end = min(seg_duration, start + per_sentence_duration)
+                        segments.append({
+                            "start": start,
+                            "end": end,
+                            "text": sent,
+                        })
+                        cur_start = end
 
                 # Adjust timestamps based on position in overall audio
                 for segment in segments:

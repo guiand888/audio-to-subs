@@ -5,6 +5,7 @@ Supports single video processing and batch processing via configuration files.
 """
 
 import logging
+import os
 import sys
 from pathlib import Path
 from typing import Optional
@@ -21,6 +22,35 @@ __version__ = "0.1.0"
 
 #: Supported subtitle output formats
 SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
+
+
+def _validate_output_directory(output_path: str) -> None:
+    """Validate that output directory is writable.
+
+    Args:
+        output_path: Path to output file
+
+    Raises:
+        click.ClickException: If directory is not writable
+    """
+    output_file = Path(output_path)
+    output_dir = output_file.parent
+
+    # Create directory if it doesn't exist
+    try:
+        output_dir.mkdir(parents=True, exist_ok=True)
+    except OSError as e:
+        raise click.ClickException(
+            f"Cannot create output directory '{output_dir}': {str(e)}"
+        )
+
+    # Check if directory is writable
+    if not os.access(output_dir, os.W_OK):
+        raise click.ClickException(
+            f"Output directory is not writable: {output_dir}"
+        )
+
+    logger.debug(f"Output directory is writable: {output_dir}")
 
 
 @click.command()
@@ -153,6 +183,13 @@ def main(
     if not Path(input_path).exists():
         click.echo(f"Error: Input file not found: {input_path}", err=True)
         sys.exit(1)
+
+    # Validate output directory is writable
+    try:
+        _validate_output_directory(output_path)
+    except click.ClickException as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(2)
 
     try:
         # Create progress callback

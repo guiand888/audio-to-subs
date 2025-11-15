@@ -376,16 +376,22 @@ Feature: Video to Subtitle Conversion
 # Build image with Podman
 podman build -t audio-to-subs:latest .
 
-# Run with Podman
+# Run with Podman (preserves your UID/GID for output files)
 podman run --rm \
-  --secret mistral_api_key \
-  -v ./videos:/input:ro \
-  -v ./subtitles:/output \
+  --userns=keep-id \
+  --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
+  -v ./videos:/input:ro,Z \
+  -v ./subtitles:/output:Z \
   audio-to-subs:latest -i /input/video.mp4 -o /output
 
 # Or with Podman Compose
 podman-compose up
 ```
+
+**Important Flags**:
+- `--userns=keep-id`: Preserves your host UID/GID in the container, ensuring output files are owned by your user
+- `,Z` flag (comma-separated): Applies SELinux relabeling to the volume mount, preventing permission issues on Fedora/RHEL systems
+- `--secret mistral_api_key,type=env,target=MISTRAL_API_KEY`: Mounts Podman secret as environment variable (ensures API key doesn't have trailing newline)
 
 ### Kubernetes Deployment
 

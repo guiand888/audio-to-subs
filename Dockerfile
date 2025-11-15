@@ -1,5 +1,9 @@
 # Multi-stage build for minimal production image
 
+# Build arguments for user configuration
+ARG USER_UID=1000
+ARG USER_GID=1000
+
 # Stage 1: Builder
 FROM python:3.11-alpine AS builder
 
@@ -28,6 +32,10 @@ RUN pip install --no-cache-dir --prefix=/install .
 # Stage 2: Runtime
 FROM python:3.11-alpine
 
+# Build arguments for user configuration
+ARG USER_UID=1000
+ARG USER_GID=1000
+
 # Install only runtime dependencies
 RUN apk add --no-cache \
     ffmpeg \
@@ -43,13 +51,14 @@ COPY pyproject.toml /app/
 # Set working directory
 WORKDIR /app
 
-# Create non-root user
-RUN adduser -D -u 1000 appuser && \
-    chown -R appuser:appuser /app
+# Create non-root user with configurable UID/GID
+RUN addgroup -g ${USER_GID} appgroup && \
+    adduser -D -u ${USER_UID} -G appgroup appuser && \
+    chown -R appuser:appgroup /app
 
 # Create directories for input/output
 RUN mkdir -p /input /output /tmp/audio-to-subs && \
-    chown -R appuser:appuser /input /output /tmp/audio-to-subs
+    chown -R appuser:appgroup /input /output /tmp/audio-to-subs
 
 USER appuser
 

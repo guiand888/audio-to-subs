@@ -1,4 +1,9 @@
 # Development container with all tools
+
+# Build arguments for user configuration
+ARG USER_UID=1000
+ARG USER_GID=1000
+
 FROM python:3.11-alpine
 
 # Install system dependencies
@@ -26,9 +31,10 @@ COPY src/ ./src/
 # Install package in editable mode
 RUN pip install -e .
 
-# Create non-root user for development
-RUN adduser -D -u 1000 developer && \
-    chown -R developer:developer /app
+# Create non-root user for development with configurable UID/GID
+RUN addgroup -g ${USER_GID} devgroup && \
+    adduser -D -u ${USER_UID} -G devgroup developer && \
+    chown -R developer:devgroup /app
 
 USER developer
 

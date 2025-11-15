@@ -91,7 +91,7 @@ class TranscriptionClient:
                 # Report upload start if progress tracking enabled
                 if self.progress_callback and segment_number and total_segments:
                     self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size} bytes (0%)"
+                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)"
                     )
 
                 file_obj = File(
@@ -103,7 +103,7 @@ class TranscriptionClient:
                 # Report upload complete
                 if self.progress_callback and segment_number and total_segments:
                     self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {file_size} / {file_size} bytes (100%)"
+                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)"
                     )
 
                 kwargs = {"model": self.model, "file": file_obj}
@@ -153,7 +153,7 @@ class TranscriptionClient:
                 # Report upload start if progress tracking enabled
                 if self.progress_callback and segment_number and total_segments:
                     self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size} bytes (0%)"
+                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)"
                     )
 
                 file_obj = File(
@@ -165,7 +165,7 @@ class TranscriptionClient:
                 # Report upload complete
                 if self.progress_callback and segment_number and total_segments:
                     self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {file_size} / {file_size} bytes (100%)"
+                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)"
                     )
 
                 kwargs = {
@@ -174,13 +174,20 @@ class TranscriptionClient:
                     "timestamp_granularities": ["segment"],
                 }
                 # Note: language and timestamp_granularities are mutually exclusive per Mistral docs
-                if lang:
-                    kwargs.pop("timestamp_granularities", None)
-                    kwargs["language"] = lang
+                # Timestamps are required for subtitle generation, so language is disabled for now.
+                # TODO: Support language parameter when Mistral API allows language + timestamps
+                # if lang:
+                #     kwargs.pop("timestamp_granularities", None)
+                #     kwargs["language"] = lang
+                logger.debug(f"Calling Mistral API with timestamps: {kwargs.keys()}")
                 response = self.client.audio.transcriptions.complete(**kwargs)
+                logger.debug(f"Transcription response type: {type(response)}")
+                logger.debug(f"Transcription response dir: {dir(response)}")
+                logger.debug(f"Transcription response: {response}")
 
             segments = []
             if hasattr(response, "segments"):
+                logger.debug(f"Response has segments attribute with {len(response.segments)} segments")
                 for segment in response.segments:
                     segments.append(
                         {
@@ -189,6 +196,8 @@ class TranscriptionClient:
                             "text": segment.text,
                         }
                     )
+            else:
+                logger.warning(f"Response does not have 'segments' attribute. Response attributes: {vars(response) if hasattr(response, '__dict__') else 'no __dict__'}")
 
             return segments
         except Exception as e:

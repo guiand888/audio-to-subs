@@ -28,11 +28,11 @@ This file provides guidance to WARP (warp.dev) when working with code in this re
 # Build development container
 podman build -t audio-to-subs:dev -f Dockerfile.dev .
 
-# Run tests in container
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest
+# Run tests in container (preserves your UID/GID)
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev pytest
 
 # Interactive development shell
-podman run --rm -it -v .:/app:Z audio-to-subs:dev /bin/sh
+podman run --rm -it --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev /bin/sh
 
 # Build production image
 podman build -t audio-to-subs:latest .
@@ -52,46 +52,52 @@ podman secret ls
 
 ### Running Tests (Containerized)
 ```bash
-# All tests with coverage
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest
+# All tests with coverage (preserves your UID/GID)
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev pytest
 
 # Specific test file
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest tests/test_audio_extractor.py
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev pytest tests/test_audio_extractor.py
 
 # BDD scenarios
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest features/
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev pytest features/
 
 # With verbose output
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest -v
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev pytest -v
 ```
 
 ### Code Quality (Containerized)
 ```bash
-# Format code
-podman run --rm -v .:/app:Z audio-to-subs:dev black src/ tests/
+# Format code (preserves your UID/GID)
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev black src/ tests/
 
 # Lint
-podman run --rm -v .:/app:Z audio-to-subs:dev ruff check src/ tests/
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev ruff check src/ tests/
 
 # Type check
-podman run --rm -v .:/app:Z audio-to-subs:dev mypy src/
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev mypy src/
 
 # Run all quality checks
-podman run --rm -v .:/app:Z audio-to-subs:dev make quality
+podman run --rm --userns=keep-id -v .:/app:Z,rslave audio-to-subs:dev make quality
 ```
 
 ### Production Usage
 ```bash
-# Run with Podman
+# Run with Podman (preserves your UID/GID for output files)
 podman run --rm \
-  --secret mistral_api_key \
-  -v ./videos:/input:ro \
-  -v ./subtitles:/output \
+  --userns=keep-id \
+  --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
+  -v ./videos:/input:ro,Z \
+  -v ./subtitles:/output:Z \
   audio-to-subs:latest -i /input/video.mp4 -o /output
 
 # Or with Podman Compose
 podman-compose up
 ```
+
+**Important Flags**:
+- `--userns=keep-id`: Preserves your host UID/GID in the container, ensuring output files are owned by your user
+- `,Z` flag (comma-separated): Applies SELinux relabeling to the volume mount, preventing permission issues on Fedora/RHEL systems
+- `--secret mistral_api_key,type=env,target=MISTRAL_API_KEY`: Mounts Podman secret as environment variable (ensures API key doesn't have trailing newline)
 
 ## Architecture
 
