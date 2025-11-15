@@ -42,6 +42,12 @@ typecheck:  ## Run type checker
 
 quality: format-check lint typecheck test  ## Run all quality checks
 
+pre-commit-install:  ## Install pre-commit hooks in container
+	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) pre-commit install
+
+pre-commit-run:  ## Run pre-commit hooks on all files
+	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pre-commit run --all-files
+
 clean:  ## Clean up containers and images
 	podman container prune -f
 	podman image prune -f
