@@ -26,7 +26,9 @@ class Pipeline:
         self,
         api_key: str,
         progress_callback: Optional[Callable[[str], None]] = None,
-        temp_dir: Optional[str] = None
+        temp_dir: Optional[str] = None,
+        transcription_model: str = "voxtral-mini-latest",
+        language: Optional[str] = None
     ):
         """Initialize pipeline.
         
@@ -34,6 +36,8 @@ class Pipeline:
             api_key: Mistral AI API key
             progress_callback: Optional callback for progress updates
             temp_dir: Optional temporary directory for intermediate files
+            transcription_model: Mistral transcription model (default: voxtral-mini-latest)
+            language: Optional language code for transcription (e.g., 'en', 'fr')
             
         Raises:
             ValueError: If API key is not provided
@@ -44,7 +48,11 @@ class Pipeline:
         self.api_key = api_key
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir or tempfile.gettempdir()
-        self.transcription_client = TranscriptionClient(api_key=api_key)
+        self.transcription_client = TranscriptionClient(
+            api_key=api_key,
+            model=transcription_model,
+            language=language
+        )
         self.subtitle_generator = SubtitleGenerator()
 
     def process_batch(self, jobs: list[dict[str, str]]) -> dict[str, str]:

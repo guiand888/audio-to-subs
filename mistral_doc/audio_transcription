@@ -1,0 +1,176 @@
+Audio & Transcription
+
+Audio input capabilities enable models to chat and understand audio directly, this can be used for both chat use cases via audio or for optimal transcription purposes.
+audio_graph
+Before You Start
+Before You Start
+Models with Audio Capabilities
+
+Audio capable models:
+
+    Voxtral Small (voxtral-small-latest) with audio input for chat use cases.
+    Voxtral Mini (voxtral-mini-latest) with audio input for chat use cases
+    And Voxtral Mini Transcribe (voxtral-mini-latest via audio/transcriptions), with an efficient transcription only service.
+
+Chat with Audio
+Chat with Audio
+Use Audio with Instruction Following models
+
+Our Voxtral models are capable of being used for chat use cases with our chat completions endpoint.
+tip
+
+Before continuing, we recommend reading the Chat Competions documentation to learn more about the chat completions API and how to use it before proceeding.
+
+Alternatively, you can upload a local file to our cloud and then use a signed URL for the task.
+
+import os
+from mistralai import Mistral
+
+api_key = os.environ["MISTRAL_API_KEY"]
+model = "voxtral-mini-latest"
+
+client = Mistral(api_key=api_key)
+
+# If local audio, upload and retrieve the signed url
+with open("music.mp3", "rb") as f:
+    uploaded_audio = client.files.upload(
+      file={
+          "content": f,
+          "file_name": f.name
+      },
+      purpose="audio"
+    )
+signed_url = client.files.get_signed_url(file_id=uploaded_audio.id)
+
+messages = [
+    {
+        "role": "user",
+        "content": [
+            {
+                "type": "input_audio",
+                "input_audio": signed_url.url,
+            },
+            {
+                "type": "text",
+                "text": "What's in this file?"
+            }
+        ]
+    }
+]
+
+chat_response = client.chat.complete(
+    model=model,
+    messages=messages
+)
+
+Example Samples
+Example Samples
+
+Below you can find a few of the multiple use cases possible, by leveraging the audio capabilities of our models.
+
+User
+0:00
+
+Assistant
+
+Sure, here is the transcription of what you said:
+"Today on July 15th, 2025, Mistral AI is announcing the new Voxtral models."
+And here is the Python code to generate the first n digits of the Fibonacci sequence:
+
+def fibonacci(n):
+    if n <= 0:
+        return []
+    elif n == 1:
+        return [0]
+    elif n == 2:
+        return [0, 1]
+
+fib_sequence = [0, 1]
+for i in range(2, n):
+    next_value = fib_sequence[-1] + fib_sequence[-2]
+    fib_sequence.append(next_value)
+
+return fib_sequence
+
+# Example usage:
+n = 10  # Change this value to get the first n digits of the Fibonacci sequence
+print(fibonacci(n))
+
+This code defines a function fibonacci that takes an integer n and returns a list containing the first n digits of the Fibonacci sequence. You can change the value of n to get the desired number of Fibonacci digits.
+Transcription
+Transcription
+Transcribe any Audio
+
+Transcription provides an optimized endpoint for transcription purposes and currently supports voxtral-mini-latest, which runs Voxtral Mini Transcribe.
+
+Parameters
+We provide different settings and parameters for transcription, such as:
+
+    timestamp_granularities: This allows you to set timestamps to track not only "what" was said but also "when". You can find more about timestamps here.
+    language: Our transcription service also works as a language detection service. However, you can manually set the language of the transcription for better accuracy if the language of the audio is already known.
+
+Among the different methods to pass the audio, you can directly provide a path to a local file to upload and transcribe it as follows:
+
+import os
+from mistralai import Mistral
+
+api_key = os.environ["MISTRAL_API_KEY"]
+model = "voxtral-mini-latest"
+
+client = Mistral(api_key=api_key)
+
+with open("/path/to/file/audio.mp3", "rb") as f:
+    transcription_response = client.audio.transcriptions.complete(
+        model=model,
+        file={
+            "content": f,
+            "file_name": "audio.mp3",
+        },
+        ## language="en"
+    )
+
+Example Samples
+Example Samples
+
+Below you can find a few examples leveraging the audio transcription endpoint.
+Cat head
+
+¡Meow! Click one of the tabs above to learn more.
+Transcription with Timestamps
+Transcription with Timestamps
+
+You can request timestamps for the transcription by passing the timestamp_granularities parameter, currently supporting segment.
+It will return the start and end time of each segment in the audio file.
+note
+
+timestamp_granularities is currently not compatible with language, please use either one or the other.
+
+import os
+from mistralai import Mistral
+
+api_key = os.environ["MISTRAL_API_KEY"]
+model = "voxtral-mini-latest"
+
+client = Mistral(api_key=api_key)
+
+transcription_response = client.audio.transcriptions.complete(
+    model=model,
+    file_url="https://docs.mistral.ai/audio/obama.mp3",
+    timestamp_granularities=["segment"]
+)
+
+---
+
+Maximum audio length
+
+The maximum length will depend on the endpoint used, currently the limits are as follows:
+
+    ≈20 minutes for Chat with Audio for both models.
+    ≈15 minutes for Transcription, longer transcriptions will be available soon.
+
+tip
+
+Here are some tips if you need to handle longer audio files:
+
+    Divide the audio into smaller segments: Transcribe each segment individually. However, be aware that this might lead to a loss of context, difficulties in splitting the audio at natural pauses (such as mid-sentence), and the need to combine the transcriptions afterward.
+    Increase the playback speed: Send the file at a faster pace by speeding up the audio. Keep in mind that this can reduce audio quality and require adjusting the transcription timestamps to align with the original audio file.

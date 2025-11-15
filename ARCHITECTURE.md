@@ -43,10 +43,14 @@
 
 **Configuration**:
 - Endpoint: `audio/transcriptions`
-- Model: `voxtral-mini-latest` (Voxtral Mini Transcribe)
+- Model: `voxtral-mini-latest` (Voxtral Mini Transcribe) - configurable
 - Documentation: https://docs.mistral.ai/capabilities/audio_transcription#transcription
+- Max audio length: 15 minutes (900 seconds) - auto-split longer files
 
 **Features**:
+- Configurable model name (default: voxtral-mini-latest per Mistral docs)
+- Optional language parameter for improved accuracy
+- Automatic audio splitting for files > 15 minutes
 - Retry pattern with exponential backoff (max 3 attempts)
 - Rate limiting awareness
 - Secure API key management via environment variables
@@ -54,6 +58,7 @@
 
 **Key Functions**:
 - `transcribe_audio(audio_path: Path, language: Optional[str] = None) -> Transcription`
+- `transcribe_audio_with_timestamps(audio_path: Path, language: Optional[str] = None) -> List[Dict]`
 - `validate_api_key() -> bool`
 - `_retry_with_backoff(func, max_retries: int = 3) -> Any`
 
@@ -110,19 +115,35 @@ Second subtitle text
 - Resource cleanup on failure
 
 **Key Functions**:
-- `process_video(video_path: Path, output_dir: Path, api_key: str) -> Path`
+- `process_video(video_path: Path, output_dir: Path, api_key: str, transcription_model: str = "voxtral-mini-latest", language: Optional[str] = None) -> Path`
 - `process_batch(video_paths: List[Path], output_dir: Path, api_key: str) -> List[Path]`
 - `cleanup_temp_files(temp_dir: Path) -> None`
 
 **Workflow**:
 1. Validate input video file
 2. Extract audio to temporary file
-3. Transcribe audio via Mistral API
-4. Generate SRT file
-5. Clean up temporary audio file
-6. Return path to generated subtitle
+3. Check audio duration; split if > 15 minutes
+4. Transcribe audio via Mistral API (with optional language)
+5. Merge transcriptions from multiple segments if needed
+6. Generate SRT file in selected format
+7. Clean up temporary audio files
+8. Return path to generated subtitle
 
-### 5. CLI Interface (`cli.py` / `__main__.py`)
+### 5. Audio Splitter (`audio_splitter.py`)
+
+**Responsibility**: Split audio files exceeding 15-minute Mistral API limit
+
+**Features**:
+- Automatic duration detection using ffprobe
+- Segment splitting with 2-second overlap for context preservation
+- Returns list of split audio files or original if under limit
+
+**Key Functions**:
+- `get_audio_duration(audio_path: str) -> float`
+- `split_audio(audio_path: str, output_dir: str, max_length: int = 900) -> List[str]`
+- `needs_splitting(audio_path: str, max_length: int = 900) -> bool`
+
+### 6. CLI Interface (`cli.py` / `__main__.py`)
 
 **Responsibility**: User interaction and command-line interface
 
@@ -131,8 +152,11 @@ Second subtitle text
 **Arguments**:
 - `--input, -i`: Video file path(s) (required)
 - `--output, -o`: Output directory (default: same as input)
+- `--format, -f`: Subtitle format: srt, vtt, webvtt, sbv (default: srt)
 - `--api-key`: Mistral API key (default: `MISTRAL_API_KEY` env var)
-- `--language, -l`: Language hint for transcription (optional)
+- `--language, -l`: Language hint for transcription (optional, e.g., 'en', 'fr')
+- `--model, -m`: Transcription model (default: voxtral-mini-latest)
+- `--config`: Configuration file for batch processing
 - `--verbose, -v`: Verbose output
 - `--debug`: Debug mode with detailed logging
 
@@ -156,14 +180,17 @@ audio-to-subs -i video.mp4 -l en
 ```
 audio-to-subs/
 ├── src/
-│   └── audio_to_subs/
-│       ├── __init__.py
-│       ├── __main__.py              # Entry point
-│       ├── cli.py                   # CLI interface
-│       ├── pipeline.py              # Orchestration
-│       ├── audio_extractor.py       # FFmpeg wrapper
-│       ├── transcription_client.py  # Mistral API client
-│       └── subtitle_generator.py    # SRT generation
+│   ├── __init__.py
+│   ├── __main__.py                  # Entry point
+│   ├── cli.py                       # CLI interface
+│   ├── pipeline.py                  # Orchestration
+│   ├── audio_extractor.py           # FFmpeg wrapper
+│   ├── audio_splitter.py            # Audio splitting for >15min files
+│   ├── transcription_client.py      # Mistral API client
+│   ├── subtitle_generator.py        # Subtitle generation
+│   ├── config_parser.py             # Configuration file parsing
+│   └── audio_to_subs/               # Package directory
+│       └── (legacy, deprecated)
 ├── tests/
 │   ├── __init__.py
 │   ├── test_audio_extractor.py
