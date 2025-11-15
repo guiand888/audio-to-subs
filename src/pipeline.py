@@ -124,7 +124,11 @@ class Pipeline:
             # Stage 2: Check if audio needs splitting (>15 minutes)
             if needs_splitting(audio_path):
                 self._progress("Audio exceeds 15 minutes, splitting into segments...")
-                audio_segments = split_audio(audio_path, self.temp_dir)
+                audio_segments = split_audio(
+                    audio_path,
+                    self.temp_dir,
+                    progress_callback=self.progress_callback if self.verbose_progress else None,
+                )
                 self._progress(f"Split audio into {len(audio_segments)} segments")
             else:
                 audio_segments = [audio_path]
@@ -176,7 +180,11 @@ class Pipeline:
             # Generate temp audio file path
             audio_path = Path(self.temp_dir) / f"audio_{video_file.stem}.wav"
 
-            return extract_audio(video_path, str(audio_path))
+            return extract_audio(
+                video_path,
+                str(audio_path),
+                progress_callback=self.progress_callback if self.verbose_progress else None,
+            )
 
         except FileNotFoundError as e:
             raise PipelineError(f"Video file not found: {str(e)}") from e

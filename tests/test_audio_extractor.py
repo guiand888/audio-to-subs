@@ -52,13 +52,21 @@ class TestFFmpegAvailability:
 class TestAudioExtraction:
     """Test audio extraction from video files."""
 
+    @patch('subprocess.Popen')
     @patch('subprocess.run')
     @patch('src.audio_extractor.check_ffmpeg_available')
-    def test_extract_audio_success(self, mock_check_ffmpeg, mock_run, tmp_path):
+    def test_extract_audio_success(self, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test successful audio extraction from video file."""
         # Arrange
         mock_check_ffmpeg.return_value = True
         mock_run.return_value = MagicMock(returncode=0)
+        
+        # Mock Popen for FFmpeg process
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = ('', '')
+        mock_process.returncode = 0
+        mock_process.stdout = []
+        mock_popen.return_value = mock_process
         
         video_path = tmp_path / "test_video.mp4"
         video_path.touch()
@@ -71,8 +79,8 @@ class TestAudioExtraction:
         
         # Assert
         assert result == str(output_path)
-        mock_run.assert_called_once()
-        call_args = mock_run.call_args[0][0]
+        mock_popen.assert_called_once()
+        call_args = mock_popen.call_args[0][0]
         assert call_args[0] == 'ffmpeg'
         assert str(video_path) in call_args
         assert str(output_path) in call_args
@@ -103,13 +111,20 @@ class TestAudioExtraction:
         with pytest.raises(FileNotFoundError):
             extract_audio(str(video_path), str(output_path))
 
+    @patch('subprocess.Popen')
     @patch('subprocess.run')
     @patch('src.audio_extractor.check_ffmpeg_available')
-    def test_extract_audio_ffmpeg_command_fails(self, mock_check_ffmpeg, mock_run, tmp_path):
+    def test_extract_audio_ffmpeg_command_fails(self, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test that extract_audio raises error when FFmpeg command fails."""
         # Arrange
         mock_check_ffmpeg.return_value = True
-        mock_run.return_value = MagicMock(returncode=1, stderr=b"Error processing video")
+        mock_run.return_value = MagicMock(returncode=0)
+        
+        # Mock failed Popen
+        mock_process = MagicMock()
+        mock_process.communicate.return_value = ('', "Error processing video")
+        mock_process.returncode = 1
+        mock_popen.return_value = mock_process
         
         video_path = tmp_path / "test_video.mp4"
         video_path.touch()
