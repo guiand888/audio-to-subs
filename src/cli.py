@@ -1,12 +1,20 @@
-"""Command-line interface for audio-to-subs."""
+"""Command-line interface for audio-to-subs.
+
+Provides CLI tools for converting video audio to subtitles using Mistral AI transcription.
+Supports single video processing and batch processing via configuration files.
+"""
 import os
 import sys
 import click
 from pathlib import Path
+from typing import Optional
 
 from src.pipeline import Pipeline, PipelineError
 
 __version__ = "0.1.0"
+
+#: Supported subtitle output formats
+SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
 
 
 @click.command()
@@ -22,7 +30,20 @@ __version__ = "0.1.0"
     'output_path',
     required=False,
     type=click.Path(),
-    help='Output SRT subtitle file path'
+    help='Output subtitle file path'
+)
+@click.option(
+    '-f', '--format',
+    'output_format',
+    type=click.Choice(SUPPORTED_FORMATS),
+    default='srt',
+    help='Output subtitle format (default: srt)'
+)
+@click.option(
+    '--config',
+    'config_path',
+    type=click.Path(exists=True),
+    help='Configuration file for batch processing (.audio-to-subs.yaml)'
 )
 @click.option(
     '--api-key',
@@ -36,12 +57,25 @@ __version__ = "0.1.0"
     is_flag=True,
     help='Show version'
 )
-def main(input_path, output_path, api_key, version):
-    """Convert video audio to SRT subtitles using Mistral AI transcription.
+def main(
+    input_path: Optional[str],
+    output_path: Optional[str],
+    output_format: str,
+    config_path: Optional[str],
+    api_key: Optional[str],
+    version: bool
+) -> None:
+    """Convert video audio to subtitles using Mistral AI transcription.
+    
+    Supports single video processing or batch processing via configuration file.
     
     \b
-    Usage:
+    Single video usage:
       audio-to-subs -i video.mp4 -o output.srt --api-key YOUR_KEY
+      audio-to-subs -i video.mp4 -o output.vtt --format vtt
+      
+    Batch processing:
+      audio-to-subs --config .audio-to-subs.yaml
       
     Or set MISTRAL_API_KEY environment variable:
       export MISTRAL_API_KEY=your_key
@@ -51,7 +85,23 @@ def main(input_path, output_path, api_key, version):
         click.echo(f"audio-to-subs v{__version__}")
         return
     
-    # Validate inputs
+    # Validate configuration
+    if config_path and (input_path or output_path):
+        click.echo(
+            "Error: --config cannot be used with --input or --output",
+            err=True
+        )
+        sys.exit(1)
+    
+    # TODO: Implement batch processing from config
+    if config_path:
+        click.echo(
+            "Batch processing not yet implemented",
+            err=True
+        )
+        sys.exit(1)
+    
+    # Single video processing
     if not input_path:
         click.echo("Error: --input is required", err=True)
         sys.exit(1)
@@ -74,7 +124,12 @@ def main(input_path, output_path, api_key, version):
     
     try:
         # Create progress callback
-        def progress_callback(message: str):
+        def progress_callback(message: str) -> None:
+            """Display progress message to user.
+            
+            Args:
+                message: Progress status message
+            """
             click.echo(f"[*] {message}")
         
         # Initialize pipeline
@@ -85,7 +140,11 @@ def main(input_path, output_path, api_key, version):
         
         # Process video
         click.echo(f"Processing: {input_path}")
-        result = pipeline.process_video(input_path, output_path)
+        result = pipeline.process_video(
+            input_path,
+            output_path,
+            output_format=output_format
+        )
         
         click.echo(f"\n✓ Success! Subtitles saved to: {result}")
         

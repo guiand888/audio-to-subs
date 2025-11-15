@@ -42,15 +42,16 @@ class Pipeline:
         self.transcription_client = TranscriptionClient(api_key=api_key)
         self.subtitle_generator = SubtitleGenerator()
 
-    def process_video(self, video_path: str, output_path: str) -> str:
+    def process_video(self, video_path: str, output_path: str, output_format: str = "srt") -> str:
         """Convert video to subtitles.
         
         Args:
             video_path: Path to input video file
-            output_path: Path to write output SRT file
+            output_path: Path to write output subtitle file
+            output_format: Output subtitle format (srt, vtt, webvtt, sbv). Default: srt
             
         Returns:
-            Path to generated SRT file
+            Path to generated subtitle file
             
         Raises:
             PipelineError: If any stage fails
@@ -67,8 +68,8 @@ class Pipeline:
             segments = self._transcribe_audio(audio_path)
             
             # Stage 3: Generate subtitles
-            self._progress("Generating SRT subtitles...")
-            output = self._generate_subtitles(segments, output_path)
+            self._progress(f"Generating {output_format.upper()} subtitles...")
+            output = self._generate_subtitles(segments, output_path, output_format)
             
             self._progress("Complete! Subtitles generated successfully.")
             return output
@@ -129,21 +130,22 @@ class Pipeline:
         except Exception as e:
             raise PipelineError(f"Transcription failed: {str(e)}")
 
-    def _generate_subtitles(self, segments: List[Dict], output_path: str) -> str:
-        """Generate SRT subtitle file.
+    def _generate_subtitles(self, segments: List[Dict], output_path: str, output_format: str = "srt") -> str:
+        """Generate subtitle file in specified format.
         
         Args:
             segments: Transcription segments
-            output_path: Path to write SRT file
+            output_path: Path to write subtitle file
+            output_format: Output subtitle format (srt, vtt, webvtt, sbv)
             
         Returns:
-            Path to generated SRT file
+            Path to generated subtitle file
             
         Raises:
             PipelineError: If generation fails
         """
         try:
-            return self.subtitle_generator.generate_srt(segments, output_path)
+            return self.subtitle_generator.generate(segments, output_path, output_format)
         except SubtitleFormatError as e:
             raise PipelineError(f"Subtitle generation failed: {str(e)}")
         except Exception as e:
