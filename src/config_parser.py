@@ -39,7 +39,7 @@ class ConfigParser:
         except Exception as e:
             raise ConfigError(f"Failed to read config: {str(e)}") from e
 
-    def get_defaults(self) -> Dict[str, Any]:
+    def get_defaults(self) -> dict[str, Any]:
         """Get default settings for all jobs.
 
         Returns:

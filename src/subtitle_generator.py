@@ -208,7 +208,7 @@ class SubtitleGenerator:
         
         return str(output_path)
 
-    def _validate_segment(self, segment: Dict) -> None:
+    def _validate_segment(self, segment: dict[str, Any]) -> None:
         """Validate segment has required fields and valid values.
         
         Args:

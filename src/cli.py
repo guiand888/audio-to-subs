@@ -4,6 +4,8 @@ Provides CLI tools for converting video audio to subtitles using Mistral AI tran
 Supports single video processing and batch processing via configuration files.
 """
 import sys
+from pathlib import Path
+from typing import Optional
 
 import click
 

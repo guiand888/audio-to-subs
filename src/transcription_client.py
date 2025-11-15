@@ -3,6 +3,7 @@ from pathlib import Path
 from typing import Any
 
 from mistralai import Mistral
+from mistralai.models import File
 
 
 class TranscriptionError(Exception):
@@ -51,10 +52,11 @@ class TranscriptionClient:
             raise AudioFileError(f"Audio file not found: {audio_path}")
         
         try:
-            with open(audio_path, "rb") as audio:
-                response = self.client.audio.transcriptions.create(
-                    model="voxtral-mini-2501",
-                    file=audio
+            with open(audio_path, "rb") as audio_file:
+                file_obj = File(content=audio_file.read(), fileName=Path(audio_path).name, contentType="audio/wav")
+                response = self.client.audio.transcriptions.complete(
+                    model="mistral-voxtral-mini-2501",
+                    file=file_obj
                 )
             return response.text
         except Exception as e:
@@ -78,10 +80,11 @@ class TranscriptionClient:
             raise AudioFileError(f"Audio file not found: {audio_path}")
         
         try:
-            with open(audio_path, "rb") as audio:
-                response = self.client.audio.transcriptions.create(
-                    model="voxtral-mini-2501",
-                    file=audio,
+            with open(audio_path, "rb") as audio_file:
+                file_obj = File(content=audio_file.read(), fileName=Path(audio_path).name, contentType="audio/wav")
+                response = self.client.audio.transcriptions.complete(
+                    model="mistral-voxtral-mini-2501",
+                    file=file_obj,
                     timestamp_granularities=["segment"]
                 )
             
@@ -96,4 +99,4 @@ class TranscriptionClient:
             
             return segments
         except Exception as e:
-            raise TranscriptionError(f"Transcription failed: {str(e)}")
+            raise TranscriptionError(f"Transcription failed: {str(e)}") from e
