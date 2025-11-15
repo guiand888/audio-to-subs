@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Optional
 
 from src.pipeline import Pipeline, PipelineError
+from src.config_parser import ConfigParser, ConfigError
 
 __version__ = "0.1.0"
 
@@ -93,13 +94,10 @@ def main(
         )
         sys.exit(1)
     
-    # TODO: Implement batch processing from config
+    # Batch processing mode
     if config_path:
-        click.echo(
-            "Batch processing not yet implemented",
-            err=True
-        )
-        sys.exit(1)
+        _process_batch(config_path, api_key)
+        return
     
     # Single video processing
     if not input_path:
@@ -148,6 +146,59 @@ def main(
         
         click.echo(f"\n✓ Success! Subtitles saved to: {result}")
         
+    except PipelineError as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
+    except Exception as e:
+        click.echo(f"Error: Unexpected error - {str(e)}", err=True)
+        sys.exit(1)
+
+
+def _process_batch(config_path: str, api_key: Optional[str]) -> None:
+    """Process multiple videos from configuration file.
+    
+    Args:
+        config_path: Path to .audio-to-subs.yaml configuration file
+        api_key: Mistral AI API key
+        
+    Raises:
+        SystemExit: On error
+    """
+    if not api_key:
+        click.echo(
+            "Error: API key required. Provide with --api-key or set MISTRAL_API_KEY",
+            err=True
+        )
+        sys.exit(1)
+    
+    try:
+        # Parse configuration
+        config = ConfigParser(config_path)
+        config.validate()
+        jobs = config.get_jobs()
+        
+        # Create progress callback
+        def progress_callback(message: str) -> None:
+            click.echo(f"[*] {message}")
+        
+        # Initialize pipeline
+        pipeline = Pipeline(
+            api_key=api_key,
+            progress_callback=progress_callback
+        )
+        
+        # Process all jobs
+        click.echo(f"Processing {len(jobs)} video(s)...\n")
+        results = pipeline.process_batch(jobs)
+        
+        # Show results
+        click.echo(f"\n✓ Batch processing complete!")
+        for input_path, output_path in results.items():
+            click.echo(f"  {input_path} → {output_path}")
+        
+    except ConfigError as e:
+        click.echo(f"Error: {str(e)}", err=True)
+        sys.exit(1)
     except PipelineError as e:
         click.echo(f"Error: {str(e)}", err=True)
         sys.exit(1)

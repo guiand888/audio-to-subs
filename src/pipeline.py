@@ -1,4 +1,7 @@
-"""Pipeline orchestrator for video to subtitles conversion."""
+"""Pipeline orchestrator for video to subtitles conversion.
+
+Supports single video processing and batch processing of multiple videos.
+"""
 from pathlib import Path
 from typing import Optional, Callable, List, Dict
 import tempfile
@@ -41,6 +44,37 @@ class Pipeline:
         self.temp_dir = temp_dir or tempfile.gettempdir()
         self.transcription_client = TranscriptionClient(api_key=api_key)
         self.subtitle_generator = SubtitleGenerator()
+
+    def process_batch(self, jobs: List[Dict[str, str]]) -> Dict[str, str]:
+        """Process multiple videos in batch.
+        
+        Args:
+            jobs: List of dicts with 'input', 'output', and optional 'format' keys
+            
+        Returns:
+            Dict mapping input paths to output paths
+            
+        Raises:
+            PipelineError: If any job fails
+        """
+        results = {}
+        total = len(jobs)
+        
+        for idx, job in enumerate(jobs, 1):
+            input_path = job["input"]
+            output_path = job["output"]
+            output_format = job.get("format", "srt")
+            
+            self._progress(f"[{idx}/{total}] Processing: {input_path}")
+            
+            try:
+                result = self.process_video(input_path, output_path, output_format)
+                results[input_path] = result
+            except PipelineError as e:
+                self._progress(f"Failed: {input_path} - {str(e)}")
+                raise
+        
+        return results
 
     def process_video(self, video_path: str, output_path: str, output_format: str = "srt") -> str:
         """Convert video to subtitles.
