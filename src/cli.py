@@ -4,6 +4,7 @@ Provides CLI tools for converting video audio to subtitles using Mistral AI tran
 Supports single video processing and batch processing via configuration files.
 """
 
+import logging
 import sys
 from pathlib import Path
 from typing import Optional
@@ -11,7 +12,10 @@ from typing import Optional
 import click
 
 from src.config_parser import ConfigError, ConfigParser
+from src.logging_config import configure_logging
 from src.pipeline import Pipeline, PipelineError
+
+logger = logging.getLogger(__name__)
 
 __version__ = "0.1.0"
 
@@ -74,6 +78,12 @@ SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
     is_flag=True,
     help="Show detailed progress (file upload, transcription segments)",
 )
+@click.option(
+    "-v",
+    "--verbose",
+    is_flag=True,
+    help="Enable debug logging for detailed output",
+)
 @click.option("--version", is_flag=True, help="Show version")
 def main(
     input_path: Optional[str],
@@ -84,6 +94,7 @@ def main(
     model: str,
     language: Optional[str],
     progress: bool,
+    verbose: bool,
     version: bool,
 ) -> None:
     """Convert video audio to subtitles using Mistral AI transcription.
@@ -102,9 +113,14 @@ def main(
       export MISTRAL_API_KEY=your_key
       audio-to-subs -i video.mp4 -o output.srt
     """
+    # Configure logging early
+    configure_logging(verbose=verbose)
+
     if version:
         click.echo(f"audio-to-subs v{__version__}")
         return
+
+    logger.debug(f"CLI invoked with verbose={verbose}, progress={progress}")
 
     # Validate configuration
     if config_path and (input_path or output_path):
@@ -113,7 +129,8 @@ def main(
 
     # Batch processing mode
     if config_path:
-        _process_batch(config_path, api_key)
+        logger.debug(f"Batch mode: config_path={config_path}")
+        _process_batch(config_path, api_key, verbose)
         return
 
     # Single video processing
@@ -172,16 +189,18 @@ def main(
         sys.exit(1)
 
 
-def _process_batch(config_path: str, api_key: Optional[str]) -> None:
+def _process_batch(config_path: str, api_key: Optional[str], verbose: bool = False) -> None:
     """Process multiple videos from configuration file.
 
     Args:
         config_path: Path to .audio-to-subs.yaml configuration file
         api_key: Mistral AI API key
+        verbose: Enable debug logging
 
     Raises:
         SystemExit: On error
     """
+    logger.debug(f"_process_batch called with config_path={config_path}")
     if not api_key:
         click.echo(
             "Error: API key required. Provide with --api-key or set MISTRAL_API_KEY",

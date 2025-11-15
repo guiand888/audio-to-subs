@@ -3,6 +3,7 @@
 Supports single video processing and batch processing of multiple videos.
 """
 
+import logging
 import os
 import tempfile
 from pathlib import Path
@@ -18,6 +19,8 @@ from src.audio_splitter import (
 from typing import Any
 
 from src.subtitle_generator import SubtitleGenerator, SubtitleFormatError
+
+logger = logging.getLogger(__name__)
 
 
 class PipelineError(Exception):
@@ -58,6 +61,10 @@ class Pipeline:
         self.progress_callback = progress_callback
         self.temp_dir = temp_dir or tempfile.gettempdir()
         self.verbose_progress = verbose_progress
+        logger.debug(
+            f"Pipeline initialized: model={transcription_model}, language={language}, "
+            f"temp_dir={self.temp_dir}, verbose_progress={verbose_progress}"
+        )
         self.transcription_client = TranscriptionClient(
             api_key=api_key,
             model=transcription_model,
@@ -116,10 +123,12 @@ class Pipeline:
         audio_path = None
         audio_segments: list[str] = []
 
+        logger.debug(f"process_video: video_path={video_path}, output_format={output_format}")
         try:
             # Stage 1: Extract audio
             self._progress("Extracting audio from video...")
             audio_path = self._extract_audio(video_path)
+            logger.debug(f"Audio extracted: {audio_path}")
 
             # Stage 2: Check if audio needs splitting (>15 minutes)
             if needs_splitting(audio_path):
@@ -129,17 +138,21 @@ class Pipeline:
                     self.temp_dir,
                     progress_callback=self.progress_callback if self.verbose_progress else None,
                 )
+                logger.debug(f"Audio split into {len(audio_segments)} segments")
                 self._progress(f"Split audio into {len(audio_segments)} segments")
             else:
                 audio_segments = [audio_path]
+                logger.debug("Audio does not need splitting")
 
             # Stage 3: Transcribe audio (handling multiple segments if needed)
             self._progress("Transcribing audio with Mistral AI...")
             all_segments = self._transcribe_audio_segments(audio_segments)
+            logger.debug(f"Transcription complete: {len(all_segments)} segments")
 
             # Stage 4: Generate subtitles
             self._progress(f"Generating {output_format.upper()} subtitles...")
             output = self._generate_subtitles(all_segments, output_path, output_format)
+            logger.debug(f"Subtitles generated: {output}")
 
             self._progress("Complete! Subtitles generated successfully.")
             return output
@@ -177,6 +190,8 @@ class Pipeline:
             if not video_file.exists():
                 raise FileNotFoundError(f"Video file not found: {video_path}")
 
+            logger.debug(f"Video file size: {video_file.stat().st_size} bytes")
+
             # Generate temp audio file path
             audio_path = Path(self.temp_dir) / f"audio_{video_file.stem}.wav"
 
@@ -187,10 +202,13 @@ class Pipeline:
             )
 
         except FileNotFoundError as e:
+            logger.error(f"Video file not found: {video_path}")
             raise PipelineError(f"Video file not found: {str(e)}") from e
         except (FFmpegNotFoundError, AudioExtractionError) as e:
+            logger.error(f"Audio extraction failed: {str(e)}")
             raise PipelineError(f"Audio extraction failed: {str(e)}") from e
         except Exception as e:
+            logger.error(f"Audio extraction error: {str(e)}")
             raise PipelineError(f"Audio extraction failed: {str(e)}") from e
 
     def _transcribe_audio_segments(

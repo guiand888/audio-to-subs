@@ -1,8 +1,11 @@
 """Audio extraction from video files using FFmpeg."""
+import logging
 import re
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
+
+logger = logging.getLogger(__name__)
 
 
 class FFmpegNotFoundError(Exception):
@@ -45,6 +48,7 @@ def _get_video_duration(video_path: str) -> float:
         AudioExtractionError: If duration cannot be determined
     """
     try:
+        logger.debug(f"Getting video duration: {video_path}")
         result = subprocess.run(
             [
                 "ffprobe",
@@ -57,8 +61,11 @@ def _get_video_duration(video_path: str) -> float:
             text=True,
             check=True,
         )
-        return float(result.stdout.strip())
+        duration = float(result.stdout.strip())
+        logger.debug(f"Video duration: {duration} seconds")
+        return duration
     except (subprocess.CalledProcessError, ValueError) as e:
+        logger.error(f"Failed to get video duration: {str(e)}")
         raise AudioExtractionError(f"Failed to get video duration: {str(e)}") from e
 
 
@@ -82,14 +89,20 @@ def extract_audio(
         FileNotFoundError: If video file doesn't exist
         AudioExtractionError: If extraction fails
     """
+    logger.debug(f"extract_audio called: video_path={video_path}, output_path={output_path}")
+    
     # Check FFmpeg availability
     if not check_ffmpeg_available():
+        logger.error("FFmpeg is not available on this system")
         raise FFmpegNotFoundError("FFmpeg is not available on this system")
     
     # Check video file exists
     video_file = Path(video_path)
     if not video_file.exists():
+        logger.error(f"Video file not found: {video_path}")
         raise FileNotFoundError(f"Video file not found: {video_path}")
+    
+    logger.debug(f"Video file found: {video_file.stat().st_size} bytes")
     
     # Extract audio using FFmpeg
     try:
@@ -110,6 +123,7 @@ def extract_audio(
             '-ar', '16000',  # 16kHz sample rate
             '-ac', '1',  # Mono
         ]
+        logger.debug(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
         
         # Add progress reporting if callback provided
         if progress_callback:
@@ -137,11 +151,14 @@ def extract_audio(
         
         if process.returncode != 0:
             error_msg = stderr if stderr else "Unknown error"
+            logger.error(f"FFmpeg extraction failed: {error_msg}")
             raise AudioExtractionError(f"FFmpeg extraction failed: {error_msg}")
         
+        logger.debug(f"Audio extraction successful: {output_path}")
         return str(output_path)
         
     except subprocess.SubprocessError as e:
+        logger.error(f"Audio extraction subprocess error: {str(e)}")
         raise AudioExtractionError(f"Audio extraction failed: {str(e)}") from e
 
 

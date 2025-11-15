@@ -1,10 +1,13 @@
 """Transcription client for Mistral AI Voxtral Mini."""
 
+import logging
 from pathlib import Path
 from typing import Any
 
 from mistralai import Mistral
 from mistralai.models import File
+
+logger = logging.getLogger(__name__)
 
 
 class TranscriptionError(Exception):
@@ -47,6 +50,7 @@ class TranscriptionClient:
         self.model = model
         self.language = language
         self.progress_callback = progress_callback
+        logger.debug(f"TranscriptionClient initialized: model={model}, language={language}")
         self.client = Mistral(api_key=api_key)
 
     def transcribe_audio(
@@ -73,13 +77,16 @@ class TranscriptionClient:
         """
         audio_file = Path(audio_path)
         if not audio_file.exists():
+            logger.error(f"Audio file not found: {audio_path}")
             raise AudioFileError(f"Audio file not found: {audio_path}")
 
         try:
+            logger.debug(f"Transcribing audio: {audio_path}")
             lang = language or self.language
             with open(audio_path, "rb") as audio_file:
                 file_content = audio_file.read()
                 file_size = len(file_content)
+                logger.debug(f"Audio file size: {file_size} bytes")
 
                 # Report upload start if progress tracking enabled
                 if self.progress_callback and segment_number and total_segments:
@@ -102,9 +109,12 @@ class TranscriptionClient:
                 kwargs = {"model": self.model, "file": file_obj}
                 if lang:
                     kwargs["language"] = lang
+                logger.debug(f"Calling Mistral API: model={self.model}, language={lang}")
                 response = self.client.audio.transcriptions.complete(**kwargs)
+                logger.debug(f"Transcription response received, text length: {len(response.text)}")
             return response.text
         except Exception as e:
+            logger.error(f"Transcription failed: {str(e)}")
             raise TranscriptionError(f"Transcription failed: {str(e)}") from e
 
     def transcribe_audio_with_timestamps(
