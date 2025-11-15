@@ -3,14 +3,12 @@
 Provides CLI tools for converting video audio to subtitles using Mistral AI transcription.
 Supports single video processing and batch processing via configuration files.
 """
-import os
 import sys
-import click
-from pathlib import Path
-from typing import Optional
 
+import click
+
+from src.config_parser import ConfigError, ConfigParser
 from src.pipeline import Pipeline, PipelineError
-from src.config_parser import ConfigParser, ConfigError
 
 __version__ = "0.1.0"
 
@@ -192,7 +190,7 @@ def _process_batch(config_path: str, api_key: Optional[str]) -> None:
         results = pipeline.process_batch(jobs)
         
         # Show results
-        click.echo(f"\n✓ Batch processing complete!")
+        click.echo("\n✓ Batch processing complete!")
         for input_path, output_path in results.items():
             click.echo(f"  {input_path} → {output_path}")
         

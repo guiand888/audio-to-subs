@@ -93,7 +93,7 @@ class TestSubtitleGenerator:
         content = output_file.read_text()
         lines = content.strip().split('\n')
         # Should have 3 blocks of (index + timecode + text + blank)
-        assert len([l for l in lines if l.strip()]) == 9  # 3*(1+1+1)
+        assert len([line for line in lines if line.strip()]) == 9  # 3*(1+1+1)
         assert "1\n00:00:00,000 --> 00:00:02,500\nFirst" in content
         assert "2\n00:00:02,500 --> 00:00:05,000\nSecond" in content
         assert "3\n00:00:05,000 --> 00:00:08,500\nThird" in content

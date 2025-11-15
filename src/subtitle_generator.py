@@ -7,7 +7,7 @@ Supported formats:
 - SBV (YouTube): .sbv files
 """
 from pathlib import Path
-from typing import List, Dict, Literal
+from typing import Any
 
 
 class SubtitleFormatError(Exception):
@@ -77,7 +77,7 @@ class SubtitleGenerator:
 
     SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
 
-    def generate(self, segments: List[Dict], output_path: str, output_format: str = "srt") -> str:
+    def generate(self, segments: list[dict[str, Any]], output_path: str, output_format: str = "srt") -> str:
         """Generate subtitle file in specified format.
         
         Args:
@@ -104,7 +104,7 @@ class SubtitleGenerator:
         elif output_format == "sbv":
             return self.generate_sbv(segments, output_path)
 
-    def generate_srt(self, segments: List[Dict], output_path: str) -> str:
+    def generate_srt(self, segments: list[dict[str, Any]], output_path: str) -> str:
         """Generate SRT file from transcription segments.
         
         Args:
@@ -139,7 +139,7 @@ class SubtitleGenerator:
         
         return str(output_path)
 
-    def generate_vtt(self, segments: List[Dict], output_path: str) -> str:
+    def generate_vtt(self, segments: list[dict[str, Any]], output_path: str) -> str:
         """Generate VTT file from transcription segments.
         
         Args:
@@ -173,7 +173,7 @@ class SubtitleGenerator:
         
         return str(output_path)
 
-    def generate_sbv(self, segments: List[Dict], output_path: str) -> str:
+    def generate_sbv(self, segments: list[dict[str, Any]], output_path: str) -> str:
         """Generate SBV file from transcription segments.
         
         Args:

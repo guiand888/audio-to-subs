@@ -1,6 +1,7 @@
 """Transcription client for Mistral AI Voxtral Mini."""
 from pathlib import Path
-from typing import List, Dict
+from typing import Any
+
 from mistralai import Mistral
 
 
@@ -57,9 +58,9 @@ class TranscriptionClient:
                 )
             return response.text
         except Exception as e:
-            raise TranscriptionError(f"Transcription failed: {str(e)}")
+            raise TranscriptionError(f"Transcription failed: {str(e)}") from e
 
-    def transcribe_audio_with_timestamps(self, audio_path: str) -> List[Dict[str, any]]:
+    def transcribe_audio_with_timestamps(self, audio_path: str) -> list[dict[str, Any]]:
         """Transcribe audio with timestamp information.
         
         Args:

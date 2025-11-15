@@ -5,7 +5,7 @@ Tests batch processing pipeline.
 """
 import tempfile
 from pathlib import Path
-from typing import List, Dict
+from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
@@ -21,7 +21,7 @@ from src.pipeline import Pipeline, PipelineError
 
 
 # Test data fixtures
-SAMPLE_SEGMENTS: List[Dict] = [
+SAMPLE_SEGMENTS: list[dict[str, Any]] = [
     {"start": 1.5, "end": 5.0, "text": "First subtitle"},
     {"start": 5.5, "end": 10.0, "text": "Second subtitle"},
     {"start": 10.5, "end": 15.0, "text": "Third subtitle with\nmultiple lines"},
@@ -138,7 +138,7 @@ class TestSubtitleGenerator:
     def test_generate_webvtt(self, generator, temp_output_dir):
         """Test WebVTT format (same as vtt)."""
         output_path = str(temp_output_dir / "output.vtt")
-        result = generator.generate(SAMPLE_SEGMENTS, output_path, "webvtt")
+        generator.generate(SAMPLE_SEGMENTS, output_path, "webvtt")
 
         content = Path(output_path).read_text()
         assert "WEBVTT" in content
@@ -146,7 +146,7 @@ class TestSubtitleGenerator:
     def test_generate_sbv(self, generator, temp_output_dir):
         """Test SBV file generation."""
         output_path = str(temp_output_dir / "output.sbv")
-        result = generator.generate(SAMPLE_SEGMENTS, output_path, "sbv")
+        generator.generate(SAMPLE_SEGMENTS, output_path, "sbv")
 
         content = Path(output_path).read_text()
         assert "0:00:01,500" in content  # SBV format

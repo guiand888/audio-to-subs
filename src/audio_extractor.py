@@ -77,4 +77,4 @@ def extract_audio(video_path: str, output_path: str) -> str:
         return str(output_path)
         
     except subprocess.SubprocessError as e:
-        raise AudioExtractionError(f"Audio extraction failed: {str(e)}")
+        raise AudioExtractionError(f"Audio extraction failed: {str(e)}") from e

@@ -3,7 +3,8 @@
 Supports .audio-to-subs.yaml configuration files for defining batch jobs.
 """
 from pathlib import Path
-from typing import List, Dict, Optional, Any
+from typing import Any
+
 import yaml
 
 
@@ -34,9 +35,9 @@ class ConfigParser:
             with open(self.config_path) as f:
                 self.config = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
-            raise ConfigError(f"Invalid YAML in {config_path}: {str(e)}")
+            raise ConfigError(f"Invalid YAML in {config_path}: {str(e)}") from e
         except Exception as e:
-            raise ConfigError(f"Failed to read config: {str(e)}")
+            raise ConfigError(f"Failed to read config: {str(e)}") from e
 
     def get_defaults(self) -> Dict[str, Any]:
         """Get default settings for all jobs.
@@ -49,7 +50,7 @@ class ConfigParser:
             defaults["format"] = "srt"
         return defaults
 
-    def get_jobs(self) -> List[Dict[str, str]]:
+    def get_jobs(self) -> list[dict[str, str]]:
         """Get list of jobs to process.
 
         Returns:

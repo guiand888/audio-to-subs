@@ -48,7 +48,7 @@ class TestIntegration:
         """Test TranscriptionClient with real Mistral API."""
         from src.transcription_client import TranscriptionClient
         
-        client = TranscriptionClient(api_key=mistral_api_key)
+        TranscriptionClient(api_key=mistral_api_key)
         
         # Would test with real audio file
         # For now, skip without real audio

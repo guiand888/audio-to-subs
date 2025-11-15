@@ -2,13 +2,15 @@
 
 Supports single video processing and batch processing of multiple videos.
 """
-from pathlib import Path
-from typing import Optional, Callable, List, Dict
-import tempfile
 import os
+import tempfile
+from pathlib import Path
+from typing import Callable, Dict, List, Optional
 
 from src.audio_extractor import extract_audio, FFmpegNotFoundError, AudioExtractionError
 from src.transcription_client import TranscriptionClient, TranscriptionError
+from typing import Any
+
 from src.subtitle_generator import SubtitleGenerator, SubtitleFormatError
 
 
@@ -45,7 +47,7 @@ class Pipeline:
         self.transcription_client = TranscriptionClient(api_key=api_key)
         self.subtitle_generator = SubtitleGenerator()
 
-    def process_batch(self, jobs: List[Dict[str, str]]) -> Dict[str, str]:
+    def process_batch(self, jobs: list[dict[str, str]]) -> dict[str, str]:
         """Process multiple videos in batch.
         
         Args:
@@ -139,13 +141,13 @@ class Pipeline:
             return extract_audio(video_path, str(audio_path))
             
         except FileNotFoundError as e:
-            raise PipelineError(f"Video file not found: {str(e)}")
+            raise PipelineError(f"Video file not found: {str(e)}") from e
         except (FFmpegNotFoundError, AudioExtractionError) as e:
-            raise PipelineError(f"Audio extraction failed: {str(e)}")
+            raise PipelineError(f"Audio extraction failed: {str(e)}") from e
         except Exception as e:
-            raise PipelineError(f"Audio extraction failed: {str(e)}")
+            raise PipelineError(f"Audio extraction failed: {str(e)}") from e
 
-    def _transcribe_audio(self, audio_path: str) -> List[Dict]:
+    def _transcribe_audio(self, audio_path: str) -> list[dict[str, Any]]:
         """Transcribe audio to text with timestamps.
         
         Args:
@@ -160,9 +162,9 @@ class Pipeline:
         try:
             return self.transcription_client.transcribe_audio_with_timestamps(audio_path)
         except TranscriptionError as e:
-            raise PipelineError(f"Transcription failed: {str(e)}")
+            raise PipelineError(f"Transcription failed: {str(e)}") from e
         except Exception as e:
-            raise PipelineError(f"Transcription failed: {str(e)}")
+            raise PipelineError(f"Transcription failed: {str(e)}") from e
 
     def _generate_subtitles(self, segments: List[Dict], output_path: str, output_format: str = "srt") -> str:
         """Generate subtitle file in specified format.
@@ -181,9 +183,9 @@ class Pipeline:
         try:
             return self.subtitle_generator.generate(segments, output_path, output_format)
         except SubtitleFormatError as e:
-            raise PipelineError(f"Subtitle generation failed: {str(e)}")
+            raise PipelineError(f"Subtitle generation failed: {str(e)}") from e
         except Exception as e:
-            raise PipelineError(f"Subtitle generation failed: {str(e)}")
+            raise PipelineError(f"Subtitle generation failed: {str(e)}") from e
 
     def _progress(self, message: str) -> None:
         """Call progress callback if provided.
