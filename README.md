@@ -21,17 +21,11 @@ Convert video audio to subtitles using AI-powered transcription.
 
 ## Quick Start
 
-### Using Containers (Recommended)
+### Build Container
 
 ```bash
-# Build development container
-make build-dev
-
-# Run tests
-make test
-
-# Interactive shell
-make shell
+# Build production image
+podman build -t audio-to-subs:latest .
 ```
 
 ### Configuration
@@ -170,36 +164,9 @@ Second subtitle line
 
 ## Development
 
+For development setup and testing, see `dev/WARP.md` in the development repository.
+
 This project follows TDD/BDD methodology with container-first development.
-
-See `WARP.md` for detailed development guidance and `ARCHITECTURE.md` for system design.
-
-### Running Tests
-
-```bash
-# All tests
-make test
-
-# Specific test file
-make test-file TEST=tests/test_pipeline.py
-
-# With coverage
-make coverage
-```
-
-### Code Quality
-
-```bash
-# Format code
-make format
-
-# Lint and type check
-make lint
-make typecheck
-
-# All quality checks
-make quality
-```
 
 ## API Reference
 
@@ -220,8 +187,18 @@ output = pipeline.process_video(
 
 - Podman (container runtime)
 - Mistral AI API key (get from https://console.mistral.ai)
-- FFmpeg (included in container)
-- Python 3.9+ (in container)
+
+## Development Standards & Instructions
+
+Comprehensive development rules, coding standards, and project guidelines are maintained in a separate repository and referenced during development. These include standards for:
+
+- Code quality and style
+- Testing methodologies (TDD/BDD)
+- Git workflow and collaboration
+- Architecture and design patterns
+- Deployment practices
+
+For access to these standards, contact the project maintainers or see the development team setup documentation.
 
 ## License
 
