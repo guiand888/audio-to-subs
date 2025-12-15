@@ -153,7 +153,61 @@ class TestSubtitleGenerator:
         
         # Assert
         content = output_file.read_text()
-        assert "Line 1\nLine 2" in content
+        assert "Line 1" in content
+        assert "Line 2" in content
+
+    def test_generate_srt_long_text_segmentation(self, tmp_path):
+        """Test generating SRT with long text that requires segmentation."""
+        # Arrange
+        generator = SubtitleGenerator()
+        long_text = "This is a very long subtitle text that should be segmented into multiple lines to comply with subtitle width constraints and best practices for readability on screen."
+        segments = [
+            {"start": 0.0, "end": 5.0, "text": long_text}
+        ]
+        output_file = tmp_path / "output.srt"
+        
+        # Act
+        generator.generate_srt(segments, str(output_file))
+        
+        # Assert
+        content = output_file.read_text()
+        lines = [line for line in content.split('\n') if line.strip() and not line[0].isdigit() and '-->' not in line]
+        
+        # Should have multiple lines due to segmentation
+        assert len(lines) > 1
+        
+        # Each line should be within reasonable length (max 42 chars + some tolerance)
+        for line in lines:
+            assert len(line) <= 50, f"Line exceeds maximum length: '{line}' ({len(line)} chars)"
+        
+        # All original text should be preserved
+        assert long_text.replace(' ', '') in ''.join(lines).replace(' ', '').replace('\n', '')
+
+    def test_segment_text_function(self):
+        """Test the segment_text function directly."""
+        from src.subtitle_generator import segment_text
+        
+        # Test basic segmentation
+        long_text = "This is a very long sentence that should be split into multiple lines for better readability."
+        result = segment_text(long_text)
+        
+        assert len(result) > 1
+        for line in result:
+            assert len(line) <= 42
+        
+        # Test with existing newlines
+        multiline_text = "First line\nSecond line that is quite long and should be segmented"
+        result = segment_text(multiline_text)
+        assert len(result) >= 2
+        
+        # Test empty text
+        result = segment_text("")
+        assert result == [""]
+        
+        # Test short text
+        short_text = "Short text"
+        result = segment_text(short_text)
+        assert result == [short_text]
 
     def test_generate_srt_write_to_file(self, tmp_path):
         """Test that SRT file is written with correct permissions."""

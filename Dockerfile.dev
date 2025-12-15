@@ -31,15 +31,15 @@ COPY src/ ./src/
 # Install package in editable mode
 RUN pip install -e .
 
-# Create non-root user for development with configurable UID/GID
-RUN addgroup -g ${USER_GID} devgroup && \
-    adduser -D -u ${USER_UID} -G devgroup developer && \
-    chown -R developer:devgroup /app
+# Create non-root user for development
+ARG USER_UID
+ARG USER_GID
+RUN addgroup -g ${USER_GID} appuser && \
+    adduser -D -u ${USER_UID} -G appuser appuser && \
+    chown -R appuser:appuser /app
 
-USER developer
+# Switch to non-root user
+USER appuser
 
-# Entry point for CLI
-ENTRYPOINT ["python", "-m", "src"]
-
-# Default command: show help
-CMD ["--help"]
+# No ENTRYPOINT for development container - allows running any command
+CMD ["/bin/sh"]
