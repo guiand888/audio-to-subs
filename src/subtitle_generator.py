@@ -7,7 +7,7 @@ Supported formats:
 - SBV (YouTube): .sbv files
 """
 from pathlib import Path
-from typing import Any, List
+from typing import Any, List, Optional
 
 
 class SubtitleFormatError(Exception):
@@ -156,13 +156,14 @@ class SubtitleGenerator:
 
     SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
 
-    def generate(self, segments: list[dict[str, Any]], output_path: str, output_format: str = "srt") -> str:
+    def generate(self, segments: list[dict[str, Any]], output_path: str, output_format: str = "srt", language_code: Optional[str] = None) -> str:
         """Generate subtitle file in specified format.
         
         Args:
             segments: List of dicts with 'start', 'end', and 'text' keys
             output_path: Path to write subtitle file
             output_format: Format to generate (srt, vtt, webvtt, sbv)
+            language_code: Optional language code for filename (e.g., 'en', 'fr')
             
         Returns:
             Path to generated subtitle file
@@ -176,12 +177,15 @@ class SubtitleGenerator:
                 f"Must be one of: {', '.join(self.SUPPORTED_FORMATS)}"
             )
         
+        # Generate proper filename with language code if provided
+        final_output_path = self._generate_output_filename(output_path, output_format, language_code)
+        
         if output_format == "srt":
-            return self.generate_srt(segments, output_path)
+            return self.generate_srt(segments, final_output_path)
         elif output_format in ["vtt", "webvtt"]:
-            return self.generate_vtt(segments, output_path)
+            return self.generate_vtt(segments, final_output_path)
         elif output_format == "sbv":
-            return self.generate_sbv(segments, output_path)
+            return self.generate_sbv(segments, final_output_path)
 
     def generate_srt(self, segments: list[dict[str, Any]], output_path: str) -> str:
         """Generate SRT file from transcription segments.
@@ -368,6 +372,80 @@ class SubtitleGenerator:
         
         return str(output_path)
 
+    def _generate_output_filename(self, output_path: str, output_format: str, language_code: Optional[str] = None) -> str:
+        """Generate proper output filename with language code if provided.
+        
+        Follows Bazarr subtitle naming conventions:
+        Video.Filename.Language.Code.format
+        
+        Args:
+            output_path: Original output path provided by user
+            output_format: Subtitle format (srt, vtt, webvtt, sbv)
+            language_code: Optional language code (e.g., 'en', 'fr')
+            
+        Returns:
+            Final output path with proper naming convention
+        """
+        if not language_code:
+            # No language code provided, use original path
+            return output_path
+        
+        # Normalize language code to lowercase
+        language_code = language_code.lower().strip()
+        
+        # Validate language code format (2-3 letters, alphabetic only)
+        if not self._is_valid_language_code(language_code):
+            raise SubtitleFormatError(
+                f"Invalid language code: '{language_code}'. "
+                f"Must be 2-3 letter ISO 639-1/2 code (e.g., en, fr, spa)"
+            )
+        
+        # Parse original output path
+        output_file = Path(output_path)
+        
+        # If output path has a directory, preserve it
+        parent_dir = output_file.parent
+        
+        # Get the full filename (including any extensions that are part of the name)
+        # For example: "show.s01e01.mp4" -> "show.s01e01.mp4"
+        # But we want to remove the final extension if it's a subtitle format
+        filename = output_file.name
+        
+        # Remove subtitle format extensions if present
+        for fmt in ["srt", "vtt", "webvtt", "sbv"]:
+            if filename.endswith(f".{fmt}"):
+                filename = filename[:-len(f".{fmt}")]
+                break
+        
+        # Generate new filename with language code
+        # Format: filename.language_code.format
+        new_filename = f"{filename}.{language_code}.{output_format}"
+        
+        # Combine with parent directory if it exists
+        if parent_dir != Path("."):
+            return str(parent_dir / new_filename)
+        else:
+            return new_filename
+    
+    def _is_valid_language_code(self, language_code: str) -> bool:
+        """Validate language code format.
+        
+        Args:
+            language_code: Language code to validate
+            
+        Returns:
+            True if valid ISO 639-1/2 format (2-3 letters, alphabetic)
+        """
+        if not language_code:
+            return False
+        
+        # Must be 2-3 characters, alphabetic only
+        if len(language_code) < 2 or len(language_code) > 3:
+            return False
+        
+        # Must contain only alphabetic characters
+        return language_code.isalpha()
+    
     def _validate_segment(self, segment: dict[str, Any]) -> None:
         """Validate segment has required fields and valid values.
         

@@ -1,4 +1,4 @@
-Feature: Convert video to subtitles
+Feature: Video to Subtitle Format Validation
   As a user
   I want to convert video audio to SRT subtitles
   So that I can watch videos with captions

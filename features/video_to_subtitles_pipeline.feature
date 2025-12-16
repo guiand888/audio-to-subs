@@ -1,4 +1,4 @@
-Feature: Video to Subtitle Conversion
+Feature: Video to Subtitle Pipeline
   As a user
   I want to convert video audio to subtitles
   So that I can add captions to my videos

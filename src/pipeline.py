@@ -124,36 +124,40 @@ class Pipeline:
 
         logger.debug(f"process_video: video_path={video_path}, output_format={output_format}")
         try:
-            # Stage 1: Extract audio
-            self._progress("Extracting audio from video...")
+            # Stage 1: Extract audio (0-25%)
+            self._progress("Extracting audio from video...", 10)
             audio_path = self._extract_audio(video_path)
             logger.debug(f"Audio extracted: {audio_path}")
+            self._progress("Audio extraction complete", 25)
 
             # Stage 2: Check if audio needs splitting (>15 minutes)
             if needs_splitting(audio_path):
-                self._progress("Audio exceeds 15 minutes, splitting into segments...")
+                self._progress("Audio exceeds 15 minutes, splitting into segments...", 25)
                 audio_segments = split_audio(
                     audio_path,
                     self.temp_dir,
                     progress_callback=self.progress_callback if self.verbose_progress else None,
                 )
                 logger.debug(f"Audio split into {len(audio_segments)} segments")
-                self._progress(f"Split audio into {len(audio_segments)} segments")
+                self._progress(f"Split audio into {len(audio_segments)} segments", 30)
             else:
                 audio_segments = [audio_path]
                 logger.debug("Audio does not need splitting")
+                self._progress("Audio ready for transcription", 30)
 
-            # Stage 3: Transcribe audio (handling multiple segments if needed)
-            self._progress("Transcribing audio with Mistral AI...")
+            # Stage 3: Transcribe audio (handling multiple segments if needed) (30-75%)
+            self._progress("Transcribing audio with Mistral AI...", 30)
             all_segments = self._transcribe_audio_segments(audio_segments)
             logger.debug(f"Transcription complete: {len(all_segments)} segments")
+            self._progress("Transcription processing complete", 75)
 
-            # Stage 4: Generate subtitles
-            self._progress(f"Generating {output_format.upper()} subtitles...")
-            output = self._generate_subtitles(all_segments, output_path, output_format)
+            # Stage 4: Generate subtitles (75-100%)
+            self._progress(f"Generating {output_format.upper()} subtitles...", 75)
+            output = self._generate_subtitles(all_segments, output_path, output_format, self.transcription_client.language)
             logger.debug(f"Subtitles generated: {output}")
+            self._progress("Subtitle generation complete", 100)
 
-            self._progress("Complete! Subtitles generated successfully.")
+            self._progress("Complete! Subtitles generated successfully.", 100)
             return output
 
         finally:
@@ -194,10 +198,12 @@ class Pipeline:
             # Generate temp audio file path
             audio_path = Path(self.temp_dir) / f"audio_{video_file.stem}.wav"
 
+            # Only pass progress callback if verbose_progress is True
+            progress_callback = self.progress_callback if self.verbose_progress else None
             return extract_audio(
                 video_path,
                 str(audio_path),
-                progress_callback=self.progress_callback if self.verbose_progress else None,
+                progress_callback=progress_callback,
             )
 
         except FileNotFoundError as e:
@@ -227,16 +233,20 @@ class Pipeline:
         try:
             all_segments: list[dict[str, Any]] = []
             time_offset = 0.0
+            total_segments = len(audio_segments)
 
             for idx, segment_path in enumerate(audio_segments, 1):
-                self._progress(f"Transcribing segment {idx}/{len(audio_segments)}...")
+                # Calculate progress percentage for this segment
+                segment_start_percent = 30 + int(45 * ((idx - 1) / total_segments))
+                segment_end_percent = 30 + int(45 * (idx / total_segments))
+                
+                self._progress(f"Transcribing segment {idx}/{total_segments}...", segment_start_percent)
+                
                 # Pass segment info to transcription client for detailed progress
                 segments = self.transcription_client.transcribe_audio_with_timestamps(
                     segment_path,
                     segment_number=idx if self.verbose_progress else None,
-                    total_segments=(
-                        len(audio_segments) if self.verbose_progress else None
-                    ),
+                    total_segments=total_segments if self.verbose_progress else None,
                 )
 
                 # Reject if no timestamped segments
@@ -255,6 +265,8 @@ class Pipeline:
                 # Update time offset for next segment
                 if segments:
                     time_offset = segments[-1]["end"]
+                
+                self._progress(f"Completed segment {idx}/{total_segments}", segment_end_percent)
 
             return all_segments
         except TranscriptionError as e:
@@ -266,35 +278,37 @@ class Pipeline:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
 
     def _generate_subtitles(
-        self, segments: List[Dict], output_path: str, output_format: str = "srt"
+        self, segments: List[Dict], output_path: str, output_format: str = "srt", language_code: Optional[str] = None
     ) -> str:
         """Generate subtitle file in specified format.
-
+        
         Args:
             segments: Transcription segments
             output_path: Path to write subtitle file
             output_format: Output subtitle format (srt, vtt, webvtt, sbv)
-
+            language_code: Optional language code for filename
+        
         Returns:
             Path to generated subtitle file
-
+        
         Raises:
             PipelineError: If generation fails
         """
         try:
             return self.subtitle_generator.generate(
-                segments, output_path, output_format
+                segments, output_path, output_format, language_code
             )
         except SubtitleFormatError as e:
             raise PipelineError(f"Subtitle generation failed: {str(e)}") from e
         except Exception as e:
             raise PipelineError(f"Subtitle generation failed: {str(e)}") from e
 
-    def _progress(self, message: str) -> None:
+    def _progress(self, message: str, percentage: int = None) -> None:
         """Call progress callback if provided.
 
         Args:
             message: Progress message
+            percentage: Optional percentage (0-100)
         """
         if self.progress_callback:
-            self.progress_callback(message)
+            self.progress_callback(message, percentage)

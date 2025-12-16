@@ -6,43 +6,43 @@ from pytest_bdd import given, when, then, scenario
 from unittest.mock import patch, MagicMock
 
 
-@scenario('../video_to_subtitles.feature', 'Successfully convert video to subtitles')
-def test_convert_video_to_subtitles():
+@scenario('../video_to_subtitles_format_format.feature', 'Successfully convert video to subtitles')
+def test_convert_video_to_subtitles_format():
     """Test successful video to subtitles conversion."""
     pass
 
 
-@scenario('../video_to_subtitles.feature', 'Handle missing video file')
+@scenario('../video_to_subtitles_format_format.feature', 'Handle missing video file')
 def test_handle_missing_video():
     """Test error handling for missing video file."""
     pass
 
 
-@scenario('../video_to_subtitles.feature', 'Handle missing API key')
+@scenario('../video_to_subtitles_format_format.feature', 'Handle missing API key')
 def test_handle_missing_api_key():
     """Test error handling for missing API key."""
     pass
 
 
-@scenario('../video_to_subtitles.feature', 'Extract audio from various video formats')
+@scenario('../video_to_subtitles_format_format.feature', 'Extract audio from various video formats')
 def test_extract_audio_formats():
     """Test audio extraction from various video formats."""
     pass
 
 
-@scenario('../video_to_subtitles.feature', 'Generate valid SRT format')
+@scenario('../video_to_subtitles_format_format.feature', 'Generate valid SRT format')
 def test_generate_srt_format():
     """Test SRT subtitle generation."""
     pass
 
 
-@scenario('../video_to_subtitles.feature', 'Handle transcription API errors')
+@scenario('../video_to_subtitles_format_format.feature', 'Handle transcription API errors')
 def test_handle_api_errors():
     """Test API error handling."""
     pass
 
 
-@scenario('../video_to_subtitles.feature', 'Clean up temporary files')
+@scenario('../video_to_subtitles_format_format.feature', 'Clean up temporary files')
 def test_cleanup_temp_files():
     """Test temporary file cleanup."""
     pass

@@ -193,13 +193,21 @@ def main(
 
     try:
         # Create progress callback
-        def progress_callback(message: str) -> None:
+        def progress_callback(message: str, percentage: int = None) -> None:
             """Display progress message to user.
 
             Args:
                 message: Progress status message
+                percentage: Optional percentage (0-100)
             """
-            click.echo(f"[*] {message}")
+            if percentage is not None and progress:
+                # Visual progress bar
+                bar_length = 30
+                filled = int(bar_length * percentage / 100)
+                bar = '█' * filled + '-' * (bar_length - filled)
+                click.echo(f"\r[{bar}] {percentage}% {message}", nl=False)
+            else:
+                click.echo(f"[*] {message}")
 
         # Initialize pipeline
         pipeline = Pipeline(
@@ -252,8 +260,15 @@ def _process_batch(config_path: str, api_key: Optional[str], verbose: bool = Fal
         jobs = config.get_jobs()
 
         # Create progress callback
-        def progress_callback(message: str) -> None:
-            click.echo(f"[*] {message}")
+        def progress_callback(message: str, percentage: int = None) -> None:
+            if percentage is not None and progress:
+                # Visual progress bar
+                bar_length = 30
+                filled = int(bar_length * percentage / 100)
+                bar = '█' * filled + '-' * (bar_length - filled)
+                click.echo(f"\r[{bar}] {percentage}% {message}", nl=False)
+            else:
+                click.echo(f"[*] {message}")
 
         # Initialize pipeline
         pipeline = Pipeline(

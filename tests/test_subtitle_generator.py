@@ -63,10 +63,10 @@ class TestSubtitleGenerator:
             {"start": 0.0, "end": 2.5, "text": "First subtitle"}
         ]
         output_file = tmp_path / "output.srt"
-        
+         
         # Act
         result = generator.generate_srt(segments, str(output_file))
-        
+         
         # Assert
         assert result == str(output_file)
         assert output_file.exists()
@@ -74,6 +74,113 @@ class TestSubtitleGenerator:
         assert "1" in content
         assert "00:00:00,000 --> 00:00:02,500" in content
         assert "First subtitle" in content
+
+    def test_generate_with_language_code(self, tmp_path):
+        """Test generating subtitles with language code in filename."""
+        # Arrange
+        generator = SubtitleGenerator()
+        segments = [
+            {"start": 0.0, "end": 2.5, "text": "First subtitle"}
+        ]
+        output_file = tmp_path / "output.srt"
+        
+        # Act
+        result = generator.generate(segments, str(output_file), "srt", "en")
+        
+        # Assert
+        result_path = Path(result)
+        expected_path = tmp_path / "output.en.srt"
+        assert result_path == expected_path
+        assert result_path.exists()
+        content = result_path.read_text()
+        assert "First subtitle" in content
+
+    def test_generate_without_language_code(self, tmp_path):
+        """Test generating subtitles without language code preserves original filename."""
+        # Arrange
+        generator = SubtitleGenerator()
+        segments = [
+            {"start": 0.0, "end": 2.5, "text": "First subtitle"}
+        ]
+        output_file = tmp_path / "output.srt"
+        
+        # Act
+        result = generator.generate(segments, str(output_file), "srt", None)
+        
+        # Assert
+        result_path = Path(result)
+        assert result_path == output_file
+        assert result_path.exists()
+
+    def test_generate_invalid_language_code(self, tmp_path):
+        """Test generating subtitles with invalid language code raises error."""
+        # Arrange
+        generator = SubtitleGenerator()
+        segments = [
+            {"start": 0.0, "end": 2.5, "text": "First subtitle"}
+        ]
+        output_file = tmp_path / "output.srt"
+        
+        # Act & Assert
+        with pytest.raises(SubtitleFormatError, match="Invalid language code"):
+            generator.generate(segments, str(output_file), "srt", "en1")
+
+    def test_generate_different_formats_with_language(self, tmp_path):
+        """Test generating different subtitle formats with language codes."""
+        # Arrange
+        generator = SubtitleGenerator()
+        segments = [
+            {"start": 0.0, "end": 2.5, "text": "Test subtitle"}
+        ]
+        
+        # Test SRT format
+        output_srt = tmp_path / "output.srt"
+        result_srt = generator.generate(segments, str(output_srt), "srt", "fr")
+        assert Path(result_srt).name == "output.fr.srt"
+        
+        # Test VTT format
+        output_vtt = tmp_path / "output.vtt"
+        result_vtt = generator.generate(segments, str(output_vtt), "vtt", "es")
+        assert Path(result_vtt).name == "output.es.vtt"
+        
+        # Test SBV format
+        output_sbv = tmp_path / "output.sbv"
+        result_sbv = generator.generate(segments, str(output_sbv), "sbv", "de")
+        assert Path(result_sbv).name == "output.de.sbv"
+
+    def test_language_code_validation(self):
+        """Test language code validation logic."""
+        generator = SubtitleGenerator()
+        
+        # Valid language codes
+        valid_codes = ["en", "fr", "es", "de", "it", "pt", "ru", "zh", "ja", "ko", "eng", "fra", "spa"]
+        for code in valid_codes:
+            assert generator._is_valid_language_code(code) is True
+        
+        # Invalid language codes
+        invalid_codes = ["en1", "123", "a", "abcd", "en-US", "en_GB", ""]
+        for code in invalid_codes:
+            assert generator._is_valid_language_code(code) is False
+
+    def test_filename_generation_logic(self):
+        """Test filename generation logic directly."""
+        generator = SubtitleGenerator()
+        
+        # Test basic filename generation
+        result = generator._generate_output_filename("output.srt", "srt", "en")
+        assert result == "output.en.srt"
+        
+        # Test with different base filenames
+        result = generator._generate_output_filename("movie.srt", "srt", "fr")
+        assert result == "movie.fr.srt"
+        
+        # Test with complex filenames
+        result = generator._generate_output_filename("show.s01e01.srt", "srt", "es")
+        assert result == "show.s01e01.es.srt"
+        
+        # Test without language code (should return original)
+        result = generator._generate_output_filename("output.srt", "srt", None)
+        assert result == "output.srt"
 
     def test_generate_srt_multiple_segments(self, tmp_path):
         """Test generating SRT with multiple segments."""

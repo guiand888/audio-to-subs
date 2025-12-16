@@ -120,7 +120,7 @@ make secret-rm
 - **User**: `appuser` (UID 1000, non-root)
 - **Working Dir**: `/app`
 - **Volumes**: `/input` (videos), `/output` (subtitles), `/tmp/audio-to-subs` (temp)
-- **Entry Point**: `python -m audio_to_subs`
+- **Entry Point**: `python -m video_to_subtitles_pipeline`
 
 **Usage**: Production deployment, actual video processing
 
@@ -183,7 +183,7 @@ podman-compose down
 
 1. **Write failing test**: Edit `tests/test_*.py`
 2. **Run tests**: `make test` (should fail)
-3. **Implement code**: Edit `src/audio_to_subs/*.py`
+3. **Implement code**: Edit `src/video_to_subtitles_pipeline/*.py`
 4. **Run tests**: `make test` (should pass)
 5. **Check quality**: `make quality`
 6. **Commit changes**

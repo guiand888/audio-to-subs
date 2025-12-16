@@ -1,6 +1,7 @@
 """Transcription client for Mistral AI Voxtral Mini."""
 
 import logging
+import os
 from pathlib import Path
 from typing import Any
 
@@ -83,16 +84,35 @@ class TranscriptionClient:
         try:
             logger.debug(f"Transcribing audio: {audio_path}")
             lang = language or self.language
-            with open(audio_path, "rb") as audio_file:
-                file_content = audio_file.read()
-                file_size = len(file_content)
-                logger.debug(f"Audio file size: {file_size} bytes")
+            file_size = os.path.getsize(audio_path)
+            uploaded_bytes = 0
+            chunk_size = 1024 * 1024  # 1MB chunks
 
-                # Report upload start if progress tracking enabled
-                if self.progress_callback and segment_number and total_segments:
-                    self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)"
-                    )
+            # Report upload start if progress tracking enabled
+            if self.progress_callback and segment_number and total_segments:
+                self.progress_callback(
+                    f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)",
+                    0
+                )
+
+            with open(audio_path, "rb") as audio_file:
+                file_content = b""
+                while uploaded_bytes < file_size:
+                    chunk = audio_file.read(min(chunk_size, file_size - uploaded_bytes))
+                    if not chunk:
+                        break
+                    file_content += chunk
+                    uploaded_bytes += len(chunk)
+
+                    # Calculate and report progress
+                    if self.progress_callback and segment_number and total_segments:
+                        percentage = int((uploaded_bytes / file_size) * 100)
+                        mb_uploaded = uploaded_bytes / (1024 * 1024)
+                        mb_total = file_size / (1024 * 1024)
+                        self.progress_callback(
+                            f"Uploading segment {segment_number}/{total_segments}: {mb_uploaded:.1f}/{mb_total:.1f} MB ({percentage}%)",
+                            percentage
+                        )
 
                 file_obj = File(
                     content=file_content,
@@ -103,7 +123,8 @@ class TranscriptionClient:
                 # Report upload complete
                 if self.progress_callback and segment_number and total_segments:
                     self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)"
+                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)",
+                        100
                     )
 
                 kwargs = {"model": self.model, "file": file_obj}
@@ -146,15 +167,35 @@ class TranscriptionClient:
 
         try:
             lang = language or self.language
-            with open(audio_path, "rb") as audio_file:
-                file_content = audio_file.read()
-                file_size = len(file_content)
+            file_size = os.path.getsize(audio_path)
+            uploaded_bytes = 0
+            chunk_size = 1024 * 1024  # 1MB chunks
 
-                # Report upload start if progress tracking enabled
-                if self.progress_callback and segment_number and total_segments:
-                    self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)"
-                    )
+            # Report upload start if progress tracking enabled
+            if self.progress_callback and segment_number and total_segments:
+                self.progress_callback(
+                    f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)",
+                    0
+                )
+
+            with open(audio_path, "rb") as audio_file:
+                file_content = b""
+                while uploaded_bytes < file_size:
+                    chunk = audio_file.read(min(chunk_size, file_size - uploaded_bytes))
+                    if not chunk:
+                        break
+                    file_content += chunk
+                    uploaded_bytes += len(chunk)
+
+                    # Calculate and report progress
+                    if self.progress_callback and segment_number and total_segments:
+                        percentage = int((uploaded_bytes / file_size) * 100)
+                        mb_uploaded = uploaded_bytes / (1024 * 1024)
+                        mb_total = file_size / (1024 * 1024)
+                        self.progress_callback(
+                            f"Uploading segment {segment_number}/{total_segments}: {mb_uploaded:.1f}/{mb_total:.1f} MB ({percentage}%)",
+                            percentage
+                        )
 
                 file_obj = File(
                     content=file_content,
@@ -165,7 +206,8 @@ class TranscriptionClient:
                 # Report upload complete
                 if self.progress_callback and segment_number and total_segments:
                     self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)"
+                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)",
+                        100
                     )
 
                 kwargs = {
