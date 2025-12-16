@@ -28,7 +28,8 @@ def segment_text(text: str, max_chars: int = 42) -> List[str]:
     Note:
         - Preserves word boundaries (doesn't break words)
         - Respects existing newlines
-        - Maximum 2 lines per subtitle (industry standard)
+        - Creates multiple lines as needed to stay within max_chars
+        - Prefers 2 lines when possible (industry standard)
     """
     if not text:
         return [text]
@@ -68,35 +69,29 @@ def segment_text(text: str, max_chars: int = 42) -> List[str]:
     if current_line:
         lines.append(current_line)
     
-    # Limit to maximum 2 lines per subtitle (industry standard)
-    if len(lines) > 2:
-        # Merge lines intelligently
-        merged_lines = []
-        temp_line = ""
-        
-        for line in lines:
-            if temp_line and len(temp_line) + len(line) + 1 > max_chars:
-                merged_lines.append(temp_line)
-                temp_line = line
-            else:
-                if temp_line:
-                    temp_line += " " + line
+    # Ensure all lines are within the max_chars limit
+    # This handles cases where the initial segmentation created lines > max_chars
+    final_lines = []
+    for line in lines:
+        if len(line) <= max_chars:
+            final_lines.append(line)
+        else:
+            # Re-segment this line if it exceeds max_chars
+            words = line.split(' ')
+            current = ""
+            for word in words:
+                if current and len(current) + len(word) + 1 > max_chars:
+                    final_lines.append(current)
+                    current = word
                 else:
-                    temp_line = line
-        
-        if temp_line:
-            merged_lines.append(temp_line)
-        
-        # Ensure we don't exceed 2 lines
-        if len(merged_lines) > 2:
-            merged_lines = merged_lines[:2]
-            # If we still have content, try to merge the first two lines
-            if len(merged_lines) == 2 and len(merged_lines[0]) + len(merged_lines[1]) + 1 <= max_chars:
-                merged_lines = [merged_lines[0] + " " + merged_lines[1]]
-        
-        return merged_lines
+                    if current:
+                        current += " " + word
+                    else:
+                        current = word
+            if current:
+                final_lines.append(current)
     
-    return lines
+    return final_lines
 
 
 def format_timestamp_srt(seconds: float) -> str:
@@ -207,18 +202,44 @@ class SubtitleGenerator:
         
         # Generate SRT content
         srt_lines = []
-        for index, segment in enumerate(segments, 1):
-            start_time = format_timestamp_srt(segment["start"])
-            end_time = format_timestamp_srt(segment["end"])
+        entry_index = 1
+        
+        for segment in segments:
+            start_time_seconds = segment["start"]
+            end_time_seconds = segment["end"]
             text = segment["text"]
             
             # Apply text segmentation for maximum width constraint
             segmented_lines = segment_text(text)
             
-            srt_lines.append(str(index))
-            srt_lines.append(f"{start_time} --> {end_time}")
-            srt_lines.extend(segmented_lines)
-            srt_lines.append("")  # Blank line between subtitles
+            # Calculate total duration
+            total_duration = end_time_seconds - start_time_seconds
+            
+            # Split into pages of max 2 lines per subtitle entry (industry standard)
+            num_pages = (len(segmented_lines) + 1) // 2  # Ceiling division
+            duration_per_page = total_duration / num_pages if num_pages > 0 else total_duration
+            
+            for page_index, page_start in enumerate(range(0, len(segmented_lines), 2)):
+                page_end = min(page_start + 2, len(segmented_lines))
+                page_lines = segmented_lines[page_start:page_end]
+                
+                # Calculate proportional timestamps for this page
+                page_start_time = start_time_seconds + (page_index * duration_per_page)
+                page_end_time = start_time_seconds + ((page_index + 1) * duration_per_page)
+                
+                # Ensure the last page ends at the original end time
+                if page_index == num_pages - 1:
+                    page_end_time = end_time_seconds
+                
+                page_start_str = format_timestamp_srt(page_start_time)
+                page_end_str = format_timestamp_srt(page_end_time)
+                
+                srt_lines.append(str(entry_index))
+                srt_lines.append(f"{page_start_str} --> {page_end_str}")
+                srt_lines.extend(page_lines)
+                srt_lines.append("")  # Blank line between subtitles
+                
+                entry_index += 1
         
         # Write to file
         output_file = Path(output_path)
@@ -245,17 +266,40 @@ class SubtitleGenerator:
         
         # Generate VTT content
         vtt_lines = ["WEBVTT", ""]
+        
         for segment in segments:
-            start_time = format_timestamp_vtt(segment["start"])
-            end_time = format_timestamp_vtt(segment["end"])
+            start_time_seconds = segment["start"]
+            end_time_seconds = segment["end"]
             text = segment["text"]
             
             # Apply text segmentation for maximum width constraint
             segmented_lines = segment_text(text)
             
-            vtt_lines.append(f"{start_time} --> {end_time}")
-            vtt_lines.extend(segmented_lines)
-            vtt_lines.append("")  # Blank line between subtitles
+            # Calculate total duration
+            total_duration = end_time_seconds - start_time_seconds
+            
+            # Split into pages of max 2 lines per subtitle entry (industry standard)
+            num_pages = (len(segmented_lines) + 1) // 2  # Ceiling division
+            duration_per_page = total_duration / num_pages if num_pages > 0 else total_duration
+            
+            for page_index, page_start in enumerate(range(0, len(segmented_lines), 2)):
+                page_end = min(page_start + 2, len(segmented_lines))
+                page_lines = segmented_lines[page_start:page_end]
+                
+                # Calculate proportional timestamps for this page
+                page_start_time = start_time_seconds + (page_index * duration_per_page)
+                page_end_time = start_time_seconds + ((page_index + 1) * duration_per_page)
+                
+                # Ensure the last page ends at the original end time
+                if page_index == num_pages - 1:
+                    page_end_time = end_time_seconds
+                
+                page_start_str = format_timestamp_vtt(page_start_time)
+                page_end_str = format_timestamp_vtt(page_end_time)
+                
+                vtt_lines.append(f"{page_start_str} --> {page_end_str}")
+                vtt_lines.extend(page_lines)
+                vtt_lines.append("")  # Blank line between subtitles
         
         # Write to file
         output_file = Path(output_path)
@@ -282,18 +326,41 @@ class SubtitleGenerator:
         
         # Generate SBV content
         sbv_lines = []
+        
         for segment in segments:
-            start_time = format_timestamp_sbv(segment["start"])
-            end_time = format_timestamp_sbv(segment["end"])
+            start_time_seconds = segment["start"]
+            end_time_seconds = segment["end"]
             text = segment["text"]
             
             # Apply text segmentation for maximum width constraint
             segmented_lines = segment_text(text)
             
-            sbv_lines.append(start_time)
-            sbv_lines.append(end_time)
-            sbv_lines.extend(segmented_lines)
-            sbv_lines.append("")  # Blank line between subtitles
+            # Calculate total duration
+            total_duration = end_time_seconds - start_time_seconds
+            
+            # Split into pages of max 2 lines per subtitle entry (industry standard)
+            num_pages = (len(segmented_lines) + 1) // 2  # Ceiling division
+            duration_per_page = total_duration / num_pages if num_pages > 0 else total_duration
+            
+            for page_index, page_start in enumerate(range(0, len(segmented_lines), 2)):
+                page_end = min(page_start + 2, len(segmented_lines))
+                page_lines = segmented_lines[page_start:page_end]
+                
+                # Calculate proportional timestamps for this page
+                page_start_time = start_time_seconds + (page_index * duration_per_page)
+                page_end_time = start_time_seconds + ((page_index + 1) * duration_per_page)
+                
+                # Ensure the last page ends at the original end time
+                if page_index == num_pages - 1:
+                    page_end_time = end_time_seconds
+                
+                page_start_str = format_timestamp_sbv(page_start_time)
+                page_end_str = format_timestamp_sbv(page_end_time)
+                
+                sbv_lines.append(page_start_str)
+                sbv_lines.append(page_end_str)
+                sbv_lines.extend(page_lines)
+                sbv_lines.append("")  # Blank line between subtitles
         
         # Write to file
         output_file = Path(output_path)
