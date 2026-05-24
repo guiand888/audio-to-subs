@@ -5,7 +5,7 @@ ARG USER_UID=1000
 ARG USER_GID=1000
 
 # Stage 1: Builder
-FROM python:3.11-alpine AS builder
+FROM python:3.11.9-alpine3.19 AS builder
 
 # Install build dependencies
 RUN apk add --no-cache \
@@ -30,7 +30,7 @@ COPY pyproject.toml ./
 RUN pip install --no-cache-dir --prefix=/install .
 
 # Stage 2: Runtime
-FROM python:3.11-alpine
+FROM python:3.11.9-alpine3.19
 
 # Build arguments for user configuration
 ARG USER_UID=1000

@@ -32,23 +32,24 @@ classifiers = [
 ]
 
 dependencies = [
-    "mistralai>=0.0.7",
-    "ffmpeg-python>=0.2.0",
-    "click>=8.1.0",
-    "pyyaml>=6.0",
+    "mistralai==2.4.5",
+    "ffmpeg-python==0.2.0",
+    "click==8.1.7",
+    "pyyaml==6.0.2",
 ]
 
 [project.optional-dependencies]
 dev = [
-    "pytest>=7.0.0",
-    "pytest-bdd>=6.0.0",
-    "pytest-cov>=4.0.0",
-    "pytest-mock>=3.10.0",
-    "responses>=0.23.0",
-    "black>=23.0.0",
-    "ruff>=0.1.0",
-    "mypy>=1.0.0",
-    "pre-commit>=3.0.0",
+    "pytest==8.0.0",
+    "pytest-bdd==7.0.0",
+    "pytest-cov==4.1.0",
+    "pytest-mock==3.14.0",
+    "responses==0.24.1",
+    "black==24.2.0",
+    "ruff==0.3.4",
+    "mypy==1.9.0",
+    "pre-commit==3.7.0",
+    "ipython==8.21.0",
 ]
 
 [project.urls]
@@ -57,7 +58,7 @@ Repository = "https://github.com/guiand888/audio-to-subs"
 Issues = "https://github.com/guiand888/audio-to-subs/issues"
 
 [project.scripts]
-audio-to-subs = "video_to_subtitles_pipeline.cli:main"
+audio-to-subs = "src.cli:main"
 
 [tool.setuptools.packages.find]
 where = ["src"]
