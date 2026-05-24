@@ -5,8 +5,8 @@ import os
 from pathlib import Path
 from typing import Any
 
-from mistralai import Mistral
-from mistralai.models import File
+from mistralai.client import Mistral
+from mistralai.client.models import File
 
 logger = logging.getLogger(__name__)
 
