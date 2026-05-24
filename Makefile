@@ -74,7 +74,7 @@ compose-logs:  ## View logs from services
 
 secret-create:  ## Create Podman secret for API key (interactive)
 	@read -p "Enter Mistral API Key: " api_key; \
-	echo "$$api_key" | podman secret create mistral_api_key -
+	echo -n "$$api_key" | podman secret create mistral_api_key -
 
 secret-list:  ## List Podman secrets
 	podman secret ls

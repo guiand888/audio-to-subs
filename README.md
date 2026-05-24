@@ -45,7 +45,7 @@ Set your Mistral AI API key:
 
 ```bash
 # Using Podman secrets (recommended)
-echo "your_api_key" | podman secret create mistral_api_key -
+echo -n "your_api_key" | podman secret create mistral_api_key -
 
 # Or using environment variable
 export MISTRAL_API_KEY=your_api_key

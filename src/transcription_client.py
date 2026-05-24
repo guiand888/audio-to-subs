@@ -47,12 +47,12 @@ class TranscriptionClient:
         if not api_key:
             raise ValueError("API key is required")
 
-        self.api_key = api_key
+        self.api_key = api_key.strip()
         self.model = model
         self.language = language
         self.progress_callback = progress_callback
         logger.debug(f"TranscriptionClient initialized: model={model}, language={language}")
-        self.client = Mistral(api_key=api_key)
+        self.client = Mistral(api_key=self.api_key)
 
     def transcribe_audio(
         self,
