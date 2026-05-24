@@ -122,6 +122,7 @@ def extract_audio(
             '-acodec', 'pcm_s16le',  # PCM 16-bit encoding
             '-ar', '16000',  # 16kHz sample rate
             '-ac', '1',  # Mono
+            '-f', 'wav',  # WAV output format with header
         ]
         logger.debug(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
         
