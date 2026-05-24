@@ -11,7 +11,8 @@ FROM python:3.11.9-alpine3.19 AS builder
 RUN apk add --no-cache \
     gcc \
     musl-dev \
-    linux-headers
+    linux-headers \
+    ca-certificates
 
 # Set working directory
 WORKDIR /build
@@ -39,7 +40,8 @@ ARG USER_GID=1000
 # Install only runtime dependencies
 RUN apk add --no-cache \
     ffmpeg \
-    libstdc++
+    libstdc++ \
+    ca-certificates
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
