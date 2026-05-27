@@ -100,14 +100,15 @@ class TestAudioExtraction:
         with pytest.raises(FFmpegNotFoundError):
             extract_audio(str(video_path), str(output_path))
 
-    def test_extract_audio_video_file_not_found(self, tmp_path):
+    @patch('src.audio_extractor.check_ffmpeg_available', return_value=True)
+    def test_extract_audio_video_file_not_found(self, mock_check_ffmpeg, tmp_path):
         """Test that extract_audio raises error when video file doesn't exist."""
         # Arrange
         video_path = tmp_path / "nonexistent.mp4"
         output_path = tmp_path / "output.wav"
-        
+
         from src.audio_extractor import extract_audio
-        
+
         # Act & Assert
         with pytest.raises(FileNotFoundError):
             extract_audio(str(video_path), str(output_path))
