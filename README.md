@@ -1,6 +1,9 @@
 # audio-to-subs
 
+[![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
+[![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 ![Coverage](./coverage.svg)
+[![Tests](https://github.com/guiand888/audio-to-subs/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/audio-to-subs/actions/workflows/tests.yml)
 
 Convert video audio to subtitles using Mistral Voxtral Mini transcription. <img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" />
 
@@ -99,4 +102,4 @@ Supported language codes: en, fr, es, de, it, pt, ru, zh, ja, ko (ISO 639-1/2)
 **Large files:** Auto-split >15min
 
 ## License
-GPLv3
+AGPLv3
