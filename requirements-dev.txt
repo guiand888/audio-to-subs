@@ -6,6 +6,7 @@ pytest-bdd==7.0.0
 pytest-cov==4.1.0
 pytest-mock==3.14.0
 responses==0.24.1
+coverage-badge==1.1.2
 
 # Code Quality
 black==24.2.0
