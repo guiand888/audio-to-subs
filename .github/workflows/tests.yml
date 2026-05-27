@@ -25,7 +25,7 @@ jobs:
 
       - name: Generate coverage badge
         if: github.ref == 'refs/heads/main'
-        run: coverage-badge -fo coverage.svg
+        run: genbadge coverage -i coverage.xml -o coverage.svg
 
       - name: Commit badge if changed
         if: github.ref == 'refs/heads/main'
