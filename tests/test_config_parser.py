@@ -4,6 +4,7 @@ Tests ConfigParser for reading and validating .audio-to-subs.yaml files.
 """
 import tempfile
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 import yaml
@@ -34,6 +35,16 @@ class TestConfigParser:
         with pytest.raises(ConfigError, match="Invalid YAML"):
             ConfigParser(str(config_file))
 
+    def test_init_file_read_error(self, temp_config_dir):
+        """Test initialization fails when file cannot be read."""
+        config_file = temp_config_dir / "unreadable.yaml"
+        config_file.write_text("{}")
+        
+        # Mock open to raise an exception
+        with patch('builtins.open', side_effect=OSError("Cannot read file")):
+            with pytest.raises(ConfigError, match="Failed to read config"):
+                ConfigParser(str(config_file))
+
     def test_init_valid_config(self, temp_config_dir):
         """Test initialization with valid config file."""
         config_file = temp_config_dir / "config.yaml"
@@ -57,6 +68,22 @@ class TestConfigParser:
         defaults = parser.get_defaults()
 
         assert defaults["format"] == "srt"
+
+    def test_get_defaults_with_partial_defaults(self, temp_config_dir):
+        """Test get_defaults adds missing format to partial defaults."""
+        config_file = temp_config_dir / "config.yaml"
+        config_file.write_text(
+            yaml.dump({
+                "defaults": {"temp_dir": "/tmp"},
+                "jobs": []
+            })
+        )
+
+        parser = ConfigParser(str(config_file))
+        defaults = parser.get_defaults()
+
+        assert defaults["format"] == "srt"
+        assert defaults["temp_dir"] == "/tmp"
 
     def test_get_defaults_with_format(self, temp_config_dir):
         """Test get_defaults returns custom format."""

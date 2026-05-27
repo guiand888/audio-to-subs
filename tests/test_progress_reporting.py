@@ -15,7 +15,7 @@ from src.transcription_client import TranscriptionClient
 class TestProgressReporting:
     """Test progress reporting functionality."""
 
-    def test_pipeline_progress_callback_signature(self):
+    def test_pipeline_progress_callback_signature(self, tmp_path):
         """Test that pipeline accepts progress callback with percentage parameter."""
         progress_messages = []
         
@@ -28,24 +28,29 @@ class TestProgressReporting:
              patch('src.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
              patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('os.path.exists') as mock_exists:
+             patch('src.pipeline.Path') as mock_path:
             
-            # Mock file existence checks
-            mock_exists.return_value = True
+            # Mock Path to avoid file existence checks
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path_instance.stat.return_value.st_size = 1024
+            mock_path_instance.stem = 'test_video'
+            mock_path.return_value = mock_path_instance
             
-            mock_extract.return_value = '/tmp/test.wav'
+            mock_extract.return_value = str(tmp_path / 'test.wav')
             mock_needs_splitting.return_value = False
             mock_transcribe.return_value = [{'start': 0, 'end': 1, 'text': 'test'}]
-            mock_generate.return_value = '/tmp/output.srt'
+            mock_generate.return_value = str(tmp_path / 'output.srt')
             
             pipeline = Pipeline(
                 api_key='test_key',
                 progress_callback=mock_progress_callback,
-                verbose_progress=True
+                verbose_progress=True,
+                temp_dir=str(tmp_path)
             )
             
             # This should not raise an error
-            pipeline.process_video('dev/test_video.mp4', '/tmp/output.srt')
+            pipeline.process_video(str(tmp_path / 'test_video.mp4'), str(tmp_path / 'output.srt'))
             
             # Verify progress callback was called
             assert len(progress_messages) > 0
@@ -71,18 +76,22 @@ class TestProgressReporting:
             tmp_audio_path = tmp_audio.name
         
         try:
-            client = TranscriptionClient(
-                api_key='test_key',
-                progress_callback=mock_progress_callback
-            )
-            
-            # Mock the Mistral API call
-            with patch('src.transcription_client.Mistral') as mock_mistral:
+            # Mock the Mistral API call - client must be created INSIDE patch context
+            with patch('src.transcription_client.Mistral') as mock_mistral, \
+                 patch('src.transcription_client.os.path.getsize') as mock_getsize, \
+                 patch('src.transcription_client.Path.exists') as mock_exists:
+                mock_exists.return_value = True
+                mock_getsize.return_value = 2048
                 mock_client = MagicMock()
                 mock_mistral.return_value = mock_client
                 mock_response = MagicMock()
                 mock_response.text = 'test transcription'
                 mock_client.audio.transcriptions.complete.return_value = mock_response
+                
+                client = TranscriptionClient(
+                    api_key='test_key',
+                    progress_callback=mock_progress_callback
+                )
                 
                 # This should call progress callback with upload progress
                 client.transcribe_audio(
@@ -107,7 +116,7 @@ class TestProgressReporting:
         finally:
             os.unlink(tmp_audio_path)
 
-    def test_progress_percentage_ranges(self):
+    def test_progress_percentage_ranges(self, tmp_path):
         """Test that progress percentages are within valid ranges."""
         progress_messages = []
         
@@ -119,26 +128,34 @@ class TestProgressReporting:
              patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('src.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate:
+             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('src.pipeline.Path') as mock_path:
             
-            mock_extract.return_value = '/tmp/test.wav'
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path_instance.stat.return_value.st_size = 1024
+            mock_path_instance.stem = 'test_video'
+            mock_path.return_value = mock_path_instance
+            
+            mock_extract.return_value = str(tmp_path / 'test.wav')
             mock_needs_splitting.return_value = False
             mock_transcribe.return_value = [{'start': 0, 'end': 1, 'text': 'test'}]
-            mock_generate.return_value = '/tmp/output.srt'
+            mock_generate.return_value = str(tmp_path / 'output.srt')
             
             pipeline = Pipeline(
                 api_key='test_key',
                 progress_callback=mock_progress_callback,
-                verbose_progress=True
+                verbose_progress=True,
+                temp_dir=str(tmp_path)
             )
             
-            pipeline.process_video('dev/test_video.mp4', '/tmp/output.srt')
+            pipeline.process_video(str(tmp_path / 'test_video.mp4'), str(tmp_path / 'output.srt'))
             
             # All percentages should be between 0 and 100
             for percentage in progress_messages:
                 assert 0 <= percentage <= 100, f"Invalid percentage: {percentage}"
 
-    def test_progress_stage_transitions(self):
+    def test_progress_stage_transitions(self, tmp_path):
         """Test that progress transitions through expected stages."""
         progress_messages = []
         
@@ -149,20 +166,28 @@ class TestProgressReporting:
              patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('src.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate:
+             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('src.pipeline.Path') as mock_path:
             
-            mock_extract.return_value = '/tmp/test.wav'
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path_instance.stat.return_value.st_size = 1024
+            mock_path_instance.stem = 'test_video'
+            mock_path.return_value = mock_path_instance
+            
+            mock_extract.return_value = str(tmp_path / 'test.wav')
             mock_needs_splitting.return_value = False
             mock_transcribe.return_value = [{'start': 0, 'end': 1, 'text': 'test'}]
-            mock_generate.return_value = '/tmp/output.srt'
+            mock_generate.return_value = str(tmp_path / 'output.srt')
             
             pipeline = Pipeline(
                 api_key='test_key',
                 progress_callback=mock_progress_callback,
-                verbose_progress=True
+                verbose_progress=True,
+                temp_dir=str(tmp_path)
             )
             
-            pipeline.process_video('dev/test_video.mp4', '/tmp/output.srt')
+            pipeline.process_video(str(tmp_path / 'test_video.mp4'), str(tmp_path / 'output.srt'))
             
             # Extract stage messages
             stage_messages = {}
@@ -185,7 +210,7 @@ class TestProgressReporting:
             assert 30 <= stage_messages['transcription'] <= 75
             assert 75 <= stage_messages['generation'] <= 100
 
-    def test_no_progress_without_verbose_flag(self):
+    def test_no_progress_without_verbose_flag(self, tmp_path):
         """Test that progress percentages are not reported without verbose flag."""
         progress_messages = []
         
@@ -196,20 +221,28 @@ class TestProgressReporting:
              patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('src.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate:
+             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('src.pipeline.Path') as mock_path:
             
-            mock_extract.return_value = '/tmp/test.wav'
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path_instance.stat.return_value.st_size = 1024
+            mock_path_instance.stem = 'test_video'
+            mock_path.return_value = mock_path_instance
+            
+            mock_extract.return_value = str(tmp_path / 'test.wav')
             mock_needs_splitting.return_value = False
             mock_transcribe.return_value = [{'start': 0, 'end': 1, 'text': 'test'}]
-            mock_generate.return_value = '/tmp/output.srt'
+            mock_generate.return_value = str(tmp_path / 'output.srt')
             
             pipeline = Pipeline(
                 api_key='test_key',
                 progress_callback=mock_progress_callback,
-                verbose_progress=False  # No verbose progress
+                verbose_progress=False,  # No verbose progress
+                temp_dir=str(tmp_path)
             )
             
-            pipeline.process_video('dev/test_video.mp4', '/tmp/output.srt')
+            pipeline.process_video(str(tmp_path / 'test_video.mp4'), str(tmp_path / 'output.srt'))
             
             # Should have messages but no percentages
             percentage_messages = [msg for msg in progress_messages if msg[1] is not None]
@@ -228,18 +261,22 @@ class TestProgressReporting:
             tmp_audio_path = tmp_audio.name
         
         try:
-            client = TranscriptionClient(
-                api_key='test_key',
-                progress_callback=mock_progress_callback
-            )
-            
-            # Mock the Mistral API call
-            with patch('src.transcription_client.Mistral') as mock_mistral:
+            # Mock the Mistral API call - client must be created INSIDE patch context
+            with patch('src.transcription_client.Mistral') as mock_mistral, \
+                 patch('src.transcription_client.os.path.getsize') as mock_getsize, \
+                 patch('src.transcription_client.Path.exists') as mock_exists:
+                mock_exists.return_value = True
+                mock_getsize.return_value = 5 * 1024 * 1024
                 mock_client = MagicMock()
                 mock_mistral.return_value = mock_client
                 mock_response = MagicMock()
                 mock_response.text = 'test transcription'
                 mock_client.audio.transcriptions.complete.return_value = mock_response
+                
+                client = TranscriptionClient(
+                    api_key='test_key',
+                    progress_callback=mock_progress_callback
+                )
                 
                 # This should call progress callback multiple times for chunked upload
                 client.transcribe_audio(
@@ -263,7 +300,7 @@ class TestProgressReporting:
         finally:
             os.unlink(tmp_audio_path)
 
-    def test_progress_completion(self):
+    def test_progress_completion(self, tmp_path):
         """Test that progress reaches 100% on completion."""
         progress_messages = []
         
@@ -274,20 +311,28 @@ class TestProgressReporting:
              patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('src.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate:
+             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('src.pipeline.Path') as mock_path:
             
-            mock_extract.return_value = '/tmp/test.wav'
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path_instance.stat.return_value.st_size = 1024
+            mock_path_instance.stem = 'test_video'
+            mock_path.return_value = mock_path_instance
+            
+            mock_extract.return_value = str(tmp_path / 'test.wav')
             mock_needs_splitting.return_value = False
             mock_transcribe.return_value = [{'start': 0, 'end': 1, 'text': 'test'}]
-            mock_generate.return_value = '/tmp/output.srt'
+            mock_generate.return_value = str(tmp_path / 'output.srt')
             
             pipeline = Pipeline(
                 api_key='test_key',
                 progress_callback=mock_progress_callback,
-                verbose_progress=True
+                verbose_progress=True,
+                temp_dir=str(tmp_path)
             )
             
-            pipeline.process_video('dev/test_video.mp4', '/tmp/output.srt')
+            pipeline.process_video(str(tmp_path / 'test_video.mp4'), str(tmp_path / 'output.srt'))
             
             # Should end with 100%
             final_messages = [msg for msg in progress_messages if msg[1] == 100]
@@ -299,7 +344,7 @@ class TestProgressReporting:
                 last_percentage = percentage_messages[-1][1]
                 assert last_percentage == 100
 
-    def test_progress_with_multiple_segments(self):
+    def test_progress_with_multiple_segments(self, tmp_path):
         """Test progress reporting with multiple audio segments."""
         progress_messages = []
         
@@ -310,21 +355,29 @@ class TestProgressReporting:
              patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('src.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate:
+             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('src.pipeline.Path') as mock_path:
             
-            mock_extract.return_value = '/tmp/test.wav'
+            mock_path_instance = MagicMock()
+            mock_path_instance.exists.return_value = True
+            mock_path_instance.stat.return_value.st_size = 1024
+            mock_path_instance.stem = 'test_video'
+            mock_path.return_value = mock_path_instance
+            
+            mock_extract.return_value = str(tmp_path / 'test.wav')
             mock_needs_splitting.return_value = True
-            mock_split.return_value = ['/tmp/segment1.wav', '/tmp/segment2.wav']
+            mock_split.return_value = [str(tmp_path / 'segment1.wav'), str(tmp_path / 'segment2.wav')]
             mock_transcribe.return_value = [{'start': 0, 'end': 1, 'text': 'test'}]
-            mock_generate.return_value = '/tmp/output.srt'
+            mock_generate.return_value = str(tmp_path / 'output.srt')
             
             pipeline = Pipeline(
                 api_key='test_key',
                 progress_callback=mock_progress_callback,
-                verbose_progress=True
+                verbose_progress=True,
+                temp_dir=str(tmp_path)
             )
             
-            pipeline.process_video('dev/test_video.mp4', '/tmp/output.srt')
+            pipeline.process_video(str(tmp_path / 'test_video.mp4'), str(tmp_path / 'output.srt'))
             
             # Should have segment progress messages
             segment_messages = [msg for msg in progress_messages if 'segment' in msg[0].lower()]

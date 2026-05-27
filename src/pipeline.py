@@ -311,4 +311,8 @@ class Pipeline:
             percentage: Optional percentage (0-100)
         """
         if self.progress_callback:
-            self.progress_callback(message, percentage)
+            # Only include percentage if verbose_progress is True
+            if self.verbose_progress:
+                self.progress_callback(message, percentage)
+            else:
+                self.progress_callback(message, None)
