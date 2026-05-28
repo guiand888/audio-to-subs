@@ -21,6 +21,7 @@ htmlcov/
 .coverage.*
 .pytest_cache/
 coverage.xml
+coverage.svg
 
 # Type checking
 .mypy_cache/

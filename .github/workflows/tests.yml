@@ -29,11 +29,17 @@ jobs:
         if: github.ref == 'refs/heads/main'
         run: genbadge coverage -i coverage.xml -o coverage.svg
 
-      - name: Commit badge if changed
+      - name: Publish badge to badges branch
         if: github.ref == 'refs/heads/main'
         run: |
           git config user.name "github-actions[bot]"
           git config user.email "github-actions[bot]@users.noreply.github.com"
+          git fetch origin badges
+          git worktree add badges-wt badges
+          mv coverage.svg badges-wt/coverage.svg
+          cd badges-wt
           git add coverage.svg
-          git diff --cached --quiet || git commit -m "chore: update coverage badge [skip ci]"
-          git push
+          git diff --cached --quiet || {
+            git commit -m "chore: update coverage badge"
+            git push origin badges
+          }

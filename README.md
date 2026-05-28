@@ -2,7 +2,7 @@
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-![Coverage](./coverage.svg)
+![Coverage](https://raw.githubusercontent.com/guiand888/audio-to-subs/badges/coverage.svg)
 [![Tests](https://github.com/guiand888/audio-to-subs/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/audio-to-subs/actions/workflows/tests.yml)
 
 <img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" /> Convert video audio to subtitles using Mistral Voxtral Mini transcription.
