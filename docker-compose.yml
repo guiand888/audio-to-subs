@@ -152,6 +152,27 @@ services:
     # Command
     command: python -m audio_to_subs.worker
 
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    image: audio-to-subs:frontend
+    container_name: audio-to-subs-frontend
+
+    ports:
+      - "8080:80"
+
+    depends_on:
+      backend:
+        condition: service_healthy
+
+    restart: unless-stopped
+
+    security_opt:
+      - no-new-privileges:true
+
+    user: "101:101"  # nginx default user in nginx:alpine
+
 volumes:
   audio-to-subs-data:
     driver: local

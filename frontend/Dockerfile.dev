@@ -1,0 +1,11 @@
+# Development container for running npm commands without installing Node on the host.
+# Usage (from repo root):
+#   podman run --rm -v ./frontend:/app:Z -w /app node:20-alpine sh -c "npm install"
+#   podman run --rm -v ./frontend:/app:Z -w /app node:20-alpine sh -c "npm run build"
+# Or via Makefile targets: make frontend-build, make frontend-shell
+FROM node:20-alpine
+WORKDIR /app
+COPY package.json package-lock.json* ./
+RUN npm install
+COPY . .
+CMD ["/bin/sh"]

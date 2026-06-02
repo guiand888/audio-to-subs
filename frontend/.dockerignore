@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+.env.*
+Dockerfile
+Dockerfile.dev
+nginx.conf

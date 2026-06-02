@@ -1,4 +1,4 @@
-.PHONY: help build build-dev test test-watch lint format typecheck quality clean run shell
+.PHONY: help build build-dev test test-watch lint format typecheck quality clean run shell frontend-install frontend-build frontend-dev frontend-shell
 
 # Variables
 IMAGE_NAME := audio-to-subs
@@ -81,3 +81,18 @@ secret-list:  ## List Podman secrets
 
 secret-rm:  ## Remove Mistral API key secret
 	podman secret rm mistral_api_key
+
+# Frontend targets — Node runs inside an ephemeral container; never on the host.
+FRONTEND_RUN := podman run --rm -v ./frontend:/app:Z -w /app node:20-alpine
+
+frontend-install:  ## Install frontend dependencies (generates package-lock.json)
+	$(FRONTEND_RUN) sh -c "npm install"
+
+frontend-build:  ## Build frontend for production (tsc + vite build)
+	$(FRONTEND_RUN) sh -c "npm run build"
+
+frontend-dev:  ## Start Vite dev server (proxies /api to localhost:8000)
+	podman run --rm -it -p 5173:5173 -v ./frontend:/app:Z -w /app node:20-alpine sh -c "npm run dev -- --host"
+
+frontend-shell:  ## Open a shell in the Node container (for debugging npm issues)
+	podman run --rm -it -v ./frontend:/app:Z -w /app node:20-alpine sh

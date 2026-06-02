@@ -11,7 +11,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M1 — DB foundation + auth | ✅ Done | 2026-06-02 | FastAPI scaffold with auth + DB |
 | M2 — Worker + queue + cost | ✅ Done | 2026-06-02 | Worker, queue, pipeline cancellation, cost |
 | M3 — Bazarr + `/api/wanted` | ✅ Done | 2026-06-02 | Depends on M2 |
-| M4 — Frontend foundation | ⏳ Not Started | - | Depends on M3 |
+| M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
 | M5 — History + Logs + Settings | ⏳ Not Started | - | Depends on M4 |
 | M6 — Polish + docs | ⏳ Not Started | - | Depends on M5 |
 
