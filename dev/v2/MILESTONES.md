@@ -9,7 +9,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M0 — Repo restructure | ✅ Done | 2026-06-02 | `src/` → `audio_to_subs/` |
 | M0.5 — Mistral usage probe | ✅ Done | 2026-06-02 | Probe executed, findings documented |
 | M1 — DB foundation + auth | ✅ Done | 2026-06-02 | FastAPI scaffold with auth + DB |
-| M2 — Worker + queue + cost | ⏳ Not Started | - | Depends on M0, M0.5, M1 |
+| M2 — Worker + queue + cost | ✅ Done | 2026-06-02 | Worker, queue, pipeline cancellation, cost |
 | M3 — Bazarr + `/api/wanted` | ⏳ Not Started | - | Depends on M2 |
 | M4 — Frontend foundation | ⏳ Not Started | - | Depends on M3 |
 | M5 — History + Logs + Settings | ⏳ Not Started | - | Depends on M4 |
