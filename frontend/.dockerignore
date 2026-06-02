@@ -4,4 +4,5 @@ dist
 .env.*
 Dockerfile
 Dockerfile.dev
-nginx.conf
+# nginx.preview.conf is DEV-ONLY (stubs auth); keep it out of the production image
+nginx.preview.conf

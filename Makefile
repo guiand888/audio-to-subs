@@ -96,3 +96,12 @@ frontend-dev:  ## Start Vite dev server (proxies /api to localhost:8000)
 
 frontend-shell:  ## Open a shell in the Node container (for debugging npm issues)
 	podman run --rm -it -v ./frontend:/app:Z -w /app node:20-alpine sh
+
+# WARNING: frontend-preview stubs auth and serves fake data.
+# It is confined to dev by frontend/.dockerignore and must never
+# be used as a production nginx config.
+frontend-preview:  ## Serve the built frontend with stubbed auth (DEV ONLY — no backend needed)
+	podman run --rm -p 8080:80 \
+		-v ./frontend/dist:/usr/share/nginx/html:ro,Z \
+		-v ./frontend/nginx.preview.conf:/etc/nginx/conf.d/default.conf:ro,Z \
+		nginx:1.27-alpine
