@@ -197,6 +197,27 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
             f"cost=${cost_breakdown.estimated_cost_usd:.4f}"
         )
 
+        # Bazarr rescan hook - notify Bazarr to rescan for new subtitles
+        try:
+            from audio_to_subs.db.models import JobSource
+
+            # Check if this job came from Bazarr
+            if claimed.source == JobSource.BAZARR_MOVIE:
+                await _rescan_bazarr_movie(deps, claimed.source_ref, job_id)
+            elif claimed.source == JobSource.BAZARR_EPISODE:
+                await _rescan_bazarr_episode(deps, claimed.source_ref, job_id)
+        except Exception as e:
+            logger.warning(
+                f"Failed to trigger Bazarr rescan for job {job_id}: {e}"
+            )
+            # Log but don't fail the job - this is best-effort
+            await persist_log(
+                deps.session,
+                job_id,
+                LogLevel.WARNING,
+                f"Bazarr rescan failed: {str(e)}",
+            )
+
         # Publish done event
         await publish_done(deps.redis, str(job_id), "done")
 
@@ -242,3 +263,111 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
 
 # Helper to get path from string
 from pathlib import Path
+
+
+async def _rescan_bazarr_movie(
+    deps: WorkerDeps,
+    source_ref: str | None,
+    job_id: UUID,
+) -> None:
+    """Trigger rescan for a Bazarr movie.
+
+    Args:
+        deps: Worker dependencies
+        source_ref: Radarr ID as string
+        job_id: Job ID for logging
+    """
+    if not source_ref:
+        logger.warning(f"No source_ref for Bazarr movie job {job_id}")
+        return
+
+    try:
+        radarr_id = int(source_ref)
+        from audio_to_subs.bazarr.client import BazarrClient
+
+        # Get Bazarr settings from deps
+        bazarr_url = getattr(deps.settings, "BAZARR_URL", None)
+        bazarr_api_key = getattr(deps.settings, "BAZARR_API_KEY", None)
+
+        if not bazarr_url or not bazarr_api_key:
+            logger.info(
+                f"Bazarr not configured (URL or API key missing), "
+                f"skipping rescan for job {job_id}"
+            )
+            return
+
+        # Create client and trigger rescan
+        client = BazarrClient(
+            base_url=bazarr_url,
+            api_key=bazarr_api_key,
+        )
+
+        await client.rescan_movie(radarr_id)
+        logger.info(f"Triggered Bazarr rescan for movie {radarr_id} (job {job_id})")
+
+        await client.close()
+
+    except ValueError:
+        logger.warning(
+            f"Invalid source_ref for Bazarr movie job {job_id}: {source_ref}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"Bazarr movie rescan failed for job {job_id}: {e}"
+        )
+        raise
+
+
+async def _rescan_bazarr_episode(
+    deps: WorkerDeps,
+    source_ref: str | None,
+    job_id: UUID,
+) -> None:
+    """Trigger rescan for a Bazarr episode.
+
+    Args:
+        deps: Worker dependencies
+        source_ref: Sonarr Episode ID as string
+        job_id: Job ID for logging
+    """
+    if not source_ref:
+        logger.warning(f"No source_ref for Bazarr episode job {job_id}")
+        return
+
+    try:
+        sonarr_episode_id = int(source_ref)
+        from audio_to_subs.bazarr.client import BazarrClient
+
+        # Get Bazarr settings from deps
+        bazarr_url = getattr(deps.settings, "BAZARR_URL", None)
+        bazarr_api_key = getattr(deps.settings, "BAZARR_API_KEY", None)
+
+        if not bazarr_url or not bazarr_api_key:
+            logger.info(
+                f"Bazarr not configured (URL or API key missing), "
+                f"skipping rescan for job {job_id}"
+            )
+            return
+
+        # Create client and trigger rescan
+        client = BazarrClient(
+            base_url=bazarr_url,
+            api_key=bazarr_api_key,
+        )
+
+        await client.rescan_episode(sonarr_episode_id)
+        logger.info(
+            f"Triggered Bazarr rescan for episode {sonarr_episode_id} (job {job_id})"
+        )
+
+        await client.close()
+
+    except ValueError:
+        logger.warning(
+            f"Invalid source_ref for Bazarr episode job {job_id}: {source_ref}"
+        )
+    except Exception as e:
+        logger.warning(
+            f"Bazarr episode rescan failed for job {job_id}: {e}"
+        )
+        raise

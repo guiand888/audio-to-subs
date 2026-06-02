@@ -11,13 +11,16 @@ from sqlalchemy.orm import joinedload
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.settings import Settings
+from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.db.models import (
+    BazarrCache,
     Job,
     JobStatus,
     JobSource,
     JobLog,
     OutputFormat,
     LogLevel,
+    Setting,
 )
 from audio_to_subs.queue_.events import publish_new, publish_cancel
 
@@ -168,6 +171,99 @@ async def list_jobs(
     )
 
 
+async def _get_path_map(db: "AsyncSession") -> PathMap:
+    """Get PathMap from database settings."""
+    import json
+
+    try:
+        result = await db.execute(
+            select(Setting.value_json).where(Setting.key == "path_mappings")
+        )
+        row = result.scalar_one_or_none()
+        if row and row.value_json:
+            path_mappings = json.loads(row.value_json)
+            return PathMap.from_settings(path_mappings)
+    except Exception as e:
+        logging.getLogger(__name__).warning(
+            "Failed to load path_mappings from settings: %s", e
+        )
+
+    return PathMap()
+
+
+async def _resolve_bazarr_source(
+    db: "AsyncSession",
+    source: JobSource,
+    source_ref: str | None,
+    requested_media_path: str | None,
+    path_map: PathMap,
+) -> tuple[str, str | None]:
+    """Resolve Bazarr source to media path.
+
+    Args:
+        db: Database session
+        source: Job source
+        source_ref: Reference ID (e.g., Radarr or Sonarr ID)
+        requested_media_path: Optional requested media path (for manual override)
+        path_map: PathMap for path translation
+
+    Returns:
+        Tuple of (media_path, source_ref)
+
+    Raises:
+        HTTPException: If source is bazarr but source_ref not found in cache
+    """
+    logger = logging.getLogger(__name__)
+
+    if source in (JobSource.BAZARR_MOVIE, JobSource.BAZARR_EPISODE):
+        if source_ref is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"source_ref is required for source={source.value}",
+            )
+
+        # Look up in bazarr_cache
+        cache_id = BazarrCache.make_id(
+            "movie" if source == JobSource.BAZARR_MOVIE else "episode",
+            int(source_ref),
+        )
+
+        result = await db.execute(
+            select(BazarrCache).where(BazarrCache.id == cache_id)
+        )
+        cache_entry = result.scalar_one_or_none()
+
+        if cache_entry is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Bazarr item {cache_id} not found in cache. "
+                "Please ensure Bazarr poller has run and the item exists.",
+            )
+
+        # Use the cached media_path (already translated by poller)
+        media_path = cache_entry.media_path
+
+        # If requested_media_path is provided, use it (allows override)
+        if requested_media_path:
+            media_path = path_map.translate(requested_media_path)
+            logger.info(
+                "Using requested media_path override for %s: %s",
+                cache_id,
+                media_path,
+            )
+
+        return media_path, source_ref
+
+    else:
+        # Manual source - use provided media_path
+        if requested_media_path is None:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail="media_path is required for manual source",
+            )
+        return requested_media_path, source_ref
+
+
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     request: Request,
@@ -179,28 +275,91 @@ async def create_job(
 
     Creates a job in 'queued' state and publishes a new job notification
     to Redis for workers to pick up.
+
+    For bazarr_movie/bazarr_episode sources, resolves media_path from cache.
     """
+    logger = logging.getLogger(__name__)
+
+    # Get path map for path translation
+    path_map = await _get_path_map(db)
+
+    # Resolve media_path based on source
+    try:
+        media_path, resolved_source_ref = await _resolve_bazarr_source(
+            db,
+            job_request.source,
+            job_request.source_ref,
+            job_request.media_path,
+            path_map,
+        )
+    except HTTPException:
+        raise
+    except Exception as e:
+        logger.error("Failed to resolve Bazarr source: %s", e)
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Failed to resolve source: {e}",
+        )
+
     # Validate media_path for path traversal
     import os
 
-    media_path = job_request.media_path
     if ".." in media_path or media_path.startswith("/"):
         # Resolve to absolute path and check it's within allowed directories
         resolved = os.path.abspath(media_path)
-        # For now, we allow any path but log a warning
-        logger = logging.getLogger(__name__)
         logger.warning(f"Potential path traversal in media_path: {media_path}")
+
+    # Use resolved source_ref
+    source_ref = resolved_source_ref or job_request.source_ref
+
+    # Apply defaults from settings if not provided
+    language_code = job_request.language_code
+    output_format = job_request.output_format
+
+    # Try to get defaults from settings
+    if language_code is None:
+        try:
+            result = await db.execute(
+                select(Setting.value_json).where(Setting.key == "default_language")
+            )
+            row = result.scalar_one_or_none()
+            if row and row.value_json:
+                import json
+
+                language_code = json.loads(row.value_json)
+        except Exception:
+            pass
+
+    # Try to get default output format from settings
+    if output_format == OutputFormat.SRT:
+        # Only override if there's a different default
+        try:
+            result = await db.execute(
+                select(Setting.value_json).where(Setting.key == "default_output_format")
+            )
+            row = result.scalar_one_or_none()
+            if row and row.value_json:
+                import json
+
+                default_format = json.loads(row.value_json)
+                if default_format and default_format != "srt":
+                    try:
+                        output_format = OutputFormat(default_format)
+                    except ValueError:
+                        pass  # Invalid format, keep default
+        except Exception:
+            pass
 
     # Create job
     job = Job(
         id=uuid4(),
         status=JobStatus.QUEUED,
         source=job_request.source,
-        source_ref=job_request.source_ref,
-        media_path=job_request.media_path,
+        source_ref=source_ref,
+        media_path=media_path,
         output_path=job_request.output_path,
-        language_code=job_request.language_code,
-        output_format=job_request.output_format,
+        language_code=language_code,
+        output_format=output_format,
         priority=job_request.priority,
         progress_percent=0,
         progress_message="Job created, waiting for worker",
