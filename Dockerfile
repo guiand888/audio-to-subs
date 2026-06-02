@@ -41,7 +41,9 @@ ARG USER_GID=1000
 RUN apk add --no-cache \
     ffmpeg \
     libstdc++ \
-    ca-certificates
+    ca-certificates \
+    # For uvicorn
+    libc6-compat
 
 # Copy installed packages from builder
 COPY --from=builder /install /usr/local
@@ -70,10 +72,10 @@ ENV TMPDIR=/tmp/audio-to-subs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "from audio_to_subs import cli; print('OK')" || exit 1
+    CMD python -c "from audio_to_subs.api.app import app; print('OK')" || exit 1
 
-# Entry point
-ENTRYPOINT ["python", "-m", "audio_to_subs"]
+# Entry point for backend (API mode)
+ENTRYPOINT ["uvicorn", "audio_to_subs.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
 
-# Default arguments
-CMD ["--help"]
+# Default arguments (can be overridden)
+CMD []

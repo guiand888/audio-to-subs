@@ -1,33 +1,48 @@
 version: '3.8'
 
 services:
-  audio-to-subs:
+  backend:
     build:
       context: .
       dockerfile: Dockerfile
-    image: audio-to-subs:latest
-    container_name: audio-to-subs
-    
-    # Use Podman secrets for API key
-    secrets:
-      - mistral_api_key
+    image: audio-to-subs:backend
+    container_name: audio-to-subs-backend
     
     # Environment variables
     environment:
-      - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
       - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
+      - SESSION_SECRET_FILE=/data/session_secret
+      - REDIS_URL=redis://redis:6379/0
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
+      - BEHIND_TLS=false
+      - DEBUG=true
+    
+    # Secrets for sensitive data
+    secrets:
+      - admin_password
     
     # Volume mounts
     volumes:
+      # Database and session data (shared with worker)
+      - audio-to-subs-data:/data
       # Input videos (read-only)
       - ./videos:/input:ro
       # Output subtitles
       - ./subtitles:/output:rw
-      # Temporary processing (tmpfs for performance)
-      - type: tmpfs
-        target: /tmp/audio-to-subs
-        tmpfs:
-          size: 1G
+      # Temporary processing
+      - /tmp/audio-to-subs
+    
+    # Ports
+    ports:
+      - "8000:8000"
+    
+    # Dependencies
+    depends_on:
+      redis:
+        condition: service_healthy
     
     # Resource limits
     deploy:
@@ -36,11 +51,8 @@ services:
           cpus: '2.0'
           memory: 2G
         reservations:
-          cpus: '0.5'
+          cps: '0.5'
           memory: 512M
-    
-    # Command (override with docker-compose run)
-    command: ["--help"]
     
     # Restart policy
     restart: unless-stopped
@@ -49,12 +61,45 @@ services:
     security_opt:
       - no-new-privileges:true
     
-    # Read-only root filesystem (except writable mounts)
-    read_only: false  # Set to true after testing
+    # User
+    user: "1000:1000"
+
+  redis:
+    image: redis:8-alpine
+    container_name: audio-to-subs-redis
+    
+    # Ports
+    ports:
+      - "6379:6379"
+    
+    # Persistence (optional, Redis can be stateless for our use case)
+    volumes:
+      - audio-to-subs-redis-data:/data
+    
+    # Health check
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
     
     # User
     user: "1000:1000"
 
+volumes:
+  audio-to-subs-data:
+    driver: local
+  audio-to-subs-redis-data:
+    driver: local
+
 secrets:
-  mistral_api_key:
+  admin_password:
     external: true
