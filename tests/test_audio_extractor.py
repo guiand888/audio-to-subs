@@ -2,7 +2,7 @@
 import pytest
 import subprocess
 from unittest.mock import patch, MagicMock
-from src.audio_extractor import check_ffmpeg_available
+from audio_to_subs.core.audio_extractor import check_ffmpeg_available
 
 
 class TestFFmpegAvailability:
@@ -55,7 +55,7 @@ class TestAudioExtraction:
 
     @patch('subprocess.Popen')
     @patch('subprocess.run')
-    @patch('src.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
     def test_extract_audio_success(self, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test successful audio extraction from video file."""
         # Arrange
@@ -73,7 +73,7 @@ class TestAudioExtraction:
         video_path.touch()
         output_path = tmp_path / "output.wav"
         
-        from src.audio_extractor import extract_audio
+        from audio_to_subs.core.audio_extractor import extract_audio
         
         # Act
         result = extract_audio(str(video_path), str(output_path))
@@ -86,7 +86,7 @@ class TestAudioExtraction:
         assert str(video_path) in call_args
         assert str(output_path) in call_args
 
-    @patch('src.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
     def test_extract_audio_ffmpeg_not_available(self, mock_check_ffmpeg, tmp_path):
         """Test that extract_audio raises error when FFmpeg is not available."""
         # Arrange
@@ -94,20 +94,20 @@ class TestAudioExtraction:
         video_path = tmp_path / "test_video.mp4"
         output_path = tmp_path / "output.wav"
         
-        from src.audio_extractor import extract_audio, FFmpegNotFoundError
+        from audio_to_subs.core.audio_extractor import extract_audio, FFmpegNotFoundError
         
         # Act & Assert
         with pytest.raises(FFmpegNotFoundError):
             extract_audio(str(video_path), str(output_path))
 
-    @patch('src.audio_extractor.check_ffmpeg_available', return_value=True)
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available', return_value=True)
     def test_extract_audio_video_file_not_found(self, mock_check_ffmpeg, tmp_path):
         """Test that extract_audio raises error when video file doesn't exist."""
         # Arrange
         video_path = tmp_path / "nonexistent.mp4"
         output_path = tmp_path / "output.wav"
 
-        from src.audio_extractor import extract_audio
+        from audio_to_subs.core.audio_extractor import extract_audio
 
         # Act & Assert
         with pytest.raises(FileNotFoundError):
@@ -115,7 +115,7 @@ class TestAudioExtraction:
 
     @patch('subprocess.Popen')
     @patch('subprocess.run')
-    @patch('src.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
     def test_extract_audio_ffmpeg_command_fails(self, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test that extract_audio raises error when FFmpeg command fails."""
         # Arrange
@@ -132,7 +132,7 @@ class TestAudioExtraction:
         video_path.touch()
         output_path = tmp_path / "output.wav"
         
-        from src.audio_extractor import extract_audio, AudioExtractionError
+        from audio_to_subs.core.audio_extractor import extract_audio, AudioExtractionError
         
         # Act & Assert
         with pytest.raises(AudioExtractionError):
@@ -151,7 +151,7 @@ class TestGetVideoDuration:
             returncode=0
         )
         
-        from src.audio_extractor import _get_video_duration
+        from audio_to_subs.core.audio_extractor import _get_video_duration
         
         # Act
         result = _get_video_duration("/path/to/video.mp4")
@@ -168,7 +168,7 @@ class TestGetVideoDuration:
         # Arrange
         mock_run.side_effect = subprocess.CalledProcessError(1, 'ffprobe')
         
-        from src.audio_extractor import _get_video_duration, AudioExtractionError
+        from audio_to_subs.core.audio_extractor import _get_video_duration, AudioExtractionError
         
         # Act & Assert
         with pytest.raises(AudioExtractionError):
@@ -183,7 +183,7 @@ class TestGetVideoDuration:
             returncode=0
         )
         
-        from src.audio_extractor import _get_video_duration, AudioExtractionError
+        from audio_to_subs.core.audio_extractor import _get_video_duration, AudioExtractionError
         
         # Act & Assert
         with pytest.raises(AudioExtractionError):
@@ -195,7 +195,7 @@ class TestAudioExtractionEdgeCases:
 
     @patch('subprocess.Popen')
     @patch('subprocess.run')
-    @patch('src.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
     def test_extract_audio_with_progress_callback(self, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test extract_audio with progress callback."""
         # Arrange
@@ -217,7 +217,7 @@ class TestAudioExtractionEdgeCases:
         def mock_callback(msg):
             progress_messages.append(msg)
         
-        from src.audio_extractor import extract_audio
+        from audio_to_subs.core.audio_extractor import extract_audio
         
         # Act
         result = extract_audio(
@@ -233,8 +233,8 @@ class TestAudioExtractionEdgeCases:
 
     @patch('subprocess.Popen')
     @patch('subprocess.run')
-    @patch('src.audio_extractor.check_ffmpeg_available')
-    @patch('src.audio_extractor._get_video_duration')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor._get_video_duration')
     def test_extract_audio_with_duration(self, mock_get_duration, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test extract_audio when duration is available for progress."""
         # Arrange
@@ -263,7 +263,7 @@ class TestAudioExtractionEdgeCases:
         def mock_callback(msg):
             progress_messages.append(msg)
         
-        from src.audio_extractor import extract_audio
+        from audio_to_subs.core.audio_extractor import extract_audio
         
         # Act
         result = extract_audio(
@@ -278,11 +278,11 @@ class TestAudioExtractionEdgeCases:
 
     @patch('subprocess.Popen')
     @patch('subprocess.run')
-    @patch('src.audio_extractor.check_ffmpeg_available')
-    @patch('src.audio_extractor._get_video_duration')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor._get_video_duration')
     def test_extract_audio_with_duration_error(self, mock_get_duration, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test extract_audio when _get_video_duration fails but we have progress callback."""
-        from src.audio_extractor import AudioExtractionError
+        from audio_to_subs.core.audio_extractor import AudioExtractionError
         # Arrange
         mock_check_ffmpeg.return_value = True
         mock_get_duration.side_effect = AudioExtractionError("ffprobe failed")
@@ -303,7 +303,7 @@ class TestAudioExtractionEdgeCases:
         def mock_callback(msg):
             progress_messages.append(msg)
         
-        from src.audio_extractor import extract_audio, AudioExtractionError
+        from audio_to_subs.core.audio_extractor import extract_audio, AudioExtractionError
         
         # Act - should not raise, should continue without progress
         result = extract_audio(
@@ -322,7 +322,7 @@ class TestParseFFmpegProgress:
 
     def test_parse_ffmpeg_progress_with_microseconds(self):
         """Test _parse_ffmpeg_progress handles microseconds pattern."""
-        from src.audio_extractor import _parse_ffmpeg_progress
+        from audio_to_subs.core.audio_extractor import _parse_ffmpeg_progress
         
         progress_messages = []
         def mock_callback(msg):
@@ -348,7 +348,7 @@ class TestParseFFmpegProgress:
 
     def test_parse_ffmpeg_progress_with_timecode(self):
         """Test _parse_ffmpeg_progress handles timecode pattern."""
-        from src.audio_extractor import _parse_ffmpeg_progress
+        from audio_to_subs.core.audio_extractor import _parse_ffmpeg_progress
         
         progress_messages = []
         def mock_callback(msg):
@@ -374,7 +374,7 @@ class TestParseFFmpegProgress:
 
     def test_parse_ffmpeg_progress_with_progress_end(self):
         """Test _parse_ffmpeg_progress handles progress=end marker."""
-        from src.audio_extractor import _parse_ffmpeg_progress
+        from audio_to_subs.core.audio_extractor import _parse_ffmpeg_progress
         
         progress_messages = []
         def mock_callback(msg):
@@ -403,10 +403,10 @@ class TestAudioExtractionSubprocessError:
 
     @patch('subprocess.Popen')
     @patch('subprocess.run')
-    @patch('src.audio_extractor.check_ffmpeg_available')
+    @patch('audio_to_subs.core.audio_extractor.check_ffmpeg_available')
     def test_extract_audio_subprocess_error(self, mock_check_ffmpeg, mock_run, mock_popen, tmp_path):
         """Test that extract_audio raises AudioExtractionError on subprocess error."""
-        from src.audio_extractor import extract_audio, AudioExtractionError
+        from audio_to_subs.core.audio_extractor import extract_audio, AudioExtractionError
         
         # Arrange
         mock_check_ffmpeg.return_value = True

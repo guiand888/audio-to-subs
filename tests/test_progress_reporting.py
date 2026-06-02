@@ -8,8 +8,8 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.pipeline import Pipeline
-from src.transcription_client import TranscriptionClient
+from audio_to_subs.core.pipeline import Pipeline
+from audio_to_subs.core.transcription_client import TranscriptionClient
 
 
 class TestProgressReporting:
@@ -23,12 +23,12 @@ class TestProgressReporting:
             progress_messages.append((message, percentage))
         
         # Test that callback is called with correct signature
-        with patch('src.pipeline.extract_audio') as mock_extract, \
-             patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
-             patch('src.pipeline.split_audio') as mock_split, \
+        with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
+             patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('src.pipeline.Path') as mock_path:
+             patch('audio_to_subs.core.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('audio_to_subs.core.pipeline.Path') as mock_path:
             
             # Mock Path to avoid file existence checks
             mock_path_instance = MagicMock()
@@ -77,9 +77,9 @@ class TestProgressReporting:
         
         try:
             # Mock the Mistral API call - client must be created INSIDE patch context
-            with patch('src.transcription_client.Mistral') as mock_mistral, \
-                 patch('src.transcription_client.os.path.getsize') as mock_getsize, \
-                 patch('src.transcription_client.Path.exists') as mock_exists:
+            with patch('audio_to_subs.core.transcription_client.Mistral') as mock_mistral, \
+                 patch('audio_to_subs.core.transcription_client.os.path.getsize') as mock_getsize, \
+                 patch('audio_to_subs.core.transcription_client.Path.exists') as mock_exists:
                 mock_exists.return_value = True
                 mock_getsize.return_value = 2048
                 mock_client = MagicMock()
@@ -124,12 +124,12 @@ class TestProgressReporting:
             if percentage is not None:
                 progress_messages.append(percentage)
         
-        with patch('src.pipeline.extract_audio') as mock_extract, \
-             patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
-             patch('src.pipeline.split_audio') as mock_split, \
+        with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
+             patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('src.pipeline.Path') as mock_path:
+             patch('audio_to_subs.core.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('audio_to_subs.core.pipeline.Path') as mock_path:
             
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -162,12 +162,12 @@ class TestProgressReporting:
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
         
-        with patch('src.pipeline.extract_audio') as mock_extract, \
-             patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
-             patch('src.pipeline.split_audio') as mock_split, \
+        with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
+             patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('src.pipeline.Path') as mock_path:
+             patch('audio_to_subs.core.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('audio_to_subs.core.pipeline.Path') as mock_path:
             
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -217,12 +217,12 @@ class TestProgressReporting:
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
         
-        with patch('src.pipeline.extract_audio') as mock_extract, \
-             patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
-             patch('src.pipeline.split_audio') as mock_split, \
+        with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
+             patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('src.pipeline.Path') as mock_path:
+             patch('audio_to_subs.core.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('audio_to_subs.core.pipeline.Path') as mock_path:
             
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -262,9 +262,9 @@ class TestProgressReporting:
         
         try:
             # Mock the Mistral API call - client must be created INSIDE patch context
-            with patch('src.transcription_client.Mistral') as mock_mistral, \
-                 patch('src.transcription_client.os.path.getsize') as mock_getsize, \
-                 patch('src.transcription_client.Path.exists') as mock_exists:
+            with patch('audio_to_subs.core.transcription_client.Mistral') as mock_mistral, \
+                 patch('audio_to_subs.core.transcription_client.os.path.getsize') as mock_getsize, \
+                 patch('audio_to_subs.core.transcription_client.Path.exists') as mock_exists:
                 mock_exists.return_value = True
                 mock_getsize.return_value = 5 * 1024 * 1024
                 mock_client = MagicMock()
@@ -307,12 +307,12 @@ class TestProgressReporting:
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
         
-        with patch('src.pipeline.extract_audio') as mock_extract, \
-             patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
-             patch('src.pipeline.split_audio') as mock_split, \
+        with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
+             patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('src.pipeline.Path') as mock_path:
+             patch('audio_to_subs.core.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('audio_to_subs.core.pipeline.Path') as mock_path:
             
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True
@@ -351,12 +351,12 @@ class TestProgressReporting:
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
         
-        with patch('src.pipeline.extract_audio') as mock_extract, \
-             patch('src.pipeline.needs_splitting') as mock_needs_splitting, \
-             patch('src.pipeline.split_audio') as mock_split, \
+        with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
+             patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
-             patch('src.pipeline.SubtitleGenerator.generate') as mock_generate, \
-             patch('src.pipeline.Path') as mock_path:
+             patch('audio_to_subs.core.pipeline.SubtitleGenerator.generate') as mock_generate, \
+             patch('audio_to_subs.core.pipeline.Path') as mock_path:
             
             mock_path_instance = MagicMock()
             mock_path_instance.exists.return_value = True

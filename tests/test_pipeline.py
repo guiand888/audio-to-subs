@@ -3,16 +3,16 @@
 import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
-from src.pipeline import Pipeline, PipelineError
+from audio_to_subs.core.pipeline import Pipeline, PipelineError
 
 
 class TestPipeline:
     """Test video to subtitles pipeline."""
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_success(
         self,
         mock_extract,
@@ -54,7 +54,7 @@ class TestPipeline:
         mock_transcription.transcribe_audio_with_timestamps.assert_called_once()
         mock_generator.generate.assert_called_once()
 
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_video_not_found(self, mock_extract, tmp_path):
         """Test pipeline fails when video file not found."""
         # Arrange
@@ -65,9 +65,9 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Video file not found"):
             pipeline.process_video("nonexistent.mp4", "output.srt")
 
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_extraction_fails(
         self, mock_extract, mock_transcription_class, mock_generator_class, tmp_path
     ):
@@ -83,10 +83,10 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Audio extraction failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_transcription_fails(
         self,
         mock_extract,
@@ -117,10 +117,10 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_subtitle_generation_fails(
         self,
         mock_extract,
@@ -155,9 +155,9 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Subtitle generation failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_no_api_key(
         self, mock_extract, mock_transcription_class, mock_generator_class
     ):
@@ -166,10 +166,10 @@ class TestPipeline:
         with pytest.raises(ValueError, match="API key is required"):
             Pipeline(api_key=None)
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_with_progress_callback(
         self,
         mock_extract,
@@ -212,10 +212,10 @@ class TestPipeline:
         # Find a call with "transcrib" in it (may be at different index depending on pipeline)
         assert any("transcrib" in call.lower() for call in calls)
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_pipeline_with_empty_segments(
         self,
         mock_extract,
@@ -245,11 +245,11 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="AI service did not return timestamp data"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("src.pipeline.split_audio")
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.split_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_pipeline_with_multiple_segments(
         self,
         mock_extract,
@@ -298,10 +298,10 @@ class TestPipeline:
         # Verify split_audio was called
         mock_split_audio.assert_called_once()
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_pipeline_cleanup_on_error(
         self,
         mock_extract,
@@ -333,10 +333,10 @@ class TestPipeline:
         # Note: We can't easily verify the cleanup happened due to container isolation,
         # but the cleanup code path is tested
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_extract_audio_ffmpeg_error(
         self,
         mock_extract,
@@ -346,7 +346,7 @@ class TestPipeline:
         tmp_path,
     ):
         """Test FFmpegNotFoundError in _extract_audio (lines 213-214)."""
-        from src.audio_extractor import FFmpegNotFoundError
+        from audio_to_subs.core.audio_extractor import FFmpegNotFoundError
         
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -361,10 +361,10 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Audio extraction failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_process_video_transcription_error(
         self,
         mock_extract,
@@ -374,7 +374,7 @@ class TestPipeline:
         tmp_path,
     ):
         """Test TranscriptionError in _transcribe_audio_segments (line 273)."""
-        from src.transcription_client import TranscriptionError
+        from audio_to_subs.core.transcription_client import TranscriptionError
         
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -395,10 +395,10 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Transcription failed: Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("src.pipeline.needs_splitting")
-    @patch("src.pipeline.SubtitleGenerator")
-    @patch("src.pipeline.TranscriptionClient")
-    @patch("src.pipeline.extract_audio")
+    @patch("audio_to_subs.core.pipeline.needs_splitting")
+    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
+    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
+    @patch("audio_to_subs.core.pipeline.extract_audio")
     def test_generate_subtitles_format_error(
         self,
         mock_extract,
@@ -408,7 +408,7 @@ class TestPipeline:
         tmp_path,
     ):
         """Test SubtitleFormatError in _generate_subtitles (line 302)."""
-        from src.subtitle_generator import SubtitleFormatError
+        from audio_to_subs.core.subtitle_generator import SubtitleFormatError
         
         # Arrange
         video_file = tmp_path / "test.mp4"

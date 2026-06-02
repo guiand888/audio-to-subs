@@ -2,7 +2,7 @@
 import pytest
 from pathlib import Path
 import src.subtitle_generator  # Import module for coverage
-from src.subtitle_generator import (
+from audio_to_subs.core.subtitle_generator import (
     SubtitleGenerator,
     format_timestamp_srt,
     SubtitleFormatError,
@@ -65,7 +65,7 @@ class TestSegmentText:
 
     def test_segment_text_empty_string(self):
         """Test segment_text with empty string."""
-        from src.subtitle_generator import segment_text
+        from audio_to_subs.core.subtitle_generator import segment_text
         
         # Act
         result = segment_text("")
@@ -75,7 +75,7 @@ class TestSegmentText:
 
     def test_segment_text_single_word(self):
         """Test segment_text with single word."""
-        from src.subtitle_generator import segment_text
+        from audio_to_subs.core.subtitle_generator import segment_text
         
         # Act
         result = segment_text("Hello")
@@ -85,7 +85,7 @@ class TestSegmentText:
 
     def test_segment_text_long_text(self):
         """Test segment_text with text exceeding max_chars."""
-        from src.subtitle_generator import segment_text
+        from audio_to_subs.core.subtitle_generator import segment_text
         
         # Create a long text that exceeds 42 characters
         long_text = "This is a very long sentence that should be split into multiple lines because it exceeds the maximum character limit"
@@ -102,7 +102,7 @@ class TestSegmentText:
 
     def test_segment_text_with_newlines(self):
         """Test segment_text preserves and handles newlines."""
-        from src.subtitle_generator import segment_text
+        from audio_to_subs.core.subtitle_generator import segment_text
         
         # Act
         result = segment_text("First line\nSecond line", max_chars=42)
@@ -112,7 +112,7 @@ class TestSegmentText:
 
     def test_segment_text_respects_word_boundaries(self):
         """Test segment_text doesn't break words."""
-        from src.subtitle_generator import segment_text
+        from audio_to_subs.core.subtitle_generator import segment_text
         
         # Act
         result = segment_text("Hello world this is a test", max_chars=10)
@@ -130,7 +130,7 @@ class TestTimestampFormattingAllFormats:
 
     def test_format_timestamp_vtt(self):
         """Test VTT timestamp formatting."""
-        from src.subtitle_generator import format_timestamp_vtt
+        from audio_to_subs.core.subtitle_generator import format_timestamp_vtt
         
         # Act
         result = format_timestamp_vtt(65.5)
@@ -140,7 +140,7 @@ class TestTimestampFormattingAllFormats:
 
     def test_format_timestamp_vtt_edge_values(self):
         """Test VTT timestamp formatting with edge values."""
-        from src.subtitle_generator import format_timestamp_vtt
+        from audio_to_subs.core.subtitle_generator import format_timestamp_vtt
         
         # Test 0
         assert format_timestamp_vtt(0.0) == "00:00:00.000"
@@ -149,7 +149,7 @@ class TestTimestampFormattingAllFormats:
 
     def test_format_timestamp_sbv(self):
         """Test SBV timestamp formatting."""
-        from src.subtitle_generator import format_timestamp_sbv
+        from audio_to_subs.core.subtitle_generator import format_timestamp_sbv
         
         # Act
         result = format_timestamp_sbv(65.5)
@@ -159,7 +159,7 @@ class TestTimestampFormattingAllFormats:
 
     def test_format_timestamp_sbv_edge_values(self):
         """Test SBV timestamp formatting with edge values."""
-        from src.subtitle_generator import format_timestamp_sbv
+        from audio_to_subs.core.subtitle_generator import format_timestamp_sbv
         
         # Test 0
         assert format_timestamp_sbv(0.0) == "0:00:00,000"
@@ -533,7 +533,7 @@ class TestSubtitleGenerator:
 
     def test_segment_text_function(self):
         """Test the segment_text function directly."""
-        from src.subtitle_generator import segment_text
+        from audio_to_subs.core.subtitle_generator import segment_text
         
         # Test basic segmentation
         long_text = "This is a very long sentence that should be split into multiple lines for better readability."

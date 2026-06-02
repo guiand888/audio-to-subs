@@ -29,16 +29,16 @@ test-cov:  ## Run tests with coverage report
 	@echo "Coverage report: htmlcov/index.html"
 
 lint:  ## Run linter
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) ruff check src/ tests/
+	podman run --rm -v ./:/app:Z $(DEV_IMAGE) ruff check audio_to_subs/ tests/
 
 format:  ## Format code with black
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black src/ tests/
+	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black audio_to_subs/ tests/
 
 format-check:  ## Check code formatting
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black --check src/ tests/
+	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black --check audio_to_subs/ tests/
 
 typecheck:  ## Run type checker
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) mypy src/
+	podman run --rm -v ./:/app:Z $(DEV_IMAGE) mypy audio_to_subs/
 
 quality: format-check lint typecheck test  ## Run all quality checks
 

@@ -1,4 +1,4 @@
-# v2 — Frontend
+ # v2 — Frontend
 
 A separate **frontend container** built from `frontend/`, served by Nginx, proxying `/api` to the backend.
 
@@ -52,7 +52,19 @@ No state management framework beyond Zustand. No Redux. No SWR.
 
 ### `/settings`
 
-- Sections: Bazarr (poll interval, track-no-subs toggle), Path mappings (editable list of pairs), Mistral (model name, fallback rate per minute), Defaults (language, output format), UI (default theme).
+- Sections:
+  - Bazarr: poll interval, track-no-subs toggle
+  - Path mappings: editable list of pairs
+  - Mistral:
+    - Model name selector
+    - **Pricing configuration**:
+      - Audio rate: USD per minute (primary, uses `prompt_audio_seconds` from Mistral usage)
+      - Input token rate: USD per token (optional, uses `prompt_tokens`)
+      - Output token rate: USD per token (optional, uses `completion_tokens`)
+    - Fallback rate per minute (used when Mistral usage data unavailable)
+  - Defaults: language, output format
+  - UI: default theme
+- Billing priority: If audio rate configured → use duration-based. If token rates configured → add token-based cost. Both can be combined.
 - Save button writes a `PATCH /api/settings` with only the changed fields.
 
 ## Live progress wiring

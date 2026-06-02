@@ -63,25 +63,44 @@ Run against a short clip (~10 s) to keep cost negligible.
 
 Fill in this section in the same commit that runs the probe, then commit.
 
-### Result (TBD — fill in after running)
+### Result
 
-- [ ] Response object has a `usage` attribute: **yes / no**
-- [ ] If yes: fields present (list them):
-  - `usage.<field_name>`: type, semantics, example value
-  - …
-- [ ] Total cost in USD is reported directly: **yes / no**
-- [ ] Billed duration in seconds is reported directly: **yes / no**
-- [ ] Other surprising fields:
-- [ ] Raw `model_dump()` output (truncate to ~30 lines):
-  ```
-  …
+Probe executed successfully on 2026-06-02 against `mistralai==2.4.5` with model `voxtral-mini-latest` and a 10-second WAV audio clip.
+
+- [x] Response object has a `usage` attribute: **yes**
+- [x] If yes: fields present (list them):
+  - `usage.prompt_tokens`: int, number of prompt tokens (example: 4)
+  - `usage.completion_tokens`: int, number of completion/generated tokens (example: 87)
+  - `usage.total_tokens`: int, sum of prompt + completion tokens (example: 466)
+  - `usage.prompt_audio_seconds`: int, billed audio duration in seconds (example: 9)
+  - `usage.prompt_tokens_details`: dict, breakdown with `audio_tokens` (int) and `cached_tokens` (int)
+- [x] Total cost in USD is reported directly: **no**
+- [x] Billed duration in seconds is reported directly: **yes** (`prompt_audio_seconds`)
+- [x] Other surprising fields: `finish_reason` (null in successful response), `language` (null when not detected)
+- [x] Raw `model_dump()` output (truncate to ~30 lines):
+  ```json
+  {
+    "model": "voxtral-mini-latest",
+    "text": "The first time you've had a boy over. I mean, I'm bound to be a little surprised, but I'm not gonna embarrass you. I better go charge the camcorder. I'm kidding! Come on!",
+    "usage": {
+      "prompt_tokens": 4,
+      "completion_tokens": 87,
+      "total_tokens": 466,
+      "prompt_audio_seconds": 9,
+      "prompt_tokens_details": {
+        "cached_tokens": 0,
+        "audio_tokens": 375
+      }
+    },
+    "language": null,
+    "segments": [...],
+    "finish_reason": null
+  }
   ```
 
 ### Decision for `core/cost.py`
 
-Based on the result above, pick one:
-
-- [ ] **Path A — Mistral provides usage**: `extract_usage(response)` returns the relevant dict; `compute_cost` reads `usage.<field>` and computes USD. Fallback path retained only for the case where the SDK changes shape.
+- [x] **Path A — Mistral provides usage**: `extract_usage(response)` returns the relevant dict; `compute_cost` reads `usage.prompt_audio_seconds` for billed duration and optionally `usage.total_tokens` for token-based pricing. Fallback path retained only for the case where the SDK changes shape.
 - [ ] **Path B — Mistral does NOT provide usable usage**: `extract_usage(response)` returns `None`; `compute_cost` always uses `audio_duration_seconds / 60 × rate_usd_per_minute`. `mistral_usage_json` on the job row stays NULL.
 
 ### Reference once decided

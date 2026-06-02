@@ -10,14 +10,14 @@ from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.subtitle_generator import (
+from audio_to_subs.core.subtitle_generator import (
     SubtitleGenerator,
     format_timestamp_srt,
     format_timestamp_vtt,
     format_timestamp_sbv,
     SubtitleFormatError,
 )
-from src.pipeline import Pipeline, PipelineError
+from audio_to_subs.core.pipeline import Pipeline, PipelineError
 
 
 # Test data fixtures
@@ -194,9 +194,9 @@ class TestBatchProcessing:
     @pytest.fixture
     def pipeline_with_mock(self):
         """Create Pipeline with mocked dependencies."""
-        with patch("src.pipeline.extract_audio"), \
-             patch("src.pipeline.TranscriptionClient"), \
-             patch("src.pipeline.SubtitleGenerator"):
+        with patch("audio_to_subs.core.pipeline.extract_audio"), \
+             patch("audio_to_subs.core.pipeline.TranscriptionClient"), \
+             patch("audio_to_subs.core.pipeline.SubtitleGenerator"):
             pipeline = Pipeline(api_key="test-key")
             return pipeline
 

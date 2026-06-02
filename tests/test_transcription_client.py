@@ -2,7 +2,7 @@
 
 import pytest
 from unittest.mock import patch, MagicMock, mock_open
-from src.transcription_client import (
+from audio_to_subs.core.transcription_client import (
     TranscriptionClient,
     TranscriptionError,
     AudioFileError,
@@ -26,10 +26,10 @@ class TestTranscriptionClient:
         with pytest.raises(ValueError, match="API key is required"):
             TranscriptionClient(api_key=None)
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_success(self, mock_mistral_class, mock_file, mock_exists, mock_getsize):
         """Test successful audio transcription."""
         # Arrange
@@ -51,7 +51,7 @@ class TestTranscriptionClient:
         assert result == "This is a test transcription."
         mock_client.audio.transcriptions.complete.assert_called_once()
 
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_file_not_found(self, mock_mistral_class):
         """Test transcription fails when audio file doesn't exist."""
         # Arrange
@@ -61,9 +61,9 @@ class TestTranscriptionClient:
         with pytest.raises(AudioFileError, match="Audio file not found"):
             client.transcribe_audio("nonexistent.wav")
 
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_api_error(
         self, mock_mistral_class, mock_file, mock_exists
     ):
@@ -80,10 +80,10 @@ class TestTranscriptionClient:
         with pytest.raises(TranscriptionError, match="Transcription failed"):
             client.transcribe_audio("test_audio.wav")
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_with_timestamps(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -116,10 +116,10 @@ class TestTranscriptionClient:
         assert result[1]["end"] == 5.0
         assert result[1]["text"] == "transcription"
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_language(self, mock_mistral_class, mock_file, mock_exists, mock_getsize):
         """Test transcription with language parameter."""
         # Arrange
@@ -143,10 +143,10 @@ class TestTranscriptionClient:
         call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
         assert call_kwargs.get("language") == "en"
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_timestamps_and_progress(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -194,7 +194,7 @@ class TestTranscriptionClient:
         assert 0 in percentages
         assert 100 in percentages
 
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     def test_transcribe_audio_with_timestamps_file_not_found(self, mock_exists):
         """Test transcription with timestamps fails when file not found."""
         # Arrange
@@ -205,10 +205,10 @@ class TestTranscriptionClient:
         with pytest.raises(AudioFileError, match="Audio file not found"):
             client.transcribe_audio_with_timestamps("nonexistent.wav")
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_timestamps_api_error(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -226,10 +226,10 @@ class TestTranscriptionClient:
         with pytest.raises(TranscriptionError, match="Transcription failed"):
             client.transcribe_audio_with_timestamps("test_audio.wav")
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_timestamps_no_segments(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):

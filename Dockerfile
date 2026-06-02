@@ -24,7 +24,7 @@ COPY requirements.txt ./
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Copy application source
-COPY src/ ./src/
+COPY audio_to_subs/ ./audio_to_subs/
 COPY pyproject.toml ./
 
 # Install application
@@ -47,7 +47,7 @@ RUN apk add --no-cache \
 COPY --from=builder /install /usr/local
 
 # Copy application source
-COPY src/ /app/src/
+COPY audio_to_subs/ /app/audio_to_subs/
 COPY pyproject.toml /app/
 
 # Set working directory
@@ -70,10 +70,10 @@ ENV TMPDIR=/tmp/audio-to-subs
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \
-    CMD python -c "from src import cli; print('OK')" || exit 1
+    CMD python -c "from audio_to_subs import cli; print('OK')" || exit 1
 
 # Entry point
-ENTRYPOINT ["python", "-m", "src"]
+ENTRYPOINT ["python", "-m", "audio_to_subs"]
 
 # Default arguments
 CMD ["--help"]

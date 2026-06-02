@@ -9,15 +9,15 @@ import tempfile
 from pathlib import Path
 from typing import Callable, Dict, List, Optional
 
-from src.audio_extractor import extract_audio, FFmpegNotFoundError, AudioExtractionError
-from src.transcription_client import TranscriptionClient, TranscriptionError
-from src.audio_splitter import (
+from audio_to_subs.core.audio_extractor import extract_audio, FFmpegNotFoundError, AudioExtractionError
+from audio_to_subs.core.transcription_client import TranscriptionClient, TranscriptionError
+from audio_to_subs.core.audio_splitter import (
     split_audio,
     needs_splitting,
 )
 from typing import Any
 
-from src.subtitle_generator import SubtitleGenerator, SubtitleFormatError
+from audio_to_subs.core.subtitle_generator import SubtitleGenerator, SubtitleFormatError
 
 logger = logging.getLogger(__name__)
 

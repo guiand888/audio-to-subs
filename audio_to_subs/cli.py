@@ -12,9 +12,9 @@ from typing import Optional
 
 import click
 
-from src.config_parser import ConfigError, ConfigParser
-from src.logging_config import configure_logging
-from src.pipeline import Pipeline, PipelineError
+from audio_to_subs.core.config_parser import ConfigError, ConfigParser
+from audio_to_subs.core.logging_config import configure_logging
+from audio_to_subs.core.pipeline import Pipeline, PipelineError
 
 logger = logging.getLogger(__name__)
 

@@ -2,7 +2,7 @@
 import pytest
 import os
 from pathlib import Path
-from src.pipeline import Pipeline
+from audio_to_subs.core.pipeline import Pipeline
 
 
 @pytest.fixture
@@ -78,8 +78,8 @@ class TestIntegration:
     @pytest.mark.integration
     def test_transcription_client_real_api(self, mistral_api_key, test_video_file, tmp_path):
         """Test TranscriptionClient with real Mistral API."""
-        from src.transcription_client import TranscriptionClient
-        from src.audio_extractor import extract_audio
+        from audio_to_subs.core.transcription_client import TranscriptionClient
+        from audio_to_subs.core.audio_extractor import extract_audio
         
         if not test_video_file:
             pytest.skip('TEST_VIDEO_FILE environment variable not set')
@@ -109,7 +109,7 @@ class TestIntegration:
         output_file = tmp_path / 'output.srt'
         
         # Mock only the transcription API, use real extraction and generation
-        with patch('src.pipeline.TranscriptionClient') as mock_tc_class:
+        with patch('audio_to_subs.core.pipeline.TranscriptionClient') as mock_tc_class:
             mock_tc = MagicMock()
             mock_tc_class.return_value = mock_tc
             mock_tc.transcribe_audio_with_timestamps.return_value = [

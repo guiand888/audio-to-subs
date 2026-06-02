@@ -128,6 +128,15 @@ The CLI ignores the return value today, so it continues to work. The worker read
 
 ## 4. Cost — `audio_to_subs/core/cost.py`
 
+The exact field names accessed inside `extract_usage`/`compute_cost` are now verified — see `dev/v2/MISTRAL_USAGE_PROBE.md`. Path A (Mistral-provided usage) is confirmed working; the fallback path remains for SDK compatibility.
+
+**Enhanced cost model**: Supports both duration-based and token-based billing. Settings panel allows configuring:
+- `rate_usd_per_minute` (primary: audio duration billing using `prompt_audio_seconds`)
+- `input_token_rate_usd` (optional: per-token input billing using `prompt_tokens`)
+- `output_token_rate_usd` (optional: per-token output billing using `completion_tokens`)
+
+Billing priority: duration-based is primary. Token-based costs are added if rates are configured.
+
 ```python
 from dataclasses import dataclass
 from typing import Any
@@ -138,12 +147,21 @@ class CostBreakdown:
     usage: dict | None         # raw usage dict if present
     estimated_cost_usd: float
     source: Literal["mistral_usage", "duration_fallback"]
+    token_cost_usd: float | None = None  # Token-based portion if calculated
 
 
 def extract_usage(mistral_response: Any) -> dict | None:
     """Return the response's `usage` field as a plain dict, or None.
 
-    Verified shape: TBD — see dev/v2/MISTRAL_USAGE_PROBE.md.
+    Verified shape (mistralai==2.4.5, voxtral-mini-latest):
+      usage = {
+        "prompt_tokens": int,
+        "completion_tokens": int,
+        "total_tokens": int,
+        "prompt_audio_seconds": int,  # billed duration in seconds
+        "prompt_tokens_details": {"audio_tokens": int, "cached_tokens": int},
+      }
+    See dev/v2/MISTRAL_USAGE_PROBE.md for full probe results.
     """
     # Try common SDK shapes:
     for attr in ("usage", "model_dump"):
@@ -167,26 +185,49 @@ def compute_cost(
     audio_duration_seconds: float,
     mistral_usage: dict | None,
     rate_usd_per_minute: float,
+    input_token_rate_usd: float | None = None,
+    output_token_rate_usd: float | None = None,
 ) -> CostBreakdown:
+    """Compute cost using both duration-based and optional token-based billing.
+    
+    Args:
+        audio_duration_seconds: Total audio duration for fallback calculation
+        mistral_usage: Raw usage dict from Mistral response (or None)
+        rate_usd_per_minute: Rate for audio duration billing (USD per minute)
+        input_token_rate_usd: Optional rate for input tokens (USD per token)
+        output_token_rate_usd: Optional rate for output tokens (USD per token)
+    """
+    duration_cost = 0.0
+    token_cost = 0.0
+    source: Literal["mistral_usage", "duration_fallback"] = "duration_fallback"
+    
     if mistral_usage:
-        # If Mistral returns a billed-duration or billed-tokens field, use it.
-        # Implementation depends on the probe; document the exact field accessed here.
-        duration_min = mistral_usage.get("billed_duration_seconds")
-        if duration_min is not None:
-            cost = (duration_min / 60.0) * rate_usd_per_minute
-            return CostBreakdown(
-                audio_duration_seconds=audio_duration_seconds,
-                usage=mistral_usage,
-                estimated_cost_usd=cost,
-                source="mistral_usage",
-            )
-    # Fallback: pure duration × rate
-    cost = (audio_duration_seconds / 60.0) * rate_usd_per_minute
+        # Mistral provides billed duration via prompt_audio_seconds
+        # Use this for precise billing (accounts for model-side processing)
+        billed_seconds = mistral_usage.get("prompt_audio_seconds")
+        if billed_seconds is not None:
+            duration_cost = (billed_seconds / 60.0) * rate_usd_per_minute
+            source = "mistral_usage"
+        
+        # Token-based billing (optional)
+        if input_token_rate_usd is not None:
+            prompt_tokens = mistral_usage.get("prompt_tokens", 0)
+            token_cost += prompt_tokens * input_token_rate_usd
+        if output_token_rate_usd is not None:
+            completion_tokens = mistral_usage.get("completion_tokens", 0)
+            token_cost += completion_tokens * output_token_rate_usd
+    else:
+        # Fallback: pure duration × rate
+        duration_cost = (audio_duration_seconds / 60.0) * rate_usd_per_minute
+    
+    total_cost = duration_cost + token_cost
+    
     return CostBreakdown(
         audio_duration_seconds=audio_duration_seconds,
         usage=mistral_usage,
-        estimated_cost_usd=cost,
-        source="duration_fallback",
+        estimated_cost_usd=total_cost,
+        source=source,
+        token_cost_usd=token_cost if token_cost > 0 else None,
     )
 ```
 
@@ -234,6 +275,8 @@ def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> None:
         audio_duration_seconds=result.audio_duration_seconds,
         mistral_usage=result.mistral_usage,
         rate_usd_per_minute=deps.settings.mistral_rate_usd_per_minute,
+        input_token_rate_usd=deps.settings.mistral_input_token_rate_usd,
+        output_token_rate_usd=deps.settings.mistral_output_token_rate_usd,
     )
     persist_success(deps.db, claimed.id, result, cost)
     publish_done(deps.redis, claimed.id, status="done")

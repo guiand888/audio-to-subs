@@ -3,7 +3,7 @@ import pytest
 from unittest.mock import patch, MagicMock
 from pathlib import Path
 from click.testing import CliRunner
-from src.cli import main
+from audio_to_subs.cli import main
 
 
 class TestCLI:
@@ -23,7 +23,7 @@ class TestCLI:
         assert '--input' in result.output or '-i' in result.output
         assert '--output' in result.output or '-o' in result.output
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_success(self, mock_pipeline_class, tmp_path):
         """Test successful video processing via CLI."""
         # Arrange
@@ -47,7 +47,7 @@ class TestCLI:
         assert result.exit_code == 0
         mock_pipeline.process_video.assert_called_once()
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_missing_input(self, mock_pipeline_class):
         """Test CLI fails when input file not specified."""
         # Arrange
@@ -62,7 +62,7 @@ class TestCLI:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_missing_output(self, mock_pipeline_class):
         """Test CLI fails when output file not specified."""
         # Arrange
@@ -77,7 +77,7 @@ class TestCLI:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_missing_api_key(self, mock_pipeline_class, tmp_path):
         """Test CLI fails when API key not provided."""
         # Arrange
@@ -94,7 +94,7 @@ class TestCLI:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_api_key_from_env(self, mock_pipeline_class, tmp_path):
         """Test CLI reads API key from environment variable."""
         # Arrange
@@ -117,7 +117,7 @@ class TestCLI:
         assert result.exit_code == 0
         mock_pipeline_class.assert_called()
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_pipeline_error(self, mock_pipeline_class, tmp_path):
         """Test CLI handles pipeline errors gracefully."""
         # Arrange
@@ -140,7 +140,7 @@ class TestCLI:
         assert result.exit_code != 0
         assert 'error' in result.output.lower() or 'failed' in result.output.lower()
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_progress_output(self, mock_pipeline_class, tmp_path):
         """Test CLI shows progress messages."""
         # Arrange
@@ -179,7 +179,7 @@ class TestCLI:
         assert result.exit_code == 0
         assert 'audio-to-subs' in result.output.lower() or '0.' in result.output
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_process_video_progress_flag(self, mock_pipeline_class, tmp_path):
         """Test CLI with --progress flag enables verbose progress."""
         # Arrange
@@ -214,7 +214,7 @@ class TestCLI:
         output_path = output_dir / "subs.srt"
         
         # Act & Assert - should not raise
-        from src.cli import _validate_output_directory
+        from audio_to_subs.cli import _validate_output_directory
         _validate_output_directory(str(output_path))
         assert output_path.parent.exists()
 
@@ -225,14 +225,14 @@ class TestCLI:
         output_path = output_dir / "subs.srt"
         
         # Act
-        from src.cli import _validate_output_directory
+        from audio_to_subs.cli import _validate_output_directory
         _validate_output_directory(str(output_path))
         
         # Assert
         assert output_dir.exists()
 
-    @patch('src.cli.ConfigParser')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.ConfigParser')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_processing_success(self, mock_pipeline_class, mock_config_class, tmp_path):
         """Test CLI batch processing with config file."""
         # Arrange
@@ -272,7 +272,7 @@ jobs:
         mock_config_class.assert_called_once()
         mock_pipeline.process_batch.assert_called_once()
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_and_single_mode_conflict(self, mock_pipeline_class, tmp_path):
         """Test CLI rejects using both --config and --input."""
         # Arrange
@@ -345,8 +345,8 @@ jobs:
         # Assert - Click validates Path(exists=True) at the option level
         assert result.exit_code != 0
 
-    @patch('src.cli._validate_output_directory')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli._validate_output_directory')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_output_directory_validation_error(self, mock_pipeline_class, mock_validate, tmp_path):
         """Test CLI handles output directory validation error."""
         import click
@@ -373,10 +373,10 @@ jobs:
         assert result.exit_code == 2
         assert 'Cannot create output directory' in result.output
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_pipeline_error_handling(self, mock_pipeline_class, tmp_path):
         """Test CLI handles PipelineError with specific error message."""
-        from src.pipeline import PipelineError
+        from audio_to_subs.core.pipeline import PipelineError
         
         # Arrange
         runner = CliRunner()
@@ -398,10 +398,10 @@ jobs:
         assert result.exit_code == 1
         assert 'Test pipeline error' in result.output
 
-    @patch('src.cli.ConfigParser')
+    @patch('audio_to_subs.cli.ConfigParser')
     def test_batch_config_error_handling(self, mock_config_parser, tmp_path):
         """Test batch mode handles ConfigError."""
-        from src.config_parser import ConfigError
+        from audio_to_subs.core.config_parser import ConfigError
         
         # Arrange
         runner = CliRunner(mix_stderr=True)
@@ -423,10 +423,10 @@ jobs:
         assert result.exit_code == 1
         assert 'Invalid config' in result.output
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_pipeline_error_handling(self, mock_pipeline_class, tmp_path):
         """Test batch mode handles PipelineError."""
-        from src.pipeline import PipelineError
+        from audio_to_subs.core.pipeline import PipelineError
         
         # Arrange
         runner = CliRunner(mix_stderr=True)
@@ -464,7 +464,7 @@ jobs:
 
 
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_processing_without_api_key(self, mock_pipeline_class, tmp_path):
         """Test CLI batch mode requires API key."""
         # Arrange
@@ -490,16 +490,16 @@ jobs:
         
         # On Linux, we can't easily make a directory non-writable in tests
         # So we test the error message handling path
-        from src.cli import _validate_output_directory
+        from audio_to_subs.cli import _validate_output_directory
         import click
         
         # Mock os.access to return False
-        with patch('src.cli.os.access', return_value=False):
+        with patch('audio_to_subs.cli.os.access', return_value=False):
             with pytest.raises(click.ClickException, match="not writable"):
                 _validate_output_directory(str(output_path))
 
-    @patch('src.cli.ConfigParser')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.ConfigParser')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_processing_config_error(self, mock_pipeline_class, mock_config_class, tmp_path):
         """Test CLI handles config errors gracefully."""
         # Arrange
@@ -518,8 +518,8 @@ jobs:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.ConfigParser')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.ConfigParser')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_processing_pipeline_error(self, mock_pipeline_class, mock_config_class, tmp_path):
         """Test CLI handles pipeline errors in batch mode."""
         # Arrange
@@ -552,7 +552,7 @@ jobs:
         assert result.exit_code != 0
         assert 'Error' in result.output
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_single_video_api_key_required(self, mock_pipeline_class, tmp_path):
         """Test CLI requires API key for single video mode."""
         # Arrange
@@ -571,7 +571,7 @@ jobs:
         assert result.exit_code != 0
         assert 'API key' in result.output or 'api-key' in result.output.lower()
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_single_video_no_api_key_env(self, mock_pipeline_class, tmp_path):
         """Test CLI fails when no API key in env or args for single video."""
         # Arrange
@@ -591,22 +591,22 @@ jobs:
 
     def test_validate_output_directory_error(self, tmp_path):
         """Test _validate_output_directory raises error when directory creation fails."""
-        from src.cli import _validate_output_directory
+        from audio_to_subs.cli import _validate_output_directory
         import click
         
         # Arrange
         output_path = tmp_path / "nonexistent" / "deep" / "path" / "output.srt"
         
         # Mock mkdir to raise OSError
-        with patch('src.cli.Path.mkdir') as mock_mkdir:
+        with patch('audio_to_subs.cli.Path.mkdir') as mock_mkdir:
             mock_mkdir.side_effect = OSError("Cannot create directory")
             
             # Act & Assert
             with pytest.raises(click.ClickException, match="Cannot create"):
                 _validate_output_directory(str(output_path))
 
-    @patch('src.cli.ConfigParser')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.ConfigParser')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_config_validation_error(self, mock_pipeline_class, mock_config_class, tmp_path):
         """Test CLI handles config validation errors."""
         # Arrange
@@ -627,8 +627,8 @@ jobs:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.ConfigParser')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.ConfigParser')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_jobs_error(self, mock_pipeline_class, mock_config_class, tmp_path):
         """Test CLI handles get_jobs errors."""
         # Arrange
@@ -650,7 +650,7 @@ jobs:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_pipeline_initialization_error(self, mock_pipeline_class, tmp_path):
         """Test CLI handles pipeline initialization errors."""
         # Arrange
@@ -671,7 +671,7 @@ jobs:
         # Assert
         assert result.exit_code != 0
 
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_pipeline_process_error(self, mock_pipeline_class, tmp_path):
         """Test CLI handles pipeline processing errors."""
         # Arrange
@@ -695,8 +695,8 @@ jobs:
         assert result.exit_code != 0
         assert 'Error' in result.output
 
-    @patch('src.cli.ConfigParser')
-    @patch('src.cli.Pipeline')
+    @patch('audio_to_subs.cli.ConfigParser')
+    @patch('audio_to_subs.cli.Pipeline')
     def test_batch_pipeline_error(self, mock_pipeline_class, mock_config_class, tmp_path):
         """Test CLI handles pipeline errors in batch mode."""
         # Arrange

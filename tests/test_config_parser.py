@@ -9,7 +9,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from src.config_parser import ConfigParser, ConfigError
+from audio_to_subs.core.config_parser import ConfigParser, ConfigError
 
 
 @pytest.fixture

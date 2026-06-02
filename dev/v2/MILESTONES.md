@@ -2,6 +2,19 @@
 
 Six milestones, each independently shippable and reviewable. The order encodes hard dependencies — do not parallelise across milestones unless explicitly noted.
 
+## Progress
+
+| Milestone | Status | Completed | Notes |
+|-----------|--------|-----------|-------|
+| M0 — Repo restructure | ✅ Done | 2026-06-02 | `src/` → `audio_to_subs/` |
+| M0.5 — Mistral usage probe | ✅ Done | 2026-06-02 | Probe executed, findings documented |
+| M1 — DB foundation + auth | ⏳ Not Started | - | - |
+| M2 — Worker + queue + cost | ⏳ Not Started | - | Depends on M0, M0.5, M1 |
+| M3 — Bazarr + `/api/wanted` | ⏳ Not Started | - | Depends on M2 |
+| M4 — Frontend foundation | ⏳ Not Started | - | Depends on M3 |
+| M5 — History + Logs + Settings | ⏳ Not Started | - | Depends on M4 |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5 |
+
 Every milestone ends with the same quality bar:
 
 - `pytest` green
@@ -85,6 +98,16 @@ Tasks:
 - `audio_to_subs/api/routes/wanted.py`: read from `bazarr_cache`, join `jobs` for `active_job_id`, apply filters.
 - Extend `POST /api/jobs` to resolve `source=bazarr_movie|bazarr_episode` via `bazarr_cache` + `pathmap`.
 - `audio_to_subs/api/routes/settings.py`: GET/PATCH settings (so the poller interval and pathmap are editable at runtime).
+- Settings model includes:
+  - `mistral_model`: str
+  - `mistral_rate_usd_per_minute`: float (primary audio duration billing)
+  - `mistral_input_token_rate_usd`: float | None (optional token-based input billing)
+  - `mistral_output_token_rate_usd`: float | None (optional token-based output billing)
+  - `bazarr_poll_interval`: int
+  - `bazarr_track_no_subs`: bool
+  - `path_mappings`: list of dict pairs
+  - `default_language`: str
+  - `default_output_format`: str
 - Tests: `test_bazarr_client.py`, `test_bazarr_pathmap.py`, `test_bazarr_poller.py`, `test_api_wanted.py`, `test_api_settings.py`.
 
 Acceptance:
@@ -92,6 +115,7 @@ Acceptance:
 - Poller fills `bazarr_cache` within one poll interval.
 - `GET /api/wanted?type=all` returns expected items with `media_path` translated to the worker's view.
 - `POST /api/jobs {source:"bazarr_episode", source_ref:"123", language_code:"en"}` enqueues a job whose `media_path` was resolved correctly.
+- `GET /api/settings` returns all cost rate fields; `PATCH /api/settings` updates them.
 
 ## M4 — Frontend foundation: Login, Wanted, Queue
 
@@ -118,11 +142,17 @@ Tasks:
 - API: `/api/history`, `/api/logs`, `/api/jobs/{id}/notify-bazarr`.
 - Worker: best-effort `rescan_movie` / `rescan_episode` after `done`, logged either way (stubs OK if endpoint still TBD — log a warning).
 - Frontend: `/history`, `/logs`, `/settings` pages.
-- Cost shown in Job detail + History aggregates.
+- **Settings page**: Mistral pricing section with:
+  - Model name selector
+  - Audio rate (USD per minute) — primary billing method
+  - Input token rate (USD per token) — optional
+  - Output token rate (USD per token) — optional
+  - Fallback rate for when Mistral usage data unavailable
+- Cost shown in Job detail + History aggregates (using configured rates).
 
 Acceptance:
 - Complete several jobs of varying lengths/languages; History shows them with correct duration and cost.
-- Settings page edits persist and take effect (poll interval honoured on the next tick).
+- Settings page edits persist and take effect (poll interval honoured on the next tick; cost rates used for new jobs immediately).
 - Logs page surfaces the milestone messages (stage transitions, errors) for each job.
 
 ## M6 — Polish, docs, coverage, security pass
