@@ -2,33 +2,38 @@
 import logging
 import re
 import subprocess
+import time
 from pathlib import Path
 from typing import Callable, Optional
+
+from audio_to_subs.core.cancel import Cancelled, CancelToken
 
 logger = logging.getLogger(__name__)
 
 
 class FFmpegNotFoundError(Exception):
     """Raised when FFmpeg is not available on the system."""
+
     pass
 
 
 class AudioExtractionError(Exception):
     """Raised when audio extraction fails."""
+
     pass
 
 
 def check_ffmpeg_available() -> bool:
     """Check if FFmpeg is available on the system.
-    
+
     Returns:
         True if FFmpeg is available, False otherwise.
     """
     try:
         result = subprocess.run(
-            ['ffmpeg', '-version'],
+            ["ffmpeg", "-version"],
             capture_output=True,
-            check=False
+            check=False,
         )
         return result.returncode == 0
     except FileNotFoundError:
@@ -37,13 +42,13 @@ def check_ffmpeg_available() -> bool:
 
 def _get_video_duration(video_path: str) -> float:
     """Get duration of video file in seconds.
-    
+
     Args:
         video_path: Path to video file
-        
+
     Returns:
         Duration in seconds
-        
+
     Raises:
         AudioExtractionError: If duration cannot be determined
     """
@@ -52,9 +57,12 @@ def _get_video_duration(video_path: str) -> float:
         result = subprocess.run(
             [
                 "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1",
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
                 video_path,
             ],
             capture_output=True,
@@ -66,44 +74,134 @@ def _get_video_duration(video_path: str) -> float:
         return duration
     except (subprocess.CalledProcessError, ValueError) as e:
         logger.error(f"Failed to get video duration: {str(e)}")
-        raise AudioExtractionError(f"Failed to get video duration: {str(e)}") from e
+        raise AudioExtractionError(
+            f"Failed to get video duration: {str(e)}"
+        ) from e
+
+
+def _terminate_ffmpeg(process: subprocess.Popen) -> None:
+    """Terminate FFmpeg process and wait for cleanup.
+
+    Args:
+        process: The FFmpeg subprocess to terminate
+    """
+    logger.info("Terminating FFmpeg process due to cancellation")
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        logger.warning("FFmpeg did not terminate in time, killing")
+        process.kill()
+        process.wait()
+
+
+def _parse_ffmpeg_progress(
+    stdout,
+    progress_callback: Callable[[str], None],
+    total_duration: float,
+    operation_name: str,
+    process: subprocess.Popen,
+    cancel_token: Optional[CancelToken] = None,
+) -> None:
+    """Parse FFmpeg progress output and call callback with formatted progress.
+
+    Args:
+        stdout: FFmpeg stdout stream with progress output
+        progress_callback: Callback to receive progress messages
+        total_duration: Total duration in seconds
+        operation_name: Name of the operation (e.g., "Extracting audio")
+        process: The subprocess to terminate if cancelled
+        cancel_token: Optional cancellation token to check periodically
+    """
+    pattern_us = re.compile(r"^out_time_us=(\d+)$")
+    pattern_time = re.compile(r"^out_time=([0-9:.]+)$")
+
+    def parse_timecode(tc: str) -> float:
+        h, m, s = tc.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    last_percent = -1
+    try:
+        for raw_line in stdout or []:
+            # Check for cancellation before processing each line
+            if cancel_token is not None:
+                try:
+                    cancel_token.check()
+                except Cancelled:
+                    _terminate_ffmpeg(process)
+                    raise
+
+            line = raw_line.strip()
+            time_s: Optional[float] = None
+
+            m_us = pattern_us.match(line)
+            if m_us:
+                us = int(m_us.group(1))
+                # FFmpeg reports microseconds here
+                time_s = us / 1_000_000.0
+            else:
+                m_time = pattern_time.match(line)
+                if m_time:
+                    time_s = parse_timecode(m_time.group(1))
+
+            if time_s is not None and total_duration and total_duration > 0:
+                percentage = min(100.0, (time_s / total_duration) * 100.0)
+                # Throttle duplicate percentages
+                if int(percentage) != last_percent:
+                    last_percent = int(percentage)
+                    progress_callback(
+                        f"{operation_name}: {time_s:.1f} / {total_duration:.1f}s ({percentage:.1f}%)"
+                    )
+
+            if line == "progress=end" and total_duration:
+                progress_callback(
+                    f"{operation_name}: {total_duration:.1f} / {total_duration:.1f}s (100.0%)"
+                )
+                break
+    except Cancelled:
+        raise
 
 
 def extract_audio(
     video_path: str,
     output_path: str,
     progress_callback: Optional[Callable[[str], None]] = None,
+    cancel_token: Optional[CancelToken] = None,
 ) -> str:
     """Extract audio from video file using FFmpeg.
-    
+
     Args:
         video_path: Path to input video file
         output_path: Path for output audio file
         progress_callback: Optional callback for progress updates (receives progress messages)
-        
+        cancel_token: Optional cancellation token for cooperative cancellation
+
     Returns:
         Path to extracted audio file
-        
+
     Raises:
         FFmpegNotFoundError: If FFmpeg is not available
         FileNotFoundError: If video file doesn't exist
         AudioExtractionError: If extraction fails
+        Cancelled: If cancellation was requested via cancel_token
     """
-    logger.debug(f"extract_audio called: video_path={video_path}, output_path={output_path}")
-    
+    logger.debug(
+        f"extract_audio called: video_path={video_path}, output_path={output_path}"
+    )
+
     # Check FFmpeg availability
     if not check_ffmpeg_available():
         logger.error("FFmpeg is not available on this system")
         raise FFmpegNotFoundError("FFmpeg is not available on this system")
-    
+
     # Check video file exists
     video_file = Path(video_path)
     if not video_file.exists():
         logger.error(f"Video file not found: {video_path}")
         raise FileNotFoundError(f"Video file not found: {video_path}")
-    
+
     logger.debug(f"Video file found: {video_file.stat().st_size} bytes")
-    
+
     # Extract audio using FFmpeg
     try:
         # Get video duration for progress calculation (only if callback provided)
@@ -113,25 +211,30 @@ def extract_audio(
                 total_duration = _get_video_duration(video_path)
             except AudioExtractionError:
                 pass  # Continue without progress if duration unavailable
-        
+
         # Build FFmpeg command
         ffmpeg_cmd = [
-            'ffmpeg',
-            '-i', str(video_path),
-            '-vn',  # No video
-            '-acodec', 'pcm_s16le',  # PCM 16-bit encoding
-            '-ar', '16000',  # 16kHz sample rate
-            '-ac', '1',  # Mono
-            '-f', 'wav',  # WAV output format with header
+            "ffmpeg",
+            "-i",
+            str(video_path),
+            "-vn",  # No video
+            "-acodec",
+            "pcm_s16le",  # PCM 16-bit encoding
+            "-ar",
+            "16000",  # 16kHz sample rate
+            "-ac",
+            "1",  # Mono
+            "-f",
+            "wav",  # WAV output format with header
         ]
         logger.debug(f"FFmpeg command: {' '.join(ffmpeg_cmd)}")
-        
+
         # Add progress reporting if callback provided
         if progress_callback:
-            ffmpeg_cmd.extend(['-progress', 'pipe:1'])
-        
+            ffmpeg_cmd.extend(["-progress", "pipe:1"])
+
         ffmpeg_cmd.append(str(output_path))
-        
+
         # Run FFmpeg with progress reporting
         process = subprocess.Popen(
             ffmpeg_cmd,
@@ -140,76 +243,52 @@ def extract_audio(
             text=True,
             bufsize=1,
         )
-        
+
         # Parse progress output if callback provided
         if progress_callback and total_duration:
             _parse_ffmpeg_progress(
-                process.stdout, progress_callback, total_duration, "Extracting audio"
+                process.stdout,
+                progress_callback,
+                total_duration,
+                "Extracting audio",
+                process,
+                cancel_token,
             )
-        
+        elif cancel_token:
+            # Check for cancellation periodically if no progress callback
+            _check_cancel_periodically(process, cancel_token)
+
         # Wait for process to complete
         _, stderr = process.communicate()
-        
+
         if process.returncode != 0:
             error_msg = stderr if stderr else "Unknown error"
             logger.error(f"FFmpeg extraction failed: {error_msg}")
             raise AudioExtractionError(f"FFmpeg extraction failed: {error_msg}")
-        
+
         logger.debug(f"Audio extraction successful: {output_path}")
         return str(output_path)
-        
+
     except subprocess.SubprocessError as e:
         logger.error(f"Audio extraction subprocess error: {str(e)}")
-        raise AudioExtractionError(f"Audio extraction failed: {str(e)}") from e
+        raise AudioExtractionError(
+            f"Audio extraction failed: {str(e)}"
+        ) from e
 
 
-def _parse_ffmpeg_progress(
-    stdout,
-    progress_callback: Callable[[str], None],
-    total_duration: float,
-    operation_name: str,
+def _check_cancel_periodically(
+    process: subprocess.Popen, cancel_token: CancelToken
 ) -> None:
-    """Parse FFmpeg progress output and call callback with formatted progress.
-    
+    """Check for cancellation periodically while process runs.
+
     Args:
-        stdout: FFmpeg stdout stream with progress output
-        progress_callback: Callback to receive progress messages
-        total_duration: Total duration in seconds
-        operation_name: Name of the operation (e.g., "Extracting audio")
+        process: The subprocess to monitor
+        cancel_token: The cancellation token to check
     """
-    pattern_us = re.compile(r'^out_time_us=(\d+)$')
-    pattern_time = re.compile(r'^out_time=([0-9:.]+)$')
-
-    def parse_timecode(tc: str) -> float:
-        h, m, s = tc.split(":")
-        return int(h) * 3600 + int(m) * 60 + float(s)
-
-    last_percent = -1
-    for raw_line in stdout or []:
-        line = raw_line.strip()
-        time_s: Optional[float] = None
-
-        m_us = pattern_us.match(line)
-        if m_us:
-            us = int(m_us.group(1))
-            # FFmpeg reports microseconds here
-            time_s = us / 1_000_000.0
-        else:
-            m_time = pattern_time.match(line)
-            if m_time:
-                time_s = parse_timecode(m_time.group(1))
-
-        if time_s is not None and total_duration and total_duration > 0:
-            percentage = min(100.0, (time_s / total_duration) * 100.0)
-            # Throttle duplicate percentages
-            if int(percentage) != last_percent:
-                last_percent = int(percentage)
-                progress_callback(
-                    f"{operation_name}: {time_s:.1f} / {total_duration:.1f}s ({percentage:.1f}%)"
-                )
-
-        if line == "progress=end" and total_duration:
-            progress_callback(
-                f"{operation_name}: {total_duration:.1f} / {total_duration:.1f}s (100.0%)"
-            )
-            break
+    while process.poll() is None:
+        try:
+            cancel_token.check()
+        except Cancelled:
+            _terminate_ffmpeg(process)
+            raise
+        time.sleep(0.1)

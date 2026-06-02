@@ -5,8 +5,11 @@ into segments and processing independently.
 """
 import re
 import subprocess
+import time
 from pathlib import Path
-from typing import Any, Callable, Optional
+from typing import Callable, Optional
+
+from audio_to_subs.core.cancel import Cancelled, CancelToken
 
 MAX_AUDIO_LENGTH = 900  # 15 minutes in seconds
 OVERLAP = 2  # 2-second overlap to preserve context at boundaries
@@ -14,6 +17,7 @@ OVERLAP = 2  # 2-second overlap to preserve context at boundaries
 
 class AudioSplitterError(Exception):
     """Raised when audio splitting fails."""
+
     pass
 
 
@@ -33,18 +37,114 @@ def get_audio_duration(audio_path: str) -> float:
         result = subprocess.run(
             [
                 "ffprobe",
-                "-v", "error",
-                "-show_entries", "format=duration",
-                "-of", "default=noprint_wrappers=1:nokey=1:nokey=1",
-                audio_path
+                "-v",
+                "error",
+                "-show_entries",
+                "format=duration",
+                "-of",
+                "default=noprint_wrappers=1:nokey=1",
+                audio_path,
             ],
             capture_output=True,
             text=True,
-            check=True
+            check=True,
         )
         return float(result.stdout.strip())
     except (subprocess.CalledProcessError, ValueError) as e:
         raise AudioSplitterError(f"Failed to get audio duration: {str(e)}") from e
+
+
+def _terminate_ffmpeg(process: subprocess.Popen) -> None:
+    """Terminate FFmpeg process and wait for cleanup.
+
+    Args:
+        process: The FFmpeg subprocess to terminate
+    """
+    import logging
+
+    logger = logging.getLogger(__name__)
+    logger.info("Terminating FFmpeg process due to cancellation")
+    process.terminate()
+    try:
+        process.wait(timeout=2)
+    except subprocess.TimeoutExpired:
+        logger.warning("FFmpeg did not terminate in time, killing")
+        process.kill()
+        process.wait()
+
+
+def _parse_ffmpeg_progress(
+    stdout,
+    progress_callback: Callable[[str], None],
+    total_duration: float,
+    operation_name: str,
+    process: subprocess.Popen,
+    cancel_token: Optional[CancelToken] = None,
+) -> None:
+    """Parse FFmpeg progress output and call callback with formatted progress."""
+    pattern_us = re.compile(r"^out_time_us=(\d+)$")
+    pattern_time = re.compile(r"^out_time=([0-9:.]+)$")
+
+    def parse_timecode(tc: str) -> float:
+        h, m, s = tc.split(":")
+        return int(h) * 3600 + int(m) * 60 + float(s)
+
+    last_percent = -1
+    try:
+        for raw_line in stdout or []:
+            # Check for cancellation before processing each line
+            if cancel_token is not None:
+                try:
+                    cancel_token.check()
+                except Cancelled:
+                    _terminate_ffmpeg(process)
+                    raise
+
+            line = raw_line.strip()
+            time_s: Optional[float] = None
+
+            m_us = pattern_us.match(line)
+            if m_us:
+                us = int(m_us.group(1))
+                time_s = us / 1_000_000.0
+            else:
+                m_time = pattern_time.match(line)
+                if m_time:
+                    time_s = parse_timecode(m_time.group(1))
+
+            if time_s is not None and total_duration > 0:
+                percentage = min(100.0, (time_s / total_duration) * 100.0)
+                if int(percentage) != last_percent:
+                    last_percent = int(percentage)
+                    progress_callback(
+                        f"{operation_name}: {time_s:.1f} / {total_duration:.1f}s ({percentage:.1f}%)"
+                    )
+
+            if line == "progress=end" and total_duration > 0:
+                progress_callback(
+                    f"{operation_name}: {total_duration:.1f} / {total_duration:.1f}s (100.0%)"
+                )
+                break
+    except Cancelled:
+        raise
+
+
+def _check_cancel_periodically(
+    process: subprocess.Popen, cancel_token: CancelToken
+) -> None:
+    """Check for cancellation periodically while process runs.
+
+    Args:
+        process: The subprocess to monitor
+        cancel_token: The cancellation token to check
+    """
+    while process.poll() is None:
+        try:
+            cancel_token.check()
+        except Cancelled:
+            _terminate_ffmpeg(process)
+            raise
+        time.sleep(0.1)
 
 
 def split_audio(
@@ -52,6 +152,7 @@ def split_audio(
     output_dir: str,
     max_length: int = MAX_AUDIO_LENGTH,
     progress_callback: Optional[Callable[[str], None]] = None,
+    cancel_token: Optional[CancelToken] = None,
 ) -> list[str]:
     """Split audio file into segments.
 
@@ -60,12 +161,14 @@ def split_audio(
         output_dir: Directory to save split files
         max_length: Maximum length of each segment in seconds
         progress_callback: Optional callback for progress updates per segment
+        cancel_token: Optional cancellation token for cooperative cancellation
 
     Returns:
         List of paths to split audio files in order
 
     Raises:
         AudioSplitterError: If splitting fails
+        Cancelled: If cancellation was requested via cancel_token
     """
     try:
         duration = get_audio_duration(audio_path)
@@ -90,14 +193,22 @@ def split_audio(
         segments: list[str] = []
 
         for idx, (start_time, end_time) in enumerate(segments_bounds, start=1):
+            # Check for cancellation before each segment
+            if cancel_token is not None:
+                cancel_token.check()
+
             output_file = output_dir_path / f"segment_{idx:03d}.wav"
 
             ffmpeg_cmd = [
                 "ffmpeg",
-                "-i", audio_path,
-                "-ss", str(start_time),
-                "-to", str(end_time),
-                "-c", "copy",
+                "-i",
+                audio_path,
+                "-ss",
+                str(start_time),
+                "-to",
+                str(end_time),
+                "-c",
+                "copy",
                 "-y",
             ]
             if progress_callback:
@@ -119,7 +230,11 @@ def split_audio(
                     progress_callback,
                     seg_duration,
                     f"Splitting segment {idx}/{total_segments}",
+                    process,
+                    cancel_token,
                 )
+            elif cancel_token:
+                _check_cancel_periodically(process, cancel_token)
 
             _, stderr = process.communicate()
             if process.returncode != 0:
@@ -133,52 +248,11 @@ def split_audio(
         return segments
 
     except subprocess.CalledProcessError as e:
-        raise AudioSplitterError(f"FFmpeg error during splitting: {e.stderr.decode()}") from e
+        raise AudioSplitterError(
+            f"FFmpeg error during splitting: {e.stderr.decode()}"
+        ) from e
     except Exception as e:
         raise AudioSplitterError(f"Audio splitting failed: {str(e)}") from e
-
-
-def _parse_ffmpeg_progress(
-    stdout,
-    progress_callback: Callable[[str], None],
-    total_duration: float,
-    operation_name: str,
-) -> None:
-    """Parse FFmpeg progress output and call callback with formatted progress."""
-    pattern_us = re.compile(r'^out_time_us=(\d+)$')
-    pattern_time = re.compile(r'^out_time=([0-9:.]+)$')
-
-    def parse_timecode(tc: str) -> float:
-        h, m, s = tc.split(":")
-        return int(h) * 3600 + int(m) * 60 + float(s)
-
-    last_percent = -1
-    for raw_line in stdout or []:
-        line = raw_line.strip()
-        time_s: Optional[float] = None
-
-        m_us = pattern_us.match(line)
-        if m_us:
-            us = int(m_us.group(1))
-            time_s = us / 1_000_000.0
-        else:
-            m_time = pattern_time.match(line)
-            if m_time:
-                time_s = parse_timecode(m_time.group(1))
-
-        if time_s is not None and total_duration > 0:
-            percentage = min(100.0, (time_s / total_duration) * 100.0)
-            if int(percentage) != last_percent:
-                last_percent = int(percentage)
-                progress_callback(
-                    f"{operation_name}: {time_s:.1f} / {total_duration:.1f}s ({percentage:.1f}%)"
-                )
-
-        if line == "progress=end" and total_duration > 0:
-            progress_callback(
-                f"{operation_name}: {total_duration:.1f} / {total_duration:.1f}s (100.0%)"
-            )
-            break
 
 
 def needs_splitting(audio_path: str, max_length: int = MAX_AUDIO_LENGTH) -> bool:

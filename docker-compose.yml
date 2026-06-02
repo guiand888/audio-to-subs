@@ -94,6 +94,64 @@ services:
     # User
     user: "1000:1000"
 
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    image: audio-to-subs:worker
+    container_name: audio-to-subs-worker
+    
+    # Environment variables
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
+      - REDIS_URL=redis://redis:6379/0
+      - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
+      - ADMIN_USERNAME=admin
+      - ADMIN_PASSWORD=admin
+      - DEBUG=true
+    
+    # Secrets for sensitive data
+    secrets:
+      - mistral_api_key
+    
+    # Volume mounts (shared with backend)
+    volumes:
+      - audio-to-subs-data:/data
+      - ./videos:/input:ro
+      - ./subtitles:/output:rw
+      - /tmp/audio-to-subs
+    
+    # Dependencies
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    
+    # Resource limits
+    deploy:
+      resources:
+        limits:
+          cpus: '1.0'
+          memory: 1G
+        reservations:
+          cpus: '0.5'
+          memory: 512M
+    
+    # Restart policy
+    restart: unless-stopped
+    
+    # Security options
+    security_opt:
+      - no-new-privileges:true
+    
+    # User
+    user: "1000:1000"
+    
+    # Command
+    command: python -m audio_to_subs.worker
+
 volumes:
   audio-to-subs-data:
     driver: local
@@ -102,4 +160,6 @@ volumes:
 
 secrets:
   admin_password:
+    external: true
+  mistral_api_key:
     external: true
