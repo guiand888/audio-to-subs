@@ -39,7 +39,7 @@ export function AppLayout() {
 
   // Redirect to /login if not authenticated
   useEffect(() => {
-    if (!isLoading && user === null) {
+    if (!isLoading && !user) {
       void navigate({
         to: "/login",
         search: { next: pathname },
