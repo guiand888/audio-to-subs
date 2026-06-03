@@ -12,6 +12,7 @@ from sqlalchemy.orm import joinedload
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.settings import Settings
 from audio_to_subs.bazarr.pathmap import PathMap
+from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
 from audio_to_subs.db.models import (
     BazarrCache,
     Job,
@@ -309,6 +310,28 @@ async def create_job(
         resolved = os.path.abspath(media_path)
         logger.warning(f"Potential path traversal in media_path: {media_path}")
 
+    # Validate media_path against configured root paths
+    movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
+    tv_root = getattr(settings, "TV_ROOT_PATH", None)
+    
+    is_valid, error_msg = validate_media_path(media_path, movies_root, tv_root)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid media path: {error_msg}",
+        )
+
+    # Auto-generate output_path if not provided and subtitles_same_directory is enabled
+    subtitles_same_dir = getattr(settings, "SUBTITLES_SAME_DIRECTORY", True)
+    output_path = job_request.output_path
+    if not output_path and subtitles_same_dir:
+        output_path = generate_output_path(
+            media_path,
+            job_request.language_code,
+            job_request.output_format,
+            subtitles_same_dir,
+        )
+
     # Use resolved source_ref
     source_ref = resolved_source_ref or job_request.source_ref
 
@@ -357,7 +380,7 @@ async def create_job(
         source=job_request.source,
         source_ref=source_ref,
         media_path=media_path,
-        output_path=job_request.output_path,
+        output_path=output_path,
         language_code=language_code,
         output_format=output_format,
         priority=job_request.priority,
