@@ -284,14 +284,15 @@ class TestSplitAudio:
             "progress=end\n"
         ]
         
-        # Act
+        # Act — process= is required since the cancel-token refactor
         _parse_ffmpeg_progress(
             iter(stdout_lines),
             mock_callback,
             360.0,  # 6 minutes total
-            "Splitting audio"
+            "Splitting audio",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 2
         assert any("50.0%" in msg for msg in progress_messages)
@@ -429,9 +430,10 @@ class TestAudioSplitterIntegration:
             iter(stdout_lines),
             mock_callback,
             100.0,  # 100 second total duration
-            "Splitting segment"
+            "Splitting segment",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 1
         assert any("50.0" in msg for msg in progress_messages)
@@ -439,24 +441,25 @@ class TestAudioSplitterIntegration:
     def test_parse_ffmpeg_progress_with_microseconds_only(self):
         """Test _parse_ffmpeg_progress with only microseconds pattern (no timecode)."""
         from audio_to_subs.core.audio_splitter import _parse_ffmpeg_progress
-        
+
         progress_messages = []
         def mock_callback(msg):
             progress_messages.append(msg)
-        
+
         # Simulate FFmpeg progress output with only microseconds
         stdout_lines = [
             "out_time_us=25000000\n",  # 25 seconds in microseconds
             "out_time_us=75000000\n",  # 75 seconds in microseconds
             "progress=end\n"
         ]
-        
+
         # Act
         _parse_ffmpeg_progress(
             iter(stdout_lines),
             mock_callback,
             100.0,  # 100 second total duration
-            "Splitting"
+            "Splitting",
+            process=MagicMock(),
         )
         
         # Assert

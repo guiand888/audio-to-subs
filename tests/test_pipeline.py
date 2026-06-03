@@ -9,6 +9,7 @@ from audio_to_subs.core.pipeline import Pipeline, PipelineError
 class TestPipeline:
     """Test video to subtitles pipeline."""
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -19,6 +20,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test successful end-to-end video processing."""
@@ -83,6 +85,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Audio extraction failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -93,6 +96,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test pipeline fails when transcription fails."""
@@ -117,6 +121,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -127,6 +132,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test pipeline fails when subtitle generation fails."""
@@ -166,6 +172,7 @@ class TestPipeline:
         with pytest.raises(ValueError, match="API key is required"):
             Pipeline(api_key=None)
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -176,6 +183,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test pipeline calls progress callback at each stage."""
@@ -212,6 +220,7 @@ class TestPipeline:
         # Find a call with "transcrib" in it (may be at different index depending on pipeline)
         assert any("transcrib" in call.lower() for call in calls)
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -222,6 +231,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test pipeline fails when transcription returns empty segments."""
@@ -245,6 +255,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="AI service did not return timestamp data"):
             pipeline.process_video(str(video_file), "output.srt")
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.split_audio")
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
@@ -257,6 +268,7 @@ class TestPipeline:
         mock_generator_class,
         mock_needs_split,
         mock_split_audio,
+        mock_duration,
         tmp_path,
     ):
         """Test pipeline with multiple audio segments."""
@@ -298,6 +310,7 @@ class TestPipeline:
         # Verify split_audio was called
         mock_split_audio.assert_called_once()
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -308,6 +321,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test pipeline cleans up temp files on error."""
@@ -361,6 +375,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Audio extraction failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -371,6 +386,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test TranscriptionError in _transcribe_audio_segments (line 273)."""
@@ -395,6 +411,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Transcription failed: Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
+    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
     @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
     @patch("audio_to_subs.core.pipeline.TranscriptionClient")
@@ -405,6 +422,7 @@ class TestPipeline:
         mock_transcription_class,
         mock_generator_class,
         mock_needs_split,
+        mock_duration,
         tmp_path,
     ):
         """Test SubtitleFormatError in _generate_subtitles (line 302)."""

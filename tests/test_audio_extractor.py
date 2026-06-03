@@ -334,14 +334,15 @@ class TestParseFFmpegProgress:
             "progress=end\n"
         ])
         
-        # Act
+        # Act — process= is required since d016c04 added cancel-token support
         _parse_ffmpeg_progress(
             mock_stdout,
             mock_callback,
             100.0,  # 100 second total duration
-            "Extracting audio"
+            "Extracting audio",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 1
         assert any("50.0" in msg for msg in progress_messages)
@@ -349,25 +350,26 @@ class TestParseFFmpegProgress:
     def test_parse_ffmpeg_progress_with_timecode(self):
         """Test _parse_ffmpeg_progress handles timecode pattern."""
         from audio_to_subs.core.audio_extractor import _parse_ffmpeg_progress
-        
+
         progress_messages = []
         def mock_callback(msg):
             progress_messages.append(msg)
-        
+
         # Simulate FFmpeg progress output with timecode
         mock_stdout = iter([
             "out_time=00:00:50.5\n",  # 50.5 seconds
             "progress=end\n"
         ])
-        
+
         # Act
         _parse_ffmpeg_progress(
             mock_stdout,
             mock_callback,
             100.0,  # 100 second total duration
-            "Extracting audio"
+            "Extracting audio",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 1
         assert any("50.5" in msg for msg in progress_messages)
@@ -375,22 +377,23 @@ class TestParseFFmpegProgress:
     def test_parse_ffmpeg_progress_with_progress_end(self):
         """Test _parse_ffmpeg_progress handles progress=end marker."""
         from audio_to_subs.core.audio_extractor import _parse_ffmpeg_progress
-        
+
         progress_messages = []
         def mock_callback(msg):
             progress_messages.append(msg)
-        
+
         # Simulate FFmpeg progress output with just end marker
         mock_stdout = iter([
             "progress=end\n"
         ])
-        
+
         # Act
         _parse_ffmpeg_progress(
             mock_stdout,
             mock_callback,
             100.0,
-            "Extracting audio"
+            "Extracting audio",
+            process=MagicMock(),
         )
         
         # Assert
