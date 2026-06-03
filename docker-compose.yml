@@ -27,13 +27,13 @@ services:
     # Volume mounts
     volumes:
       # Database and session data (shared with worker)
-      - audio-to-subs-data:/data
+      - audio-to-subs-data:/data:z
       # Movie files (aligned with Radarr/Bazarr)
-      - ./movies:/movies:rw
+      - ./movies:/movies:z
       # TV series files (aligned with Sonarr/Bazarr)
-      - ./tv:/tv:rw
+      - ./tv:/tv:z
       # Temporary processing
-      - /tmp/audio-to-subs
+      - /tmp/audio-to-subs:z
     
     # Ports
     ports:
@@ -74,7 +74,7 @@ services:
     
     # Persistence (optional, Redis can be stateless for our use case)
     volumes:
-      - audio-to-subs-redis-data:/data
+      - audio-to-subs-redis-data:/data:z
     
     # Health check
     healthcheck:
@@ -117,11 +117,11 @@ services:
     
     # Volume mounts (shared with backend)
     volumes:
-      - audio-to-subs-data:/data
+      - audio-to-subs-data:/data:z
       # Movie and TV files (aligned with Radarr/Sonarr/Bazarr)
-      - ./movies:/movies:rw
-      - ./tv:/tv:rw
-      - /tmp/audio-to-subs
+      - ./movies:/movies:z
+      - ./tv:/tv:z
+      - /tmp/audio-to-subs:z
     
     # Dependencies
     depends_on:

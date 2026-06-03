@@ -27,13 +27,13 @@ services:
     # Volume mounts
     volumes:
       # Database and session data (shared with worker)
-      - ./dev/testing/audio-to-subs-data:/data
+      - ./dev/testing/audio-to-subs-data:/data:z
       # Movie files (aligned with Radarr/Bazarr)
-      - ./dev/testing/movies:/movies:rw
+      - ./dev/testing/movies:/movies:z
       # TV series files (aligned with Sonarr/Bazarr)
-      - ./dev/testing/tv:/tv:rw
+      - ./dev/testing/tv:/tv:z
       # Temporary processing
-      - ./dev/testing/tmp/audio-to-subs
+      - ./dev/testing/tmp/audio-to-subs:z
 
     # Ports
     ports:
@@ -65,7 +65,7 @@ services:
     user: "1000:1000"
 
   redis:
-    image: redis:8-alpine
+    image: docker.io/redis:8-alpine
     container_name: audio-to-subs-redis
 
     # Ports
@@ -74,7 +74,7 @@ services:
 
     # Persistence (optional, Redis can be stateless for our use case)
     volumes:
-      - ./dev/testing/audio-to-subs-redis-data:/data
+      - ./dev/testing/audio-to-subs-redis-data:/data:z
 
     # Health check
     healthcheck:
@@ -117,11 +117,11 @@ services:
 
     # Volume mounts (shared with backend)
     volumes:
-      - ./dev/testing/audio-to-subs-data:/data
+      - ./dev/testing/audio-to-subs-data:/data:z
       # Movie and TV files (aligned with Radarr/Sonarr/Bazarr)
-      - ./dev/testing/movies:/movies:rw
-      - ./dev/testing/tv:/tv:rw
-      - ./dev/testing/tmp/audio-to-subs
+      - ./dev/testing/movies:/movies:z
+      - ./dev/testing/tv:/tv:z
+      - ./dev/testing/tmp/audio-to-subs:z
 
     # Dependencies
     depends_on:
@@ -182,8 +182,8 @@ services:
       - PGID=1000
       - TZ=Asia/Singapore
     volumes:
-      - ./dev/testing/sonarr/data:/config
-      - ./dev/testing/tv:/tv
+      - ./dev/testing/sonarr/data:/config:Z
+      - ./dev/testing/tv:/tv:z
 
   radarr:
     image: lscr.io/linuxserver/radarr:latest
@@ -193,8 +193,8 @@ services:
       - PGID=1000
       - TZ=Asia/Singapore
     volumes:
-      - ./dev/testing/radarr/data:/config
-      - ./dev/testing/movies:/movies
+      - ./dev/testing/radarr/data:/config:Z
+      - ./dev/testing/movies:/movies:z
 
   bazarr:
     image: lscr.io/linuxserver/bazarr:latest
@@ -204,9 +204,9 @@ services:
       - PGID=1000
       - TZ=Asia/Singapore
     volumes:
-      - ./dev/testing/bazarr/config:/config
-      - ./dev/testing/movies:/movies
-      - ./dev/testing/tv:/tv
+      - ./dev/testing/bazarr/config:/config:Z
+      - ./dev/testing/movies:/movies:z
+      - ./dev/testing/tv:/tv:z
 volumes:
   audio-to-subs-data:
     driver: local
