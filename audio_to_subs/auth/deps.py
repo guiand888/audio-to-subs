@@ -16,18 +16,31 @@ from audio_to_subs.db.session import get_async_session
 
 
 async def get_db():
-    """FastAPI dependency for async database session."""
-    async for session in get_async_session():
+    """FastAPI dependency for async database session.
+
+    Uses the configured DATABASE_URL (from settings) so tests and production
+    both point at the right database without hardcoded path fallbacks.
+    """
+    from audio_to_subs.api.settings import get_settings
+
+    async with get_async_session(get_settings().DATABASE_URL) as session:
         yield session
 
 
-async def get_session_manager_dep(
-    session_secret: Annotated[str | None, Depends(lambda: None)],
-    session_secret_file: Annotated[str | None, Depends(lambda: None)],
-) -> Any:
-    """FastAPI dependency for session manager."""
-    # These would come from settings in a real implementation
-    return get_session_manager()
+async def get_session_manager_dep() -> Any:
+    """FastAPI dependency for session manager.
+
+    Reads SESSION_SECRET / SESSION_SECRET_FILE from settings so the manager
+    is always initialised with the right secret, including in tests where
+    the env var is set but the secret file does not exist.
+    """
+    from audio_to_subs.api.settings import get_settings
+
+    settings = get_settings()
+    return get_session_manager(
+        secret=settings.SESSION_SECRET,
+        secret_file=settings.SESSION_SECRET_FILE,
+    )
 
 
 async def get_current_user(

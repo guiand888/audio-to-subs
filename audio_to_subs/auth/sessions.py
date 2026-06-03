@@ -172,18 +172,27 @@ _session_manager: SessionManager | None = None
 def get_session_manager(
     secret: str | None = None,
     secret_file: str | None = None,
-) -> SessionManager:
-    """Get or create session manager instance.
-    
+) -> "SessionManager":
+    """Get or create session manager singleton.
+
+    When called with no arguments the function falls back to the
+    ``SESSION_SECRET`` / ``SESSION_SECRET_FILE`` environment variables so
+    that routes, tests, and the lifespan all obtain a consistent instance
+    without needing to pass settings around manually.
+
     Args:
-        secret: Session secret (from env)
-        secret_file: Path to secret file (from env)
-    
+        secret: Explicit session secret string.
+        secret_file: Path to a file containing the session secret.
+
     Returns:
-        Session manager instance
+        The cached ``SessionManager`` instance.
     """
     global _session_manager
     if _session_manager is None:
+        # Fall back to env vars when no explicit values are given.
+        if secret is None and secret_file is None:
+            secret = os.environ.get("SESSION_SECRET")
+            secret_file = os.environ.get("SESSION_SECRET_FILE")
         _session_manager = SessionManager(
             secret=secret,
             secret_file=secret_file,
