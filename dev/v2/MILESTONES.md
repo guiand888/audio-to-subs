@@ -12,8 +12,9 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M2 — Worker + queue + cost | ✅ Done | 2026-06-02 | Worker, queue, pipeline cancellation, cost |
 | M3 — Bazarr + `/api/wanted` | ✅ Done | 2026-06-02 | Depends on M2 |
 | M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
-| M5 — History + Logs + Settings | ⏳ Not Started | - | Depends on M4 |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5 |
+| M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
+| M5.1 — M5 cleanup and verification | ⏳ Not Started | - | Depends on M5 |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.1 |
 
 Every milestone ends with the same quality bar:
 
@@ -155,6 +156,25 @@ Acceptance:
 - Settings page edits persist and take effect (poll interval honoured on the next tick; cost rates used for new jobs immediately).
 - Logs page surfaces the milestone messages (stage transitions, errors) for each job.
 
+## M5.1 — M5 cleanup and verification
+
+**Goal**: Clean up M5 artifacts and verify all features work end-to-end.
+
+Tasks:
+- Remove leftover ComingSoonPage.tsx from frontend
+- Update MILESTONES.md to mark M5 as complete
+- Verify all M5 API endpoints functional (/api/history, /api/logs, /api/settings, /api/jobs/{id}/notify-bazarr)
+- Verify all M5 frontend pages render correctly (/history, /logs, /settings)
+- Verify Bazarr rescan triggers on job completion
+- Run full quality suite (pytest, black, ruff, mypy)
+
+Acceptance:
+- `make frontend-preview` shows no "Coming in M5" messages
+- All M5 pages (History, Logs, Settings) fully functional
+- No unused imports or dead code from M4/M5 transition
+- All tests pass
+- Lint and format checks clean
+
 ## M6 — Polish, docs, coverage, security pass
 
 **Goal**: shippable v2.0.
@@ -185,6 +205,7 @@ The milestones are serial as listed. The following sub-tasks within a milestone 
 - M3: bazarr/client + bazarr/pathmap + api/routes/settings are independent.
 - M4: frontend pages are independent of each other once Login + Layout + auth flow exist.
 - M5: history + logs + settings pages are independent.
+- M5.1: cleanup tasks are independent.
 
 ## Definition of done (per milestone)
 
