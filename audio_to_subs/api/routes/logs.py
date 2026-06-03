@@ -25,14 +25,13 @@ global_logs_router = APIRouter(prefix="/api/logs", tags=["logs"])
 class JobLogResponse(BaseModel):
     """Response model for a job log entry."""
 
+    model_config = {"from_attributes": True}
+
     id: int
     job_id: UUID
     ts: datetime
     level: LogLevel
     message: str
-
-    class Config:
-        from_attributes = True
 
 
 class JobLogsResponse(BaseModel):

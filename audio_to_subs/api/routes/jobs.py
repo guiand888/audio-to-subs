@@ -10,7 +10,6 @@ from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.orm import joinedload
 
 from audio_to_subs.api.deps import SettingsDep, get_db
-from audio_to_subs.api.settings import Settings
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
 from audio_to_subs.db.models import (
@@ -63,6 +62,8 @@ class JobCreateRequest(BaseModel):
 class JobResponse(BaseModel):
     """Response model for a job."""
 
+    model_config = {"from_attributes": True}
+
     id: UUID
     status: JobStatus
     source: JobSource
@@ -84,9 +85,6 @@ class JobResponse(BaseModel):
     started_at: datetime | None
     finished_at: datetime | None
     updated_at: datetime
-
-    class Config:
-        from_attributes = True
 
 
 class JobListResponse(BaseModel):
@@ -269,7 +267,7 @@ async def _resolve_bazarr_source(
 async def create_job(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
     job_request: JobCreateRequest = ...,  # type: ignore
 ) -> JobResponse:
     """Create a new transcription job.
@@ -432,7 +430,7 @@ async def get_job(
 async def cancel_job(
     job_id: UUID,
     db: Annotated["AsyncSession", Depends(get_db)],
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
 ) -> JobResponse:
     """Request cancellation of a job.
 
@@ -559,7 +557,7 @@ logger = logging.getLogger(__name__)
 async def notify_bazarr(
     job_id: UUID,
     db: Annotated["AsyncSession", Depends(get_db)],
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
 ) -> dict[str, str]:
     """Trigger Bazarr rescan for a completed job.
 

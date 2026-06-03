@@ -31,6 +31,8 @@ class WantedItemType(str, Enum):
 class WantedItem(BaseModel):
     """Wanted item with job status."""
 
+    model_config = {"from_attributes": True}
+
     id: str = Field(description="Cache ID (e.g., 'movie:123' or 'episode:456')")
     kind: str = Field(description="Item kind: 'movie' or 'episode'")
     ext_id: int = Field(description="External ID (Radarr or Sonarr ID)")
@@ -50,9 +52,6 @@ class WantedItem(BaseModel):
     active_job_progress: int | None = Field(
         default=None, description="Progress percent of active job"
     )
-
-    class Config:
-        from_attributes = True
 
 
 class WantedListResponse(BaseModel):
