@@ -203,7 +203,7 @@ async def list_wanted(
             )
             job = job_result.one_or_none()
             if job:
-                active_job_status = job.status.value
+                active_job_status = job.status.value if hasattr(job.status, "value") else str(job.status)
                 active_job_progress = job.progress_percent
 
         wanted_item = WantedItem(

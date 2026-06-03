@@ -253,30 +253,32 @@ class TestBazarrClientRequests:
 
 
 class TestRescanStubs:
-    """Test rescan stub methods."""
+    """Test rescan methods (previously stubs, now real HTTP calls)."""
 
     @pytest.mark.asyncio
-    async def test_rescan_movie_stub(self, mock_client, caplog):
-        """Test that rescan_movie logs a warning."""
-        import logging
-        
-        logger = logging.getLogger("audio_to_subs.bazarr.client")
-        logger.setLevel(logging.WARNING)
-        
-        with caplog.at_level(logging.WARNING, logger=logger.name):
-            result = await mock_client.rescan_movie(123)
-            assert result is None
-            assert "rescan_movie endpoint not yet wired" in caplog.text
+    async def test_rescan_movie_stub(self, respx_mock):
+        """Test that rescan_movie returns True on 202 response."""
+        respx_mock.post("http://test-bazarr:6767/api/movies/123/rescan").mock(
+            return_value=httpx.Response(202)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.rescan_movie(123)
+            assert result is True
 
     @pytest.mark.asyncio
-    async def test_rescan_episode_stub(self, mock_client, caplog):
-        """Test that rescan_episode logs a warning."""
-        import logging
-        
-        logger = logging.getLogger("audio_to_subs.bazarr.client")
-        logger.setLevel(logging.WARNING)
-        
-        with caplog.at_level(logging.WARNING, logger=logger.name):
-            result = await mock_client.rescan_episode(456)
-            assert result is None
-            assert "rescan_episode endpoint not yet wired" in caplog.text
+    async def test_rescan_episode_stub(self, respx_mock):
+        """Test that rescan_episode returns True on 202 response."""
+        respx_mock.post("http://test-bazarr:6767/api/episodes/456/rescan").mock(
+            return_value=httpx.Response(202)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.rescan_episode(456)
+            assert result is True

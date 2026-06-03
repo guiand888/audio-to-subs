@@ -6,6 +6,7 @@ from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
+from sqlalchemy import select
 
 from audio_to_subs.bazarr.client import BazarrClient
 from audio_to_subs.bazarr.pathmap import PathMap
@@ -314,10 +315,10 @@ class TestDeleteStale:
 
     @pytest.mark.asyncio
     async def test_delete_stale_keeps_recent_entries(self, mock_db_session):
-        """Test that recent entries are kept."""
-        # Create recent entry
-        recent_time = datetime.now(timezone.utc)
-        
+        """Test that entries polled AFTER started_at are kept."""
+        # started_at is set in the past so that recent_entry.last_polled > started_at.
+        started_at = datetime.now(timezone.utc) - timedelta(seconds=5)
+
         recent_entry = BazarrCache(
             id="movie:3",
             kind="movie",
@@ -326,15 +327,13 @@ class TestDeleteStale:
             media_path="/path.mkv",
             has_any_subs=False,
             missing_subtitles=[],
-            last_polled=recent_time,
+            last_polled=datetime.now(timezone.utc),  # after started_at
         )
         mock_db_session.add(recent_entry)
         await mock_db_session.commit()
-        
-        # Try to delete stale entries
-        started_at = datetime.now(timezone.utc)
+
         deleted_count = await _delete_stale(mock_db_session, started_at)
-        
+
         assert deleted_count == 0
 
 
@@ -404,12 +403,18 @@ class TestPollerIntegration:
 
     @pytest.mark.asyncio
     async def test_stop_poller(self):
-        """Test stop_poller function."""
+        """Test stop_poller cancels the running task and clears the state."""
         mock_app = Mock()
         mock_app.state = Mock()
-        mock_app.state.poller_task = AsyncMock()
-        
+
+        # Use a real asyncio task so stop_poller can call .cancel() and await it.
+        async def _dummy():
+            await asyncio.sleep(10)
+
+        task = asyncio.create_task(_dummy())
+        mock_app.state.poller_task = task
+
         await stop_poller(mock_app)
-        
-        mock_app.state.poller_task.cancel.assert_called_once()
+
+        assert task.cancelled()
         assert mock_app.state.poller_task is None

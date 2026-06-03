@@ -186,8 +186,9 @@ async def _calculate_stats(
         if job.audio_duration_seconds is not None:
             total_duration += job.audio_duration_seconds
 
-        # Count by status
-        status_str = job.status.value
+        # Count by status — SQLAlchemy returns raw strings for String(20) columns;
+        # use .value when the attribute holds an enum, fall back to str() otherwise.
+        status_str = job.status.value if hasattr(job.status, "value") else str(job.status)
         count_by_status[status_str] = count_by_status.get(status_str, 0) + 1
 
         # Count by language
@@ -197,7 +198,7 @@ async def _calculate_stats(
             )
 
         # Count by source
-        source_str = job.source.value
+        source_str = job.source.value if hasattr(job.source, "value") else str(job.source)
         count_by_source[source_str] = count_by_source.get(source_str, 0) + 1
 
     num_jobs = len(all_jobs)
