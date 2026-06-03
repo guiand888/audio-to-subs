@@ -584,7 +584,12 @@ async def notify_bazarr(
             detail=f"Job {job_id} not found",
         )
 
-    # Check if Bazarr is configured
+    # Skip manual jobs immediately — Bazarr config is irrelevant for them.
+    if job.source not in (JobSource.BAZARR_MOVIE, JobSource.BAZARR_EPISODE):
+        logger.info(f"Job {job_id} is manual source, skipping Bazarr rescan")
+        return {"status": "skipped", "reason": "Manual job has no Bazarr source"}
+
+    # Check if Bazarr is configured (needed only for Bazarr-sourced jobs)
     bazarr_url = getattr(settings, "BAZARR_URL", None)
     bazarr_api_key = getattr(settings, "BAZARR_API_KEY", None)
 
@@ -595,7 +600,7 @@ async def notify_bazarr(
         )
         return {"status": "skipped", "reason": "Bazarr not configured"}
 
-    # Only trigger rescan for Bazarr-sourced jobs
+    # Trigger rescan for Bazarr-sourced jobs
     if job.source == JobSource.BAZARR_MOVIE:
         logger.info(f"Triggering Bazarr rescan for movie job {job_id}")
         try:
@@ -641,6 +646,6 @@ async def notify_bazarr(
             return {"status": "failed", "error": str(e)}
 
     else:
-        # Manual job - no Bazarr source to rescan
-        logger.info(f"Job {job_id} is manual source, skipping Bazarr rescan")
-        return {"status": "skipped", "reason": "Manual job has no Bazarr source"}
+        # Unknown Bazarr source type — shouldn't happen given the enum, but guard it
+        logger.warning(f"Unhandled source {job.source!r} for job {job_id}")
+        return {"status": "skipped", "reason": f"Unhandled source: {job.source}"}
