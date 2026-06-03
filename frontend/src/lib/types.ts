@@ -141,6 +141,41 @@ export interface LogsPage {
   total: number
 }
 
+// Global logs response
+export interface GlobalLogsResponse {
+  logs: LogEntry[]
+  total: number
+}
+
+// Logs filters
+export interface LogsFilters {
+  job_id?: string
+  level_filter?: LogLevel
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
+
+// Settings
+export interface SettingsFormData {
+  mistral_model: string
+  mistral_rate_usd_per_minute: number
+  mistral_input_token_rate_usd: number | null
+  mistral_output_token_rate_usd: number | null
+  bazarr_poll_interval: number
+  bazarr_track_no_subs: boolean
+  path_mappings: Array<{ from: string; to: string }>
+  default_language: string
+  default_output_format: OutputFormat
+}
+
+// Path mapping
+export interface PathMapping {
+  from: string
+  to: string
+}
+
 // --------------- SSE events ---------------
 // The backend emits unnamed SSE `message` events. The JSON payload discriminates
 // on the `event` field. Do NOT use named EventSource listeners.
@@ -156,3 +191,34 @@ export type SseEventData =
     }
   | { event: "cancel"; job_id: string }
   | { event: "done"; job_id: string; status: string; error?: string }
+
+// --------------- History ---------------
+
+export interface HistoryStats {
+  total_jobs: number
+  total_cost_usd: number
+  total_duration_seconds: number
+  average_cost_usd: number
+  average_duration_seconds: number
+  count_by_status: Record<string, number>
+  count_by_language: Record<string, number>
+  count_by_source: Record<string, number>
+}
+
+export interface HistoryResponse {
+  jobs: JobResponse[]
+  stats: HistoryStats
+  total: number
+  limit: number
+  offset: number
+}
+
+export interface HistoryFilters {
+  status_filter?: JobStatus[]
+  source_filter?: JobSource
+  language_filter?: string
+  since?: string
+  until?: string
+  limit?: number
+  offset?: number
+}
