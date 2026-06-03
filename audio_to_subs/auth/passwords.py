@@ -1,17 +1,17 @@
 """Password hashing using argon2."""
 
-from argon2 import PasswordHasher
+from argon2 import PasswordHasher, Type
 from argon2.exceptions import VerifyMismatchError
 
 # Password hasher with safe defaults
-# id = argon2id, m=64 MiB, t=3, p=1
+# argon2id, m=64 MiB, t=3, p=1
 _PH = PasswordHasher(
     time_cost=3,
     memory_cost=65536,  # 64 MiB
     parallelism=1,
     hash_len=32,
     salt_len=16,
-    type=2,  # argon2id
+    type=Type.ID,
 )
 
 
@@ -49,15 +49,14 @@ def verify_password(plain: str, hashed: str) -> bool:
 
 def needs_rehash(hashed: str) -> bool:
     """Check if a password hash needs to be rehashed with current parameters.
-    
+
     Args:
         hashed: Stored argon2 hash
-    
+
     Returns:
-        True if hash should be upgraded
+        True if hash should be upgraded, False otherwise
     """
-    try:
-        _PH.check_needs_rehash(hashed)
-        return True
-    except Exception:
-        return False
+    # check_needs_rehash returns a bool; it does not raise.  The previous
+    # try/except always returned True (on success) which caused a rehash on
+    # every login.
+    return _PH.check_needs_rehash(hashed)
