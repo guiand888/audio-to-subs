@@ -530,3 +530,96 @@ async def delete_job(
 # Import logging for use in functions
 import logging
 logger = logging.getLogger(__name__)
+
+
+@router.post("/{job_id}/notify-bazarr", status_code=status.HTTP_202_ACCEPTED)
+async def notify_bazarr(
+    job_id: UUID,
+    db: Annotated["AsyncSession", Depends(get_db)],
+    settings: Settings = Depends(SettingsDep),
+) -> dict[str, str]:
+    """Trigger Bazarr rescan for a completed job.
+
+    This endpoint triggers a rescan in Bazarr for the source media of a job.
+    It's a best-effort operation that runs asynchronously.
+
+    For bazarr_movie jobs: triggers rescan for the Radarr movie
+    For bazarr_episode jobs: triggers rescan for the Sonarr episode
+    For manual jobs: returns 202 without action (no Bazarr source)
+
+    Returns 202 Accepted in all cases - the rescan is best-effort.
+    """
+    logger = logging.getLogger(__name__)
+
+    # Get the job
+    result = await db.execute(
+        select(Job).where(Job.id == job_id)
+    )
+    job = result.scalar_one_or_none()
+
+    if job is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Job {job_id} not found",
+        )
+
+    # Check if Bazarr is configured
+    bazarr_url = getattr(settings, "BAZARR_URL", None)
+    bazarr_api_key = getattr(settings, "BAZARR_API_KEY", None)
+
+    if not bazarr_url or not bazarr_api_key:
+        logger.info(
+            f"Bazarr not configured (URL or API key missing), "
+            f"skipping rescan for job {job_id}"
+        )
+        return {"status": "skipped", "reason": "Bazarr not configured"}
+
+    # Only trigger rescan for Bazarr-sourced jobs
+    if job.source == JobSource.BAZARR_MOVIE:
+        logger.info(f"Triggering Bazarr rescan for movie job {job_id}")
+        try:
+            from audio_to_subs.bazarr.client import BazarrClient
+
+            client = BazarrClient(
+                base_url=bazarr_url,
+                api_key=bazarr_api_key,
+            )
+
+            if job.source_ref:
+                radarr_id = int(job.source_ref)
+                await client.rescan_movie(radarr_id)
+                logger.info(f"Triggered Bazarr rescan for movie {radarr_id}")
+
+            await client.close()
+            return {"status": "triggered", "source": "bazarr_movie", "source_ref": job.source_ref}
+
+        except Exception as e:
+            logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    elif job.source == JobSource.BAZARR_EPISODE:
+        logger.info(f"Triggering Bazarr rescan for episode job {job_id}")
+        try:
+            from audio_to_subs.bazarr.client import BazarrClient
+
+            client = BazarrClient(
+                base_url=bazarr_url,
+                api_key=bazarr_api_key,
+            )
+
+            if job.source_ref:
+                sonarr_episode_id = int(job.source_ref)
+                await client.rescan_episode(sonarr_episode_id)
+                logger.info(f"Triggered Bazarr rescan for episode {sonarr_episode_id}")
+
+            await client.close()
+            return {"status": "triggered", "source": "bazarr_episode", "source_ref": job.source_ref}
+
+        except Exception as e:
+            logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
+            return {"status": "failed", "error": str(e)}
+
+    else:
+        # Manual job - no Bazarr source to rescan
+        logger.info(f"Job {job_id} is manual source, skipping Bazarr rescan")
+        return {"status": "skipped", "reason": "Manual job has no Bazarr source"}
