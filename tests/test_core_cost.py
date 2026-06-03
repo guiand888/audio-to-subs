@@ -84,9 +84,11 @@ class TestExtractUsage:
         assert result is None
 
     def test_extract_empty_response(self) -> None:
-        """Test extraction from empty response."""
-        mock_response = Mock()
-        
+        """Test extraction from a response with no recognisable usage attribute."""
+        # spec=[] ensures the mock has NO attributes at all, so extract_usage
+        # cannot find .usage, .model_dump, or __dict__["usage"] and returns None.
+        mock_response = Mock(spec=[])
+
         result = extract_usage(mock_response)
         assert result is None
 
