@@ -7,7 +7,7 @@ SQLAlchemy 2.x ORM.
 from typing import AsyncGenerator
 
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # WAL pragmas to apply on every new connection
@@ -26,10 +26,10 @@ class Base(DeclarativeBase):
 
 
 # Async engine for FastAPI
-_async_engine: create_async_engine | None = None
+_async_engine: AsyncEngine | None = None
 
 
-def get_async_engine(dsn: str) -> create_async_engine:
+def get_async_engine(dsn: str) -> AsyncEngine:
     """Create and return async SQLAlchemy engine with WAL pragmas.
     
     Args:
@@ -45,13 +45,25 @@ def get_async_engine(dsn: str) -> create_async_engine:
     return _async_engine
 
 
-def _configure_wal_pragmas_async(engine: create_async_engine) -> None:
+def _configure_wal_pragmas_async(engine: AsyncEngine) -> None:
     """Configure WAL pragmas on async engine connections."""
 
     @event.listens_for(engine.sync_engine, "connect")
-    def _on_connect(connection):
+    def _on_connect(dbapi_connection, connection_record):
+        # Disable pysqlite's implicit transaction management so we can emit our
+        # own BEGIN IMMEDIATE below. Without this, transactions start DEFERRED:
+        # a SELECT-then-UPDATE acquires a read lock first, then fails instantly
+        # with SQLITE_BUSY on the read->write upgrade (busy_timeout does not
+        # apply to lock upgrades). See sqlite "database is locked" gotcha.
+        dbapi_connection.isolation_level = None
         for key, value in WAL_PRAGMAS.items():
-            connection.execute(f"PRAGMA {key} = {value}")
+            dbapi_connection.execute(f"PRAGMA {key} = {value}")
+
+    @event.listens_for(engine.sync_engine, "begin")
+    def _on_begin(conn):
+        # Acquire the write lock up front; busy_timeout then makes concurrent
+        # writers wait politely instead of erroring.
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
 
 
 # Sync engine for worker
@@ -80,16 +92,22 @@ def _configure_wal_pragmas_sync(engine):
     """Configure WAL pragmas on sync engine connections."""
 
     @event.listens_for(engine, "connect")
-    def _on_connect(connection):
+    def _on_connect(dbapi_connection, connection_record):
+        # See _configure_wal_pragmas_async for rationale.
+        dbapi_connection.isolation_level = None
         for key, value in WAL_PRAGMAS.items():
-            connection.execute(f"PRAGMA {key} = {value}")
+            dbapi_connection.execute(f"PRAGMA {key} = {value}")
+
+    @event.listens_for(engine, "begin")
+    def _on_begin(conn):
+        conn.exec_driver_sql("BEGIN IMMEDIATE")
 
 
 # Async session factory
 _async_sessionmaker: async_sessionmaker | None = None
 
 
-def get_async_sessionmaker(engine: create_async_engine) -> async_sessionmaker:
+def get_async_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
     """Create and return async session factory.
     
     Args:

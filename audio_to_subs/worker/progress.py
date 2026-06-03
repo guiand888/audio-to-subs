@@ -48,13 +48,26 @@ class ProgressBridge:
     redis: "Redis"
     job_id: UUID
     token: CancelToken
+    loop: "asyncio.AbstractEventLoop"
 
     _last_percent: int = field(default=0, init=False)
     _last_db_update: float = field(default=0.0, init=False)
     _last_stage: Optional[str] = field(default=None, init=False)
     _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
-    async def on_event(self, event: ProgressEvent) -> None:
+    def on_event(self, event: ProgressEvent) -> None:
+        """Synchronous progress callback for the pipeline.
+
+        The pipeline runs in a worker thread (via asyncio.to_thread) and invokes
+        this callback synchronously. DB and Redis writes must happen on the
+        event loop, so we marshal the async handler back onto it. Fire-and-forget
+        is intentional: progress is best-effort and must never block or break the
+        job; the debounce + lock in ``_handle`` keep writes ordered and
+        rate-limited.
+        """
+        asyncio.run_coroutine_threadsafe(self._handle(event), self.loop)
+
+    async def _handle(self, event: ProgressEvent) -> None:
         """Handle a structured progress event from the pipeline.
 
         Performs the following actions:

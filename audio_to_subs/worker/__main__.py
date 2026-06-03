@@ -28,8 +28,7 @@ from audio_to_subs.api.settings import Settings, get_settings
 from audio_to_subs.db.session import get_async_session
 from audio_to_subs.queue_.claim import claim_one
 from audio_to_subs.queue_.reaper import reap_stale_running
-from audio_to_subs.worker.runner import run_job, WorkerDeps, JobResult
-from audio_to_subs.worker.progress import ProgressBridge
+from audio_to_subs.worker.runner import run_job, persist_result, WorkerDeps
 
 logger = logging.getLogger(__name__)
 
@@ -65,7 +64,7 @@ class Worker:
 
         # Run reaper on startup to clean up any stale jobs
         async with get_async_session(self._settings.DATABASE_URL) as session:
-            reaped = reap_stale_running(session, stale_seconds=120)
+            reaped = await reap_stale_running(session, stale_seconds=120)
             logger.info(f"Reaper cleanup: {reaped} stale jobs requeued")
 
     async def shutdown(self) -> None:
@@ -86,53 +85,52 @@ class Worker:
         if self._settings is None or self._redis is None:
             raise RuntimeError("Worker not started. Call startup() first.")
 
+        dsn = self._settings.DATABASE_URL
+
         while not self._shutdown:
             try:
-                async with get_async_session(self._settings.DATABASE_URL) as session:
-                    # Try to claim a job
-                    claimed = claim_one(session, self._worker_id)
+                # Claim in a short-lived session so the SQLite write lock is
+                # released immediately whether or not a job was available.
+                async with get_async_session(dsn) as session:
+                    claimed = await claim_one(session, self._worker_id)
 
-                    if claimed is not None:
-                        logger.info(
-                            f"Worker {self._worker_id} claimed job {claimed.id}"
+                if claimed is None:
+                    # No job: sleep OUTSIDE any session so we never hold the
+                    # write lock while idle.
+                    logger.debug(f"Worker {self._worker_id} waiting for jobs...")
+                    await asyncio.sleep(1)
+                    continue
+
+                logger.info(f"Worker {self._worker_id} claimed job {claimed.id}")
+
+                mistral_api_key = self._settings.mistral_api_key
+
+                # Run the job in its own session. All writes inside (progress,
+                # result) commit per-event, keeping every transaction short.
+                async with get_async_session(dsn) as session:
+                    if mistral_api_key is None:
+                        logger.error(
+                            "MISTRAL_API_KEY not configured. Cannot run job."
                         )
-
-                        # Get Mistral API key
-                        mistral_api_key = self._settings.mistral_api_key
-                        if mistral_api_key is None:
-                            logger.error(
-                                "MISTRAL_API_KEY not configured. Cannot run job."
-                            )
-                            # Mark job as failed
-                            await self._mark_job_failed(
-                                session, claimed.id, "Missing Mistral API key"
-                            )
-                            continue
-
-                        # Build worker deps
-                        deps = WorkerDeps(
-                            session=session,
-                            redis=self._redis,
-                            settings=self._settings,
-                            mistral_api_key=mistral_api_key,
+                        await self._mark_job_failed(
+                            session, claimed.id, "Missing Mistral API key"
                         )
+                        continue
 
-                        # Run the job
-                        result = await run_job(claimed, deps)
+                    deps = WorkerDeps(
+                        session=session,
+                        redis=self._redis,
+                        settings=self._settings,
+                        mistral_api_key=mistral_api_key,
+                    )
 
-                        # Persist result
-                        await self._persist_job_result(session, claimed.id, result)
+                    result = await run_job(claimed, deps)
+                    await persist_result(session, claimed.id, result)
 
-                        logger.info(
-                            f"Worker {self._worker_id} completed job {claimed.id}: {result.status}"
-                        )
-
-                    else:
-                        # No job available, wait briefly before retrying
-                        logger.debug(
-                            f"Worker {self._worker_id} waiting for jobs..."
-                        )
-                        await asyncio.sleep(1)
+                logger.info(
+                    f"Worker {self._worker_id} completed job {claimed.id}: "
+                    f"{result.status}"
+                )
 
             except Exception as e:
                 logger.error(f"Worker {self._worker_id} error: {e}")
@@ -149,34 +147,6 @@ class Worker:
             "error_message=:error WHERE id=:id"
         )
         await session.execute(update_stmt, {"error": error_message, "id": str(job_id)})
-        await session.commit()
-
-    async def _persist_job_result(
-        self, session: Any, job_id: Any, result: JobResult
-    ) -> None:
-        """Persist job result to database."""
-        from sqlalchemy import text
-
-        update_fields = {
-            "status": result.status.value,
-            "finished_at": "CURRENT_TIMESTAMP",
-            "updated_at": "CURRENT_TIMESTAMP",
-        }
-
-        if result.error_message:
-            update_fields["error_message"] = result.error_message
-        if result.audio_duration_seconds is not None:
-            update_fields["audio_duration_seconds"] = result.audio_duration_seconds
-        if result.mistral_usage_json is not None:
-            update_fields["mistral_usage_json"] = result.mistral_usage_json
-        if result.estimated_cost_usd is not None:
-            update_fields["estimated_cost_usd"] = result.estimated_cost_usd
-
-        set_clause = ", ".join([f"{k} = :{k}" for k in update_fields.keys()])
-        update_stmt = text(f"UPDATE jobs SET {set_clause} WHERE id = :job_id")
-
-        params = {**update_fields, "job_id": str(job_id)}
-        await session.execute(update_stmt, params)
         await session.commit()
 
     async def run(self) -> None:

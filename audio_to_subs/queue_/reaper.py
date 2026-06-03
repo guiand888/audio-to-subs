@@ -14,11 +14,11 @@ from sqlalchemy.exc import IntegrityError
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
-def reap_stale_running(
-    session: "Session",
+async def reap_stale_running(
+    session: "AsyncSession",
     stale_seconds: int = 120,
     busy_timeout_ms: int = 5000,
 ) -> int:
@@ -43,9 +43,6 @@ def reap_stale_running(
         Exception: If database operations fail
     """
     try:
-        # Set busy timeout for WAL mode concurrent access
-        session.execute(text(f"PRAGMA busy_timeout = {busy_timeout_ms}"))
-
         # Compute the stale threshold
         stale_threshold = datetime.utcnow() - timedelta(seconds=stale_seconds)
 
@@ -65,7 +62,7 @@ def reap_stale_running(
             RETURNING id
         """)
 
-        result = session.execute(
+        result = await session.execute(
             reap_stmt,
             {"stale_threshold": stale_threshold.isoformat()},
         )
@@ -74,18 +71,18 @@ def reap_stale_running(
         count = len(reaped_ids)
 
         if count > 0:
-            session.commit()
+            await session.commit()
             logger.info(f"Reaped {count} stale running jobs: {reaped_ids}")
         else:
-            session.rollback()
+            await session.rollback()
 
         return count
 
     except IntegrityError:
-        session.rollback()
+        await session.rollback()
         logger.error("Integrity error during reaping")
         return 0
     except Exception as e:
-        session.rollback()
+        await session.rollback()
         logger.error(f"Failed to reap stale jobs: {e}")
         raise

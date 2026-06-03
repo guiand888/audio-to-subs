@@ -141,15 +141,19 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
     """
     job_id = claimed.id
     token = CancelToken()
+    loop = asyncio.get_running_loop()
 
     logger.info(f"Starting job {job_id}: {claimed.media_path}")
 
-    # Create progress bridge
+    # Create progress bridge. The pipeline runs in a thread and calls
+    # bridge.on_event synchronously; the bridge marshals DB/Redis writes back
+    # onto this loop.
     bridge = ProgressBridge(
         session=deps.session,
         redis=deps.redis,
         job_id=job_id,
         token=token,
+        loop=loop,
     )
 
     # Build output path if not provided
@@ -178,8 +182,11 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
     )
 
     try:
-        # Execute pipeline
-        result: PipelineResult = pipeline.process_video(
+        # Execute pipeline. process_video is blocking (CPU + network), so run
+        # it in a thread to keep the worker's event loop free for progress
+        # callbacks, Redis, and the DB.
+        result: PipelineResult = await asyncio.to_thread(
+            pipeline.process_video,
             claimed.media_path,
             str(output_path),
             claimed.output_format,

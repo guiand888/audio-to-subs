@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 # Default DSN
 DEFAULT_ASYNC_DSN = "sqlite+aiosqlite:////data/audio-to-subs.db"
-DEFAULT_SYNC_DSN = "sqlite:////data/audio-to_subs.db"
+DEFAULT_SYNC_DSN = "sqlite:////data/audio-to-subs.db"
 
 
 @asynccontextmanager
@@ -36,26 +36,20 @@ async def get_async_session(
     if dsn is None:
         dsn = DEFAULT_ASYNC_DSN
     engine = get_async_engine(dsn)
-    
-    async with engine.begin() as conn:
-        # Ensure all models are registered
-        await conn.run_sync(Base.metadata.create_all)
-    
-    async with engine.connect() as conn:
-        # Enable foreign keys for SQLite
-        await conn.execute("PRAGMA foreign_keys = ON")
-        await conn.commit()
-    
-    async with engine.begin() as conn:
-        session = AsyncSession(engine, expire_on_commit=False)
-        try:
-            yield session
-            await session.commit()
-        except Exception:
-            await session.rollback()
-            raise
-        finally:
-            await session.close()
+
+    # NOTE: schema is owned by Alembic migrations (run at startup); do NOT call
+    # create_all here, and do NOT wrap the session in an outer engine.begin() —
+    # that holds a separate write transaction open for the session's lifetime
+    # and deadlocks every write with "database is locked".
+    session = AsyncSession(engine, expire_on_commit=False)
+    try:
+        yield session
+        await session.commit()
+    except Exception:
+        await session.rollback()
+        raise
+    finally:
+        await session.close()
 
 
 @contextmanager
@@ -73,11 +67,6 @@ def get_sync_session(
     if dsn is None:
         dsn = DEFAULT_SYNC_DSN
     engine = get_sync_engine(dsn)
-    
-    with engine.connect() as conn:
-        # Ensure all models are registered
-        conn.execute("PRAGMA foreign_keys = ON")
-        conn.commit()
     
     session = Session(engine, expire_on_commit=False)
     try:
@@ -101,5 +90,3 @@ async def init_db(dsn: str | None = None) -> None:
     engine = get_async_engine(dsn)
     async with engine.begin() as conn:
         await conn.run_sync(Base.metadata.create_all)
-        await conn.execute("PRAGMA foreign_keys = ON")
-        await conn.commit()

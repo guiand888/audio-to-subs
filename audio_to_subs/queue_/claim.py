@@ -15,7 +15,7 @@ from sqlalchemy.exc import IntegrityError
 from audio_to_subs.db.models import Job, JobStatus, JobSource, OutputFormat
 
 if TYPE_CHECKING:
-    from sqlalchemy.orm import Session
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 
 @dataclass
@@ -41,8 +41,8 @@ class ClaimedJob:
     source_ref: Optional[str]
 
 
-def claim_one(
-    session: "Session",
+async def claim_one(
+    session: "AsyncSession",
     worker_id: str,
     busy_timeout_ms: int = 5000,
 ) -> Optional[ClaimedJob]:
@@ -67,9 +67,6 @@ def claim_one(
     from sqlalchemy import update, and_, or_
 
     try:
-        # Set busy timeout for WAL mode concurrent access
-        session.execute(text(f"PRAGMA busy_timeout = {busy_timeout_ms}"))
-
         # Atomic claim: update the oldest highest-priority queued job and return it
         # Using a subquery to select the job in the WHERE clause
         claim_stmt = text("""
@@ -90,17 +87,21 @@ def claim_one(
             RETURNING id, media_path, output_path, language_code, output_format, source, source_ref
         """)
 
-        result = session.execute(
+        result = await session.execute(
             claim_stmt,
             {"worker_id": worker_id},
         )
 
         row = result.fetchone()
         if row is None:
+            # No job available: release the write lock the UPDATE acquired
+            # immediately, otherwise the idle loop would monopolise SQLite's
+            # single writer and starve every other writer.
+            await session.rollback()
             return None
 
         # Commit the claim
-        session.commit()
+        await session.commit()
 
         return ClaimedJob(
             id=UUID(row[0]),
@@ -114,8 +115,8 @@ def claim_one(
 
     except IntegrityError:
         # Handle any integrity errors
-        session.rollback()
+        await session.rollback()
         return None
-    except Exception as e:
-        session.rollback()
+    except Exception:
+        await session.rollback()
         raise
