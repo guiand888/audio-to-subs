@@ -1,4 +1,4 @@
-version: '3.8'
+version: "3.8"
 
 services:
   backend:
@@ -7,7 +7,7 @@ services:
       dockerfile: Dockerfile
     image: audio-to-subs:backend
     container_name: audio-to-subs-backend
-    
+
     # Environment variables
     environment:
       - PYTHONUNBUFFERED=1
@@ -19,63 +19,63 @@ services:
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - BEHIND_TLS=false
       - DEBUG=true
-    
+
     # Secrets for sensitive data
     secrets:
       - admin_password
-    
+
     # Volume mounts
     volumes:
       # Database and session data (shared with worker)
-      - audio-to-subs-data:/data
+      - ./dev/testing/audio-to-subs-data:/data
       # Movie files (aligned with Radarr/Bazarr)
-      - ./movies:/movies:rw
+      - ./dev/testing/movies:/movies:rw
       # TV series files (aligned with Sonarr/Bazarr)
-      - ./tv:/tv:rw
+      - ./dev/testing/tv:/tv:rw
       # Temporary processing
-      - /tmp/audio-to-subs
-    
+      - ./dev/testing/tmp/audio-to-subs
+
     # Ports
     ports:
       - "8000:8000"
-    
+
     # Dependencies
     depends_on:
       redis:
         condition: service_healthy
-    
+
     # Resource limits
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          cpus: "2.0"
           memory: 2G
         reservations:
-          cps: '0.5'
+          cps: "0.5"
           memory: 512M
-    
+
     # Restart policy
     restart: unless-stopped
-    
+
     # Security options
     security_opt:
       - no-new-privileges:true
-    
+
     # User
     user: "1000:1000"
 
   redis:
     image: redis:8-alpine
     container_name: audio-to-subs-redis
-    
+
     # Ports
     ports:
       - "6379:6379"
-    
+
     # Persistence (optional, Redis can be stateless for our use case)
     volumes:
-      - audio-to-subs-redis-data:/data
-    
+      - ./dev/testing/audio-to-subs-redis-data:/data
+
     # Health check
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
@@ -83,14 +83,14 @@ services:
       timeout: 5s
       retries: 5
       start_period: 5s
-    
+
     # Restart policy
     restart: unless-stopped
-    
+
     # Security options
     security_opt:
       - no-new-privileges:true
-    
+
     # User
     user: "1000:1000"
 
@@ -100,7 +100,7 @@ services:
       dockerfile: Dockerfile
     image: audio-to-subs:worker
     container_name: audio-to-subs-worker
-    
+
     # Environment variables
     environment:
       - PYTHONUNBUFFERED=1
@@ -110,46 +110,46 @@ services:
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=admin
       - DEBUG=true
-    
+
     # Secrets for sensitive data
     secrets:
       - mistral_api_key
-    
+
     # Volume mounts (shared with backend)
     volumes:
-      - audio-to-subs-data:/data
+      - ./dev/testing/audio-to-subs-data:/data
       # Movie and TV files (aligned with Radarr/Sonarr/Bazarr)
-      - ./movies:/movies:rw
-      - ./tv:/tv:rw
-      - /tmp/audio-to-subs
-    
+      - ./dev/testing/movies:/movies:rw
+      - ./dev/testing/tv:/tv:rw
+      - ./dev/testing/tmp/audio-to-subs
+
     # Dependencies
     depends_on:
       backend:
         condition: service_healthy
       redis:
         condition: service_healthy
-    
+
     # Resource limits
     deploy:
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 1G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
-    
+
     # Restart policy
     restart: unless-stopped
-    
+
     # Security options
     security_opt:
       - no-new-privileges:true
-    
+
     # User
     user: "1000:1000"
-    
+
     # Command
     command: python -m audio_to_subs.worker
 
@@ -172,8 +172,41 @@ services:
     security_opt:
       - no-new-privileges:true
 
-    user: "101:101"  # nginx default user in nginx:alpine
+    user: "101:101" # nginx default user in nginx:alpine
 
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+    volumes:
+      - ./dev/testing/sonarr/data:/config
+      - ./dev/testing/tv:/tv
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+    volumes:
+      - ./dev/testing/radarr/data:/config
+      - ./dev/testing/movies:/movies
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+    volumes:
+      - ./dev/testing/bazarr/config:/config
+      - ./dev/testing/movies:/movies
+      - ./dev/testing/tv:/tv
 volumes:
   audio-to-subs-data:
     driver: local
