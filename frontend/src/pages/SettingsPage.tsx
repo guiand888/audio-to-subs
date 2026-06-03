@@ -111,6 +111,9 @@ export function SettingsPage() {
         path_mappings: settings.path_mappings as any,
         default_language: settings.default_language,
         default_output_format: settings.default_output_format,
+        movies_root_path: settings.movies_root_path || "",
+        tv_root_path: settings.tv_root_path || "",
+        subtitles_same_directory: settings.subtitles_same_directory ?? true,
       })
     }
   }, [settings])
@@ -333,6 +336,61 @@ export function SettingsPage() {
               <p className="text-sm text-muted-foreground">
                 Include items that have no subtitles in any language.
               </p>
+            </div>
+          </CardContent>
+        </Card>
+
+        {/* Media Paths Configuration */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Media Paths</CardTitle>
+            <CardDescription>
+              Configure root directories for movies and TV shows (aligned with Radarr/Sonarr/Bazarr)
+            </CardDescription>
+          </CardHeader>
+          <CardContent className="space-y-4">
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label htmlFor="movies-root-path">Movies Root Path</Label>
+                <Input
+                  id="movies-root-path"
+                  type="text"
+                  placeholder="/movies"
+                  value={formData.movies_root_path ?? ""}
+                  onChange={(e) => setFormData({ ...formData, movies_root_path: e.target.value })}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Root directory for movie files (e.g., /movies)
+                </p>
+              </div>
+              <div className="space-y-2">
+                <Label htmlFor="tv-root-path">TV Root Path</Label>
+                <Input
+                  id="tv-root-path"
+                  type="text"
+                  placeholder="/tv"
+                  value={formData.tv_root_path ?? ""}
+                  onChange={(e) => setFormData({ ...formData, tv_root_path: e.target.value })}
+                />
+                <p className="text-sm text-muted-foreground">
+                  Root directory for TV series files (e.g., /tv)
+                </p>
+              </div>
+            </div>
+            <div className="space-y-2">
+              <div className="flex items-center justify-between">
+                <div>
+                  <Label htmlFor="subtitles-same-directory">Save Subtitles Alongside Video Files</Label>
+                  <p className="text-sm text-muted-foreground">
+                    When enabled, subtitles will be saved in the same directory as the source video file
+                  </p>
+                </div>
+                <Switch
+                  id="subtitles-same-directory"
+                  checked={formData.subtitles_same_directory ?? true}
+                  onCheckedChange={(checked) => setFormData({ ...formData, subtitles_same_directory: checked })}
+                />
+              </div>
             </div>
           </CardContent>
         </Card>

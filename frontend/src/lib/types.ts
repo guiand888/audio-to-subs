@@ -110,6 +110,9 @@ export interface SettingsOut {
   path_mappings: Record<string, string>[]
   default_language: string
   default_output_format: string
+  movies_root_path: string | null
+  tv_root_path: string | null
+  subtitles_same_directory: boolean
 }
 
 export interface SettingsPatch {
@@ -122,6 +125,9 @@ export interface SettingsPatch {
   path_mappings?: Record<string, string>[]
   default_language?: string
   default_output_format?: string
+  movies_root_path?: string | null
+  tv_root_path?: string | null
+  subtitles_same_directory?: boolean
 }
 
 // --------------- Logs ---------------
@@ -168,6 +174,9 @@ export interface SettingsFormData {
   path_mappings: Array<{ from: string; to: string }>
   default_language: string
   default_output_format: OutputFormat
+  movies_root_path: string | null
+  tv_root_path: string | null
+  subtitles_same_directory: boolean
 }
 
 // Path mapping
@@ -175,6 +184,9 @@ export interface PathMapping {
   from: string
   to: string
 }
+
+// Media type
+export type MediaType = "movie" | "tv" | "unknown"
 
 // --------------- SSE events ---------------
 // The backend emits unnamed SSE `message` events. The JSON payload discriminates
