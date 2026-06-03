@@ -293,31 +293,111 @@ class BazarrClient:
                 return [FileEntry.model_validate(item) for item in file_data]
             return []
 
-    # --- Rescan (TBD endpoints) ---
+    # --- Rescan endpoints ---
 
-    async def rescan_movie(self, radarr_id: int) -> None:
+    async def rescan_movie(self, radarr_id: int, retries: int = 2) -> bool:
         """Rescan a movie in Bazarr.
 
-        Note: The Bazarr rescan endpoint is not yet documented/identified.
-        This is a stub that logs a warning and returns None.
-        """
-        logger.warning(
-            "Bazarr rescan_movie endpoint not yet wired for radarr_id=%s",
-            radarr_id,
-        )
-        return None
+        Triggers Bazarr to rescan the movie directory for new subtitle files.
+        Uses POST /api/movies/{radarrId}/rescan endpoint.
 
-    async def rescan_episode(self, sonarr_episode_id: int) -> None:
+        Args:
+            radarr_id: Radarr ID of the movie to rescan
+            retries: Number of retry attempts on failure
+
+        Returns:
+            True if rescan was triggered successfully, False otherwise
+        """
+        for attempt in range(retries):
+            try:
+                client = await self._ensure_client()
+                response = await client.post(f"/api/movies/{radarr_id}/rescan")
+
+                if response.status_code in (200, 201, 202, 204):
+                    logger.info(
+                        "Successfully triggered Bazarr rescan for movie radarr_id=%s",
+                        radarr_id,
+                    )
+                    return True
+
+                logger.warning(
+                    "Bazarr rescan for movie %s returned status %s",
+                    radarr_id,
+                    response.status_code,
+                )
+                return False
+
+            except (httpx.RequestError, BazarrError) as e:
+                if attempt < retries - 1:
+                    logger.warning(
+                        "Attempt %s/%s: Failed to rescan movie %s: %s",
+                        attempt + 1,
+                        retries,
+                        radarr_id,
+                        e,
+                    )
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                logger.error(
+                    "Final attempt failed: Failed to rescan movie %s: %s",
+                    radarr_id,
+                    e,
+                )
+                return False
+
+        return False
+
+    async def rescan_episode(self, sonarr_episode_id: int, retries: int = 2) -> bool:
         """Rescan an episode in Bazarr.
 
-        Note: The Bazarr rescan endpoint is not yet documented/identified.
-        This is a stub that logs a warning and returns None.
+        Triggers Bazarr to rescan the episode directory for new subtitle files.
+        Uses POST /api/episodes/{sonarrEpisodeId}/rescan endpoint.
+
+        Args:
+            sonarr_episode_id: Sonarr Episode ID of the episode to rescan
+            retries: Number of retry attempts on failure
+
+        Returns:
+            True if rescan was triggered successfully, False otherwise
         """
-        logger.warning(
-            "Bazarr rescan_episode endpoint not yet wired for sonarr_episode_id=%s",
-            sonarr_episode_id,
-        )
-        return None
+        for attempt in range(retries):
+            try:
+                client = await self._ensure_client()
+                response = await client.post(f"/api/episodes/{sonarr_episode_id}/rescan")
+
+                if response.status_code in (200, 201, 202, 204):
+                    logger.info(
+                        "Successfully triggered Bazarr rescan for episode sonarr_episode_id=%s",
+                        sonarr_episode_id,
+                    )
+                    return True
+
+                logger.warning(
+                    "Bazarr rescan for episode %s returned status %s",
+                    sonarr_episode_id,
+                    response.status_code,
+                )
+                return False
+
+            except (httpx.RequestError, BazarrError) as e:
+                if attempt < retries - 1:
+                    logger.warning(
+                        "Attempt %s/%s: Failed to rescan episode %s: %s",
+                        attempt + 1,
+                        retries,
+                        sonarr_episode_id,
+                        e,
+                    )
+                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
+                    continue
+                logger.error(
+                    "Final attempt failed: Failed to rescan episode %s: %s",
+                    sonarr_episode_id,
+                    e,
+                )
+                return False
+
+        return False
 
     # --- Utility methods ---
 
