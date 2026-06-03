@@ -79,7 +79,7 @@ export function SettingsPage() {
 
   const mutation = useMutation({
     mutationFn: (patch: SettingsPatch) => api.patch<SettingsOut>("/api/settings", patch),
-    onSuccess: (newSettings) => {
+    onSuccess: () => {
       toast.success("Settings saved")
       void queryClient.invalidateQueries({ queryKey: ["settings"] })
       // Also invalidate other queries that might depend on settings
@@ -131,10 +131,6 @@ export function SettingsPage() {
     const value = e.target.value
     const num = value === "" ? 0 : parseFloat(value)
     setFormData({ ...formData, [field]: isNaN(num) ? 0 : num })
-  }
-
-  const handleStringChange = (field: keyof SettingsPatch) => (e: React.ChangeEvent<HTMLInputElement>) => {
-    setFormData({ ...formData, [field]: e.target.value })
   }
 
   const handleBooleanChange = (field: keyof SettingsPatch) => (checked: boolean) => {

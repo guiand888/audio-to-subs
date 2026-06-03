@@ -79,20 +79,6 @@ function truncatePath(path: string, maxLength: number = 50): string {
   return path
 }
 
-// Get status badge variant
-function getStatusVariant(status: JobStatus): "default" | "secondary" | "destructive" {
-  switch (status) {
-    case "done":
-      return "default"
-    case "failed":
-      return "destructive"
-    case "cancelled":
-      return "secondary"
-    default:
-      return "default"
-  }
-}
-
 // Filter form component
 interface HistoryFiltersProps {
   filters: HistoryFilters
@@ -100,14 +86,14 @@ interface HistoryFiltersProps {
 }
 
 function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
-  const [status, setStatus] = useState<JobStatus[]>(filters.status_filter || [])
+  const [status, setStatus] = useState<JobStatus | undefined>(filters.status_filter?.[0])
   const [source, setSource] = useState<JobSource | undefined>(filters.source_filter)
   const [language, setLanguage] = useState<string | undefined>(filters.language_filter)
 
   const handleApply = () => {
     onChange({
       ...filters,
-      status_filter: status.length > 0 ? status : undefined,
+      status_filter: status ? [status] : undefined,
       source_filter: source,
       language_filter: language || undefined,
       offset: 0, // Reset to first page on filter change
@@ -115,7 +101,7 @@ function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
   }
 
   const handleReset = () => {
-    setStatus([])
+    setStatus(undefined)
     setSource(undefined)
     setLanguage(undefined)
     onChange({ offset: 0 })
@@ -130,14 +116,14 @@ function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
         <div className="space-y-2">
           <Label htmlFor="status-filter">Status</Label>
           <Select
-            value={status.join(",")}
-            onValueChange={(v) => setStatus(v.split(",") as JobStatus[])}
-            multiple
+            value={status}
+            onValueChange={(v) => setStatus(v as JobStatus)}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select statuses" />
+              <SelectValue placeholder="Select status" />
             </SelectTrigger>
             <SelectContent>
+              <SelectItem value="">All statuses</SelectItem>
               {STATUS_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
@@ -262,7 +248,7 @@ export function HistoryPage() {
     return p.toString()
   }, [filters])
 
-  const { data, isLoading, isError, refetch } = useQuery({
+  const { data, isLoading, isError } = useQuery({
     queryKey: ["history", filters],
     queryFn: () => api.get<HistoryResponse>(`/api/history?${params}`),
     staleTime: 30_000,

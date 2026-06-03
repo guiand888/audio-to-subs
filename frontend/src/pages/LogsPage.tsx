@@ -1,13 +1,13 @@
 // Logs page: global log viewer with filters and auto-refresh.
 // Fetches from GET /api/logs.
 
-import { useState, useEffect, useMemo } from "react"
+import { useState, useMemo } from "react"
 import { useQuery } from "@tanstack/react-query"
 import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react"
 import { format } from "date-fns"
 
 import { api } from "@/lib/api"
-import type { GlobalLogsResponse, LogsFilters, LogLevel, LogEntry } from "@/lib/types"
+import type { GlobalLogsResponse, LogsFilters, LogLevel } from "@/lib/types"
 
 // Import from shadcn/ui
 import { Button } from "@/components/ui/button"
