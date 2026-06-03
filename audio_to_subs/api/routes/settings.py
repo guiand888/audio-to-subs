@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
@@ -147,7 +147,7 @@ async def _seed_default_settings(
     from audio_to_subs.db.models import Setting
 
     result = await db.execute(select(Setting))
-    existing_count = result.rowcount
+    existing_count = len(result.scalars().all())
 
     if existing_count == 0:
         for key, value in DEFAULT_SETTINGS.items():

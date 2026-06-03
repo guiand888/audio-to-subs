@@ -72,11 +72,12 @@ async def get_path_map(
         result = await db.execute(
             select(Setting.value_json).where(Setting.key == "path_mappings")
         )
-        row = result.scalar_one_or_none()
-        if row and row.value_json:
+        # scalar_one_or_none() returns the raw value_json string, not a Setting.
+        value_json = result.scalar_one_or_none()
+        if value_json:
             import json
 
-            path_mappings = json.loads(row.value_json)
+            path_mappings = json.loads(value_json)
             return PathMap.from_settings(path_mappings)
     except Exception as e:
         logger.warning("Failed to load path_mappings from settings: %s", e)
@@ -105,11 +106,12 @@ async def get_settings_value(
         result = await db.execute(
             select(Setting.value_json).where(Setting.key == key)
         )
-        row = result.scalar_one_or_none()
-        if row and row.value_json:
+        # scalar_one_or_none() returns the raw value_json string, not a Setting.
+        value_json = result.scalar_one_or_none()
+        if value_json:
             import json
 
-            return json.loads(row.value_json)
+            return json.loads(value_json)
     except Exception as e:
         logger.warning("Failed to load setting %s: %s", key, e)
 

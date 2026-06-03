@@ -216,9 +216,10 @@ class TestPipeline:
         # Assert
         assert progress_callback.call_count >= 3
         calls = [call[0][0] for call in progress_callback.call_args_list]
-        assert "extraction" in calls[0].lower() or "audio" in calls[0].lower()
-        # Find a call with "transcrib" in it (may be at different index depending on pipeline)
-        assert any("transcrib" in call.lower() for call in calls)
+        # Pipeline emits a "Starting pipeline" message first; verify extraction
+        # and transcription stages are present somewhere in the call list.
+        assert any("extraction" in c.lower() or "audio" in c.lower() for c in calls)
+        assert any("transcrib" in c.lower() for c in calls)
 
     @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
     @patch("audio_to_subs.core.pipeline.needs_splitting")
