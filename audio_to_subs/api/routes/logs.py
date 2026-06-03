@@ -1,12 +1,12 @@
-"""Log routes for job logging."""
+"""Log routes for job logging and global logs."""
 
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
-from pydantic import BaseModel
-from sqlalchemy import select, desc, func
+from pydantic import BaseModel, Field
+from sqlalchemy import select, and_, desc, func, or_
 from sqlalchemy.orm import joinedload
 
 from audio_to_subs.api.deps import get_db
@@ -15,7 +15,11 @@ from audio_to_subs.db.models import Job, JobLog, LogLevel
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
-router = APIRouter(prefix="/api/jobs", tags=["logs"])
+# Router for job-specific logs (/api/jobs/{id}/logs)
+jobs_logs_router = APIRouter(prefix="/api/jobs", tags=["logs"])
+
+# Router for global logs (/api/logs)
+global_logs_router = APIRouter(prefix="/api/logs", tags=["logs"])
 
 
 class JobLogResponse(BaseModel):
@@ -38,7 +42,7 @@ class JobLogsResponse(BaseModel):
     total: int
 
 
-@router.get("/{job_id}/logs", response_model=JobLogsResponse)
+@jobs_logs_router.get("/{job_id}/logs", response_model=JobLogsResponse)
 async def get_job_logs(
     job_id: UUID,
     request: Request,
@@ -87,7 +91,7 @@ async def get_job_logs(
     )
 
 
-@router.post(
+@jobs_logs_router.post(
     "/{job_id}/logs",
     response_model=JobLogResponse,
     status_code=status.HTTP_201_CREATED,
@@ -128,3 +132,81 @@ async def create_job_log(
     await db.refresh(log_entry)
 
     return JobLogResponse.model_validate(log_entry)
+
+
+# Global logs response model
+class GlobalLogsResponse(BaseModel):
+    """Response model for global logs endpoint."""
+
+    logs: list[JobLogResponse] = Field(
+        default_factory=list, description="List of log entries"
+    )
+    total: int = Field(description="Total number of log entries")
+
+
+@global_logs_router.get("", response_model=GlobalLogsResponse)
+async def get_global_logs(
+    request: Request,
+    db: Annotated["AsyncSession", Depends(get_db)],
+    job_id: UUID | None = None,
+    level_filter: LogLevel | None = None,
+    since: datetime | None = None,
+    until: datetime | None = None,
+    limit: int = 100,
+    offset: int = 0,
+) -> GlobalLogsResponse:
+    """Get logs across all jobs.
+
+    Returns a paginated list of log entries from all jobs, with optional
+    filtering by job_id, log level, and date range.
+
+    Query parameters:
+    - job_id: Filter logs for a specific job
+    - level_filter: Filter by log level (debug, info, warning, error)
+    - since: Start timestamp (inclusive)
+    - until: End timestamp (inclusive)
+    - limit: Number of logs per page (default 100)
+    - offset: Pagination offset (default 0)
+    """
+    # Build query
+    query = select(JobLog)
+
+    # Apply filters
+    conditions = []
+
+    if job_id is not None:
+        conditions.append(JobLog.job_id == job_id)
+
+    if level_filter is not None:
+        conditions.append(JobLog.level == level_filter)
+
+    if since is not None:
+        conditions.append(JobLog.ts >= since)
+
+    if until is not None:
+        conditions.append(JobLog.ts <= until)
+
+    if conditions:
+        query = query.where(and_(*conditions))
+
+    # Get total count
+    count_query = select(func.count(JobLog.id))
+    if conditions:
+        count_query = count_query.where(and_(*conditions))
+
+    total_result = await db.execute(count_query)
+    total = total_result.scalar() or 0
+
+    # Get paginated logs ordered by timestamp descending
+    query = query.order_by(desc(JobLog.ts)).limit(limit).offset(offset)
+    result = await db.execute(query)
+    logs = result.scalars().all()
+
+    return GlobalLogsResponse(
+        logs=[JobLogResponse.model_validate(log) for log in logs],
+        total=total,
+    )
+
+
+# Export routers
+router = jobs_logs_router

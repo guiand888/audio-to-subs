@@ -11,9 +11,13 @@ from fastapi.middleware.cors import CORSMiddleware
 from audio_to_subs.api.routes import auth, healthz
 from audio_to_subs.api.routes.jobs import router as jobs_router
 from audio_to_subs.api.routes.stream import router as stream_router
-from audio_to_subs.api.routes.logs import router as logs_router
+from audio_to_subs.api.routes.logs import (
+    router as jobs_logs_router,
+    global_logs_router,
+)
 from audio_to_subs.api.routes.settings import router as settings_router
 from audio_to_subs.api.routes.wanted import router as wanted_router
+from audio_to_subs.api.routes.history import router as history_router
 from audio_to_subs.api.settings import get_settings
 from audio_to_subs.auth.bootstrap import bootstrap_admin
 from audio_to_subs.bazarr.poller import run_bazarr_poller, stop_poller
@@ -160,7 +164,9 @@ def create_app() -> FastAPI:
     app.include_router(wanted_router)
     app.include_router(jobs_router)
     app.include_router(stream_router)
-    app.include_router(logs_router)
+    app.include_router(jobs_logs_router)
+    app.include_router(global_logs_router)
+    app.include_router(history_router)
 
     return app
 
