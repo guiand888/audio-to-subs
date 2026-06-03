@@ -56,7 +56,10 @@ def needs_rehash(hashed: str) -> bool:
     Returns:
         True if hash should be upgraded, False otherwise
     """
-    # check_needs_rehash returns a bool; it does not raise.  The previous
-    # try/except always returned True (on success) which caused a rehash on
-    # every login.
-    return _PH.check_needs_rehash(hashed)
+    # check_needs_rehash returns a bool for valid hashes.  For invalid or
+    # malformed strings it raises InvalidHashError; treat that as "no rehash
+    # needed" rather than propagating.
+    try:
+        return _PH.check_needs_rehash(hashed)
+    except Exception:
+        return False

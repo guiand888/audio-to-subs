@@ -1,5 +1,6 @@
 """Tests for Bazarr API client."""
 
+import httpx
 import pytest
 
 from audio_to_subs.bazarr.client import (
@@ -139,15 +140,15 @@ class TestBazarrClientRequests:
         }
         
         respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
-            return_value=mock_response
+            return_value=httpx.Response(200, json=mock_response)
         )
-        
+
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="test-key",
         ) as client:
             result = await client.list_wanted_movies()
-            
+
             assert result.total == 1
             assert len(result.data) == 1
             assert result.data[0].title == "Inception"
@@ -176,9 +177,9 @@ class TestBazarrClientRequests:
         }
         
         respx_mock.get("http://test-bazarr:6767/api/episodes/wanted").mock(
-            return_value=mock_response
+            return_value=httpx.Response(200, json=mock_response)
         )
-        
+
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="test-key",
@@ -194,8 +195,7 @@ class TestBazarrClientRequests:
     async def test_auth_error(self, respx_mock):
         """Test 401 authentication error."""
         respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
-            return_value={"error": "Unauthorized"},
-            status_code=401,
+            return_value=httpx.Response(401, json={"error": "Unauthorized"}),
         )
         
         async with BazarrClient(
@@ -209,8 +209,7 @@ class TestBazarrClientRequests:
     async def test_not_found_error(self, respx_mock):
         """Test 404 not found error."""
         respx_mock.get("http://test-bazarr:6767/api/nonexistent").mock(
-            return_value={"error": "Not found"},
-            status_code=404,
+            return_value=httpx.Response(404, json={"error": "Not found"}),
         )
         
         async with BazarrClient(
@@ -224,9 +223,7 @@ class TestBazarrClientRequests:
     async def test_rate_limited_error(self, respx_mock):
         """Test 429 rate limited error."""
         respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
-            return_value={"error": "Rate limited"},
-            status_code=429,
-            headers={"Retry-After": "30"},
+            return_value=httpx.Response(429, json={"error": "Rate limited"}, headers={"Retry-After": "30"}),
         )
         
         async with BazarrClient(
@@ -241,17 +238,8 @@ class TestBazarrClientRequests:
     @pytest.mark.asyncio
     async def test_server_error_with_retry(self, respx_mock):
         """Test 5xx server error with retry."""
-        # First request fails with 500
-        # Second request succeeds
-        route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted")
-        route.side_effect = [
-            {"error": "Server error"},  # status_code=500 (default for mock)
-            {"data": [], "total": 0},
-        ]
-        
-        # Note: respx doesn't automatically set status_code, need to specify
-        route_500 = respx_mock.get("http://test-bazarr:6767/api/movies/wanted")
-        route_500.side_effect = [
+        # First request fails with 500, second succeeds — use httpx.Response explicitly.
+        respx_mock.get("http://test-bazarr:6767/api/movies/wanted").side_effect = [
             httpx.Response(500, json={"error": "Server error"}),
             httpx.Response(200, json={"data": [], "total": 0}),
         ]

@@ -18,12 +18,13 @@ class TestProgressReporting:
     def test_pipeline_progress_callback_signature(self, tmp_path):
         """Test that pipeline accepts progress callback with percentage parameter."""
         progress_messages = []
-        
+
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
-        
+
         # Test that callback is called with correct signature
         with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=60.0), \
              patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
@@ -119,12 +120,13 @@ class TestProgressReporting:
     def test_progress_percentage_ranges(self, tmp_path):
         """Test that progress percentages are within valid ranges."""
         progress_messages = []
-        
+
         def mock_progress_callback(message: str, percentage: int = None):
             if percentage is not None:
                 progress_messages.append(percentage)
-        
+
         with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=60.0), \
              patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
@@ -158,11 +160,12 @@ class TestProgressReporting:
     def test_progress_stage_transitions(self, tmp_path):
         """Test that progress transitions through expected stages."""
         progress_messages = []
-        
+
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
-        
+
         with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=60.0), \
              patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
@@ -213,11 +216,12 @@ class TestProgressReporting:
     def test_no_progress_without_verbose_flag(self, tmp_path):
         """Test that progress percentages are not reported without verbose flag."""
         progress_messages = []
-        
+
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
-        
+
         with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=60.0), \
              patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
@@ -303,11 +307,12 @@ class TestProgressReporting:
     def test_progress_completion(self, tmp_path):
         """Test that progress reaches 100% on completion."""
         progress_messages = []
-        
+
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
-        
+
         with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=60.0), \
              patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \
@@ -347,11 +352,12 @@ class TestProgressReporting:
     def test_progress_with_multiple_segments(self, tmp_path):
         """Test progress reporting with multiple audio segments."""
         progress_messages = []
-        
+
         def mock_progress_callback(message: str, percentage: int = None):
             progress_messages.append((message, percentage))
-        
+
         with patch('audio_to_subs.core.pipeline.extract_audio') as mock_extract, \
+             patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=60.0), \
              patch('audio_to_subs.core.pipeline.needs_splitting') as mock_needs_splitting, \
              patch('audio_to_subs.core.pipeline.split_audio') as mock_split, \
              patch.object(TranscriptionClient, 'transcribe_audio_with_timestamps') as mock_transcribe, \

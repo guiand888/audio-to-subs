@@ -163,9 +163,9 @@ class TestSessionManagerRenewal:
         manager = SessionManager(secret="test-secret")
         token = manager.create_session(123)
         
-        # Wait a bit
-        time.sleep(0.1)
-        
+        # Wait >1 s so iat (int seconds) is different, guaranteeing a new token.
+        time.sleep(1.1)
+
         # Renew
         new_token = manager.renew_session(token)
         

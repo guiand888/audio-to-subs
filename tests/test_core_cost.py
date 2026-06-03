@@ -47,6 +47,9 @@ class TestExtractUsage:
     def test_extract_from_model_dump_with_usage_key(self) -> None:
         """Test extracting usage from model_dump() output."""
         mock_response = Mock()
+        # Set usage=None so extract_usage skips the .usage branch and falls
+        # through to the model_dump() branch.
+        mock_response.usage = None
         mock_response.model_dump = Mock(return_value={
             "usage": {
                 "prompt_tokens": 100,

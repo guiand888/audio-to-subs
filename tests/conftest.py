@@ -52,8 +52,10 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     # Pre-create schema and default admin user synchronously so tests that
     # skip the lifespan (non-context-manager TestClient) still have a working DB.
     sync_url = f"sqlite:///{db_path}"
+    # Import models BEFORE Base so that all tables are registered in
+    # Base.metadata before create_all() is called.  Base alone has no tables.
+    from audio_to_subs.db.models import User  # noqa: F401 — registers all models
     from audio_to_subs.db.base import Base
-    from audio_to_subs.db.models import User
     from audio_to_subs.auth.passwords import hash_password
 
     sync_engine = create_engine(sync_url, connect_args={"check_same_thread": False})
@@ -94,6 +96,21 @@ def sync_session(tmp_path) -> Generator[Session, None, None]:
     finally:
         session.close()
         engine.dispose()
+
+
+@pytest.fixture
+async def mock_db_session():
+    """Real async SQLAlchemy session backed by the per-test file DB.
+
+    Used by tests that need async ORM operations (e.g. bazarr poller tests)
+    without going through the full FastAPI stack.
+    """
+    from audio_to_subs.db.session import get_async_session
+    from audio_to_subs.api.settings import get_settings
+
+    settings = get_settings()
+    async with get_async_session(settings.DATABASE_URL) as session:
+        yield session
 
 
 @pytest.fixture

@@ -50,8 +50,8 @@ class TestPipeline:
         # Act
         result = pipeline.process_video(str(video_file), str(output_file))
 
-        # Assert
-        assert result == str(output_file)
+        # Assert — process_video returns PipelineResult; compare via str()/__fspath__
+        assert str(result) == str(output_file)
         mock_extract.assert_called_once()
         mock_transcription.transcribe_audio_with_timestamps.assert_called_once()
         mock_generator.generate.assert_called_once()
@@ -304,7 +304,7 @@ class TestPipeline:
         result = pipeline.process_video(str(video_file), "output.srt")
 
         # Assert
-        assert result == "output.srt"
+        assert str(result) == "output.srt"
         # Verify transcription was called twice (once per segment)
         assert mock_transcription.transcribe_audio_with_timestamps.call_count == 2
         # Verify split_audio was called
