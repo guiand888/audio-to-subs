@@ -1,11 +1,11 @@
 """Tests for queue_/claim.py module."""
 
-from unittest.mock import MagicMock, Mock
-from uuid import uuid4
+from unittest.mock import AsyncMock, MagicMock
+from uuid import UUID, uuid4
 
 import pytest
 
-from audio_to_subs.queue_.claim import claim_one, ClaimedJob
+from audio_to_subs.queue_.claim import ClaimedJob, claim_one
 
 
 class TestClaimedJob:
@@ -23,7 +23,7 @@ class TestClaimedJob:
             source="manual",
             source_ref=None,
         )
-        
+
         assert claimed.id == job_id
         assert claimed.media_path == "/input/video.mp4"
         assert claimed.output_path == "/output/video.srt"
@@ -34,57 +34,60 @@ class TestClaimedJob:
 
 
 class TestClaimOne:
-    """Tests for claim_one function."""
+    """Tests for claim_one function (async)."""
 
-    @pytest.mark.asyncio
     async def test_claim_one_with_job(self, mock_session) -> None:
         """Test claiming a job when one is available."""
-        from sqlalchemy import text
-        
-        # Mock session with a job
         job_id = str(uuid4())
-        mock_session.execute = MagicMock(return_value=Mock(
-            fetchone=Mock(return_value=(
-                job_id,
-                "/input/video.mp4",
-                "/output/video.srt",
-                "en",
-                "srt",
-                "manual",
-                None,
-            ))
-        ))
-        mock_session.commit = MagicMock()
-        
-        result = claim_one(mock_session, "worker-1")
-        
+        # execute() is awaited inside claim_one; use AsyncMock so that
+        # `await session.execute(...)` returns a plain Mock with fetchone.
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = (
+            job_id,
+            "/input/video.mp4",
+            "/output/video.srt",
+            "en",
+            "srt",
+            "manual",
+            None,
+        )
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.commit = AsyncMock()
+
+        result = await claim_one(mock_session, "worker-1")
+
         assert result is not None
-        assert result.id == uuid4()  # UUID constructed from string
+        # claim_one wraps the raw string from the DB in UUID()
+        assert isinstance(result.id, UUID)
+        assert str(result.id) == job_id
         assert result.media_path == "/input/video.mp4"
         assert mock_session.commit.called
 
-    @pytest.mark.asyncio
     async def test_claim_one_no_job(self, mock_session) -> None:
         """Test claiming a job when none are available."""
-        mock_session.execute = MagicMock(return_value=Mock(fetchone=Mock(return_value=None)))
-        mock_session.rollback = MagicMock()
-        
-        result = claim_one(mock_session, "worker-1")
-        
-        assert result is None
+        mock_result = MagicMock()
+        mock_result.fetchone.return_value = None
+        mock_session.execute = AsyncMock(return_value=mock_result)
+        mock_session.rollback = AsyncMock()
 
-    @pytest.mark.asyncio
+        result = await claim_one(mock_session, "worker-1")
+
+        assert result is None
+        mock_session.rollback.assert_called_once()
+
     async def test_claim_one_error(self, mock_session) -> None:
         """Test claiming a job when an error occurs."""
-        mock_session.execute = MagicMock(side_effect=Exception("DB error"))
-        mock_session.rollback = MagicMock()
-        
-        with pytest.raises(Exception):
-            claim_one(mock_session, "worker-1")
+        mock_session.execute = AsyncMock(side_effect=Exception("DB error"))
+        mock_session.rollback = AsyncMock()
+
+        with pytest.raises(Exception, match="DB error"):
+            await claim_one(mock_session, "worker-1")
+
+        mock_session.rollback.assert_called_once()
 
 
 @pytest.fixture
 def mock_session():
-    """Create a mock async session."""
-    session = MagicMock()
+    """Create a mock async session with AsyncMock for awaitable methods."""
+    session = AsyncMock()
     return session
