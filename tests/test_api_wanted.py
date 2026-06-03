@@ -12,9 +12,17 @@ from audio_to_subs.db.models import BazarrCache, Job, JobStatus, JobSource
 
 @pytest.fixture
 def test_client():
-    """Create a test client."""
+    """TestClient backed by the per-test file DB."""
+    import audio_to_subs.db.base as db_base
+    import audio_to_subs.api.settings as api_settings
+    import audio_to_subs.auth.sessions as auth_sessions
+
+    db_base._async_engine = None
+    api_settings._settings = None
+    auth_sessions._session_manager = None
+
     app = create_app()
-    return TestClient(app)
+    return TestClient(app, raise_server_exceptions=False)
 
 
 class TestWantedItemModel:
@@ -69,8 +77,7 @@ class TestWantedItemType:
 class TestListWantedEndpoint:
     """Test GET /api/wanted endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_list_wanted_empty(self, test_client):
+    def test_list_wanted_empty(self, test_client):
         """Test list_wanted with empty cache."""
         response = test_client.get("/api/wanted")
         
@@ -81,8 +88,7 @@ class TestListWantedEndpoint:
         assert "total" in data
         assert isinstance(data["items"], list)
 
-    @pytest.mark.asyncio
-    async def test_list_wanted_with_type_filter(self, test_client):
+    def test_list_wanted_with_type_filter(self, test_client):
         """Test list_wanted with type filter."""
         response = test_client.get("/api/wanted?item_type=movie")
         
@@ -92,8 +98,7 @@ class TestListWantedEndpoint:
         assert "items" in data
         assert "total" in data
 
-    @pytest.mark.asyncio
-    async def test_list_wanted_with_pagination(self, test_client):
+    def test_list_wanted_with_pagination(self, test_client):
         """Test list_wanted with pagination."""
         response = test_client.get("/api/wanted?page=1&page_size=50")
         
@@ -108,8 +113,7 @@ class TestListWantedEndpoint:
 class TestGetWantedItemEndpoint:
     """Test GET /api/wanted/{item_id} endpoint."""
 
-    @pytest.mark.asyncio
-    async def test_get_wanted_item_not_found(self, test_client):
+    def test_get_wanted_item_not_found(self, test_client):
         """Test get_wanted_item with nonexistent ID."""
         response = test_client.get("/api/wanted/movie:999999")
         

@@ -12,12 +12,10 @@ the per-test file DB.  Tests that only need a raw SQLAlchemy session can use
 """
 
 import os
-from contextlib import asynccontextmanager
 from typing import Generator
-from unittest.mock import MagicMock, AsyncMock
 
 import pytest
-from sqlalchemy import create_engine, text
+from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
 import audio_to_subs.db.base as _db_base
@@ -51,13 +49,18 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     _api_settings._settings = None
     _auth_sessions._session_manager = None
 
-    # Pre-create schema synchronously so tests that skip the lifespan still
-    # have tables available.
+    # Pre-create schema and default admin user synchronously so tests that
+    # skip the lifespan (non-context-manager TestClient) still have a working DB.
     sync_url = f"sqlite:///{db_path}"
     from audio_to_subs.db.base import Base
+    from audio_to_subs.db.models import User
+    from audio_to_subs.auth.passwords import hash_password
 
     sync_engine = create_engine(sync_url, connect_args={"check_same_thread": False})
     Base.metadata.create_all(sync_engine)
+    with Session(sync_engine) as session:
+        session.add(User(username="admin", password_hash=hash_password("admin123")))
+        session.commit()
     sync_engine.dispose()
 
     yield
