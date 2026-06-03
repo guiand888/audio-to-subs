@@ -1,7 +1,7 @@
 """Tests for subtitle_generator module."""
 import pytest
 from pathlib import Path
-import src.subtitle_generator  # Import module for coverage
+import audio_to_subs.core.subtitle_generator  # noqa: F401 — ensure module is loaded for coverage
 from audio_to_subs.core.subtitle_generator import (
     SubtitleGenerator,
     format_timestamp_srt,
