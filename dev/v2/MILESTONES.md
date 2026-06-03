@@ -14,7 +14,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
 | M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
 | M5.1 — M5 cleanup and verification | ⏳ Not Started | - | Depends on M5 |
-| M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | ⏳ Not Started | - | Depends on M5.1 |
+| M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | 🔄 In Progress | - | Depends on M5.1 |
 | M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.2 |
 
 Every milestone ends with the same quality bar:
@@ -188,6 +188,7 @@ Tasks:
 - Update worker to save subtitles in source directory when configured
 - Update docker-compose.yml to use separate /movies and /tv volumes
 - Update testing.docker-compose.yaml to match new volume structure
+- Add SELinux relabeling (:z/:Z) to volume mounts for Podman compatibility
 - Enhance PathMap with media type detection and output path generation
 - Add path validation to prevent traversal and ensure paths within allowed roots
 - Update frontend settings page with new configuration options
@@ -200,6 +201,7 @@ Acceptance:
 - Settings page allows configuration of movies_root_path, tv_root_path, and subtitles_same_directory
 - Path validation prevents jobs with media_path outside configured roots
 - Bazarr rescan picks up subtitles from same directory as video files
+- No SELinux permission errors on Podman with enforcing SELinux
 - pytest, black, ruff, mypy all clean
 - New code ≥ 80% coverage
 
