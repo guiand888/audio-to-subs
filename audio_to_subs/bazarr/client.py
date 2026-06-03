@@ -76,10 +76,12 @@ class BazarrClient:
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
+        # httpx>=0.28 requires either a default or all four params explicitly.
+        # Pass timeout as the default and override connect/read individually.
         self.timeout = httpx.Timeout(
+            timeout,
             connect=connect_timeout,
             read=read_timeout,
-            pool=5.0,
         )
         self._client: httpx.AsyncClient | None = None
         self._headers = {"X-API-Key": api_key}
