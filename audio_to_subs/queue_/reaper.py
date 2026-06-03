@@ -5,7 +5,7 @@ threshold. This handles worker crashes and allows jobs to be picked up by other 
 """
 
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
 from sqlalchemy import text, and_
@@ -44,7 +44,7 @@ async def reap_stale_running(
     """
     try:
         # Compute the stale threshold
-        stale_threshold = datetime.utcnow() - timedelta(seconds=stale_seconds)
+        stale_threshold = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
 
         # Atomic reaping statement
         # Only requeue jobs that are still in 'running' state and haven't been updated recently

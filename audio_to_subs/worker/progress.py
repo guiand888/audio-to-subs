@@ -11,7 +11,7 @@ import json
 import logging
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
@@ -153,7 +153,7 @@ class ProgressBridge:
         try:
             log_entry = JobLog(
                 job_id=self.job_id,
-                ts=datetime.utcnow(),
+                ts=datetime.now(timezone.utc),
                 level=LogLevel.INFO,
                 message=f"[{stage}] {message}",
             )

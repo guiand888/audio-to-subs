@@ -1,14 +1,13 @@
 """Authentication routes."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from audio_to_subs.api.deps import SettingsDep
-from audio_to_subs.api.settings import Settings
-from audio_to_subs.auth.deps import get_db
+from audio_to_subs.auth.deps import get_current_user, get_db
 from audio_to_subs.auth.passwords import verify_password
 from audio_to_subs.auth.sessions import SESSION_COOKIE_NAME, get_session_manager
 from audio_to_subs.db.models import User
@@ -42,7 +41,7 @@ async def login(
     response: Response,
     login_request: LoginRequest,
     db: Annotated[Any, Depends(get_db)],
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
 ) -> LoginResponse:
     """Login endpoint.
     
@@ -71,7 +70,7 @@ async def login(
         )
     
     # Update last login time
-    user.last_login_at = datetime.utcnow()
+    user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
     
@@ -111,16 +110,11 @@ async def logout(
 
 @router.get("/me", response_model=UserOut)
 async def me(
-    request: Request,
-    db: Annotated[Any, Depends(get_db)],
-    settings: Settings = Depends(SettingsDep),
+    user: Annotated[User, Depends(get_current_user)],
 ) -> UserOut:
     """Get current user.
-    
+
     Returns the authenticated user.
     Authentication required.
     """
-    from audio_to_subs.auth.deps import get_current_user
-    
-    user = await get_current_user(request, response, db, None)
     return UserOut(id=user.id, username=user.username)

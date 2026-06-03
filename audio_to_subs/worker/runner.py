@@ -10,7 +10,7 @@ import logging
 import os
 import time
 from dataclasses import dataclass, field
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
@@ -71,8 +71,8 @@ async def persist_result(
     try:
         update_fields = {
             "status": result.status.value,
-            "finished_at": datetime.utcnow(),
-            "updated_at": datetime.utcnow(),
+            "finished_at": datetime.now(timezone.utc),
+            "updated_at": datetime.now(timezone.utc),
             "error_message": result.error_message,
         }
 
@@ -110,7 +110,7 @@ async def persist_log(
     try:
         log_entry = JobLog(
             job_id=job_id,
-            ts=datetime.utcnow(),
+            ts=datetime.now(timezone.utc),
             level=level,
             message=message,
         )

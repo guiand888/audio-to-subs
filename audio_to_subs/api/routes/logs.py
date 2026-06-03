@@ -1,6 +1,6 @@
 """Log routes for job logging and global logs."""
 
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
@@ -121,7 +121,7 @@ async def create_job_log(
     # Create log entry
     log_entry = JobLog(
         job_id=job_id,
-        ts=datetime.utcnow(),
+        ts=datetime.now(timezone.utc),
         level=level,
         message=message,
     )
