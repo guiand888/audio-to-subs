@@ -19,6 +19,7 @@ from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.core.cancel import Cancelled, CancelToken
 from audio_to_subs.core.cost import compute_cost, extract_usage, CostBreakdown
+from audio_to_subs.core.path_utils import generate_output_path
 from audio_to_subs.core.pipeline import Pipeline, PipelineResult
 from audio_to_subs.db.models import Job, JobStatus, JobLog, LogLevel
 from audio_to_subs.queue_.claim import ClaimedJob
@@ -154,9 +155,17 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
     # Build output path if not provided
     output_path = claimed.output_path
     if not output_path:
+        # Check if we should save subtitles alongside source files
+        subtitles_same_dir = getattr(
+            deps.settings, "SUBTITLES_SAME_DIRECTORY", True
+        )
         # Generate output path from media path
-        media_path = Path(claimed.media_path)
-        output_path = media_path.parent / f"{media_path.stem}.{claimed.output_format}"
+        output_path = generate_output_path(
+            claimed.media_path,
+            claimed.language_code,
+            claimed.output_format,
+            subtitles_same_dir,
+        )
 
     # Create pipeline
     pipeline = Pipeline(
@@ -262,7 +271,6 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
 
 
 # Helper to get path from string
-from pathlib import Path
 
 
 async def _rescan_bazarr_movie(
