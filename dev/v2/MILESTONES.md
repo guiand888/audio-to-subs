@@ -14,7 +14,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
 | M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
 | M5.1 — M5 cleanup and verification | ⏳ Not Started | - | Depends on M5 |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.1 |
+| M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | ⏳ Not Started | - | Depends on M5.1 |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.2 |
 
 Every milestone ends with the same quality bar:
 
@@ -174,6 +175,33 @@ Acceptance:
 - No unused imports or dead code from M4/M5 transition
 - All tests pass
 - Lint and format checks clean
+
+## M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr
+
+**Goal**: Align volume mounts and subtitle path handling with Bazarr, Sonarr, and Radarr conventions. Separate movie/TV input paths and save subtitles alongside source files.
+
+**Depends on**: M5.1
+
+Tasks:
+- Add movies_root_path, tv_root_path, subtitles_same_directory settings
+- Extend Settings API and frontend with new path configuration
+- Update worker to save subtitles in source directory when configured
+- Update docker-compose.yml to use separate /movies and /tv volumes
+- Update testing.docker-compose.yaml to match new volume structure
+- Enhance PathMap with media type detection and output path generation
+- Add path validation to prevent traversal and ensure paths within allowed roots
+- Update frontend settings page with new configuration options
+- Update job creation to auto-generate output_path when subtitles_same_directory=True
+- Add tests for all new functionality
+
+Acceptance:
+- docker compose up brings up stack with /movies and /tv volumes instead of /input and /output
+- Subtitles are saved alongside source video files when subtitles_same_directory=True
+- Settings page allows configuration of movies_root_path, tv_root_path, and subtitles_same_directory
+- Path validation prevents jobs with media_path outside configured roots
+- Bazarr rescan picks up subtitles from same directory as video files
+- pytest, black, ruff, mypy all clean
+- New code ≥ 80% coverage
 
 ## M6 — Polish, docs, coverage, security pass
 
