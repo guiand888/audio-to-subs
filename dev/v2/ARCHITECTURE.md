@@ -168,7 +168,7 @@ Cancellation, crash recovery, and reaper behavior are covered in [`QUEUE.md`](QU
 
 ### Infra
 
-- **Nginx** (`nginx:1.27-alpine`) serves the static frontend and proxies `/api`. `proxy_buffering off` is required for SSE.
+- **Nginx** (`nginx:1.30-alpine`) serves the static frontend and proxies `/api`. `proxy_buffering off` is required for SSE.
 - **SQLite** with WAL mode is fine for 1 API + 1–3 workers. Document Postgres as the upgrade path (only `DATABASE_URL` change + `alembic upgrade head` needed).
 
 ## Cross-cutting design decisions

@@ -83,7 +83,7 @@ secret-rm:  ## Remove Mistral API key secret
 	podman secret rm mistral_api_key
 
 # Frontend targets — Node runs inside an ephemeral container; never on the host.
-FRONTEND_RUN := podman run --rm -v ./frontend:/app:Z -w /app node:20-alpine
+FRONTEND_RUN := podman run --rm -v ./frontend:/app:Z -w /app node:24-alpine
 
 frontend-install:  ## Install frontend dependencies (generates package-lock.json)
 	$(FRONTEND_RUN) sh -c "npm install"
@@ -92,10 +92,10 @@ frontend-build:  ## Build frontend for production (tsc + vite build)
 	$(FRONTEND_RUN) sh -c "npm run build"
 
 frontend-dev:  ## Start Vite dev server (proxies /api to localhost:8000)
-	podman run --rm -it -p 5173:5173 -v ./frontend:/app:Z -w /app node:20-alpine sh -c "npm run dev -- --host"
+	podman run --rm -it -p 5173:5173 -v ./frontend:/app:Z -w /app node:24-alpine sh -c "npm run dev -- --host"
 
 frontend-shell:  ## Open a shell in the Node container (for debugging npm issues)
-	podman run --rm -it -v ./frontend:/app:Z -w /app node:20-alpine sh
+	podman run --rm -it -v ./frontend:/app:Z -w /app node:24-alpine sh
 
 # WARNING: frontend-preview stubs auth and serves fake data.
 # It is confined to dev by frontend/.dockerignore and must never
@@ -104,4 +104,4 @@ frontend-preview:  ## Serve the built frontend with stubbed auth (DEV ONLY — n
 	podman run --rm -p 8080:80 \
 		-v ./frontend/dist:/usr/share/nginx/html:ro,Z \
 		-v ./frontend/nginx.preview.conf:/etc/nginx/conf.d/default.conf:ro,Z \
-		nginx:1.27-alpine
+		nginx:1.30-alpine

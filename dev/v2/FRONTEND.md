@@ -131,7 +131,7 @@ In Compose dev mode the proxy target is `http://backend:8000`. SSE works through
 
 ```dockerfile
 # Build
-FROM node:20-alpine AS build
+FROM node:24-alpine AS build
 WORKDIR /app
 COPY package.json package-lock.json ./
 RUN npm ci
@@ -139,7 +139,7 @@ COPY . .
 RUN npm run build      # outputs to dist/
 
 # Serve
-FROM nginx:1.27-alpine
+FROM nginx:1.30-alpine
 COPY --from=build /app/dist /usr/share/nginx/html
 COPY nginx.conf /etc/nginx/conf.d/default.conf
 EXPOSE 80
