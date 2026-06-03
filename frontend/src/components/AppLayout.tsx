@@ -99,12 +99,6 @@ export function AppLayout() {
             )
           })}
         </nav>
-
-        <Separator />
-        {/* Bottom: theme toggle */}
-        <div className="p-2 flex justify-center">
-          <ThemeToggle />
-        </div>
       </aside>
 
       {/* Main area */}
@@ -114,16 +108,19 @@ export function AppLayout() {
           <span className="text-sm text-muted-foreground">
             {user.username}
           </span>
-          <Button
-            variant="ghost"
-            size="sm"
-            onClick={handleLogout}
-            disabled={logout.isPending}
-            className="gap-2"
-          >
-            <LogOut className="h-4 w-4" />
-            Logout
-          </Button>
+          <div className="flex items-center gap-1">
+            <ThemeToggle />
+            <Button
+              variant="ghost"
+              size="sm"
+              onClick={handleLogout}
+              disabled={logout.isPending}
+              className="gap-2"
+            >
+              <LogOut className="h-4 w-4" />
+              Logout
+            </Button>
+          </div>
         </header>
 
         {/* Page content */}
