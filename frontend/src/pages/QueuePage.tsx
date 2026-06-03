@@ -30,6 +30,27 @@ function jobTitle(job: LiveJob): string {
   return parts[parts.length - 1] ?? job.media_path
 }
 
+// Format cost as USD
+function formatCost(cost: number | null | undefined): string {
+  if (cost === null || cost === undefined) return ""
+  if (cost === 0) return "$0.00"
+  if (cost < 0.01) return `$${cost.toFixed(4)}`
+  if (cost < 1) return `$${cost.toFixed(2)}`
+  return `$${cost.toFixed(2)}`
+}
+
+// Format duration as human-readable string
+function formatDuration(seconds: number | null | undefined): string {
+  if (seconds === null || seconds === undefined) return ""
+  if (seconds < 60) return `${Math.round(seconds)}s`
+  const minutes = Math.floor(seconds / 60)
+  const secs = Math.round(seconds % 60)
+  if (minutes < 60) return `${minutes}m ${secs}s`
+  const hours = Math.floor(minutes / 60)
+  const mins = minutes % 60
+  return `${hours}h ${mins}m`
+}
+
 function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
   const isTerminal =
     job.status === "done" ||
@@ -76,6 +97,22 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
               <span className="truncate">{job.stage || job.message || "Processing…"}</span>
               <span className="flex-none ml-2">{job.percent}%</span>
             </div>
+          </div>
+        )}
+
+        {/* Cost and duration info (for completed jobs) */}
+        {isTerminal && (job.estimated_cost_usd !== null || job.audio_duration_seconds !== null) && (
+          <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            {job.audio_duration_seconds !== null && (
+              <span className="flex items-center gap-1">
+                <span>Duration: {formatDuration(job.audio_duration_seconds)}</span>
+              </span>
+            )}
+            {job.estimated_cost_usd !== null && (
+              <span className="flex items-center gap-1">
+                <span>Cost: {formatCost(job.estimated_cost_usd)}</span>
+              </span>
+            )}
           </div>
         )}
       </CardContent>

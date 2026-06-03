@@ -10,7 +10,9 @@ import { AppLayout } from "@/components/AppLayout"
 import { LoginPage } from "@/pages/LoginPage"
 import { WantedPage } from "@/pages/WantedPage"
 import { QueuePage } from "@/pages/QueuePage"
-import { ComingSoonPage } from "@/pages/ComingSoonPage"
+import { HistoryPage } from "@/pages/HistoryPage"
+import { LogsPage } from "@/pages/LogsPage"
+import { SettingsPage } from "@/pages/SettingsPage"
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 
@@ -66,19 +68,19 @@ const queueRoute = createRoute({
 const historyRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "/history",
-  component: () => <ComingSoonPage page="History" />,
+  component: HistoryPage,
 })
 
 const logsRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "/logs",
-  component: () => <ComingSoonPage page="Logs" />,
+  component: LogsPage,
 })
 
 const settingsRoute = createRoute({
   getParentRoute: () => layoutRoute,
   path: "/settings",
-  component: () => <ComingSoonPage page="Settings" />,
+  component: SettingsPage,
 })
 
 // ── Tree ─────────────────────────────────────────────────────────────────────

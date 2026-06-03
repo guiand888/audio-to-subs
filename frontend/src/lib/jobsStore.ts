@@ -21,7 +21,11 @@ export interface LiveJob {
   output_format: string
   created_at: string
   started_at: string | null
+  finished_at: string | null
   cancel_requested: boolean
+  // Cost and duration (available for completed jobs)
+  audio_duration_seconds: number | null
+  estimated_cost_usd: number | null
 }
 
 interface JobsState {
@@ -89,22 +93,25 @@ export const useJobsStore = create<JobsState>()((set) => ({
     set(() => {
       const jobs: Record<string, LiveJob> = {}
       for (const j of apiJobs) {
-        if (j.status === "queued" || j.status === "running") {
-          jobs[j.id] = {
-            id: j.id,
-            status: j.status,
-            percent: j.progress_percent,
-            stage: j.progress_message ?? "",
-            message: j.progress_message ?? "",
-            source: j.source,
-            source_ref: j.source_ref,
-            media_path: j.media_path,
-            language_code: j.language_code,
-            output_format: j.output_format,
-            created_at: j.created_at,
-            started_at: j.started_at,
-            cancel_requested: j.cancel_requested,
-          }
+        // Include all jobs, not just queued/running
+        // This allows cost/duration to be available for recently completed jobs
+        jobs[j.id] = {
+          id: j.id,
+          status: j.status,
+          percent: j.progress_percent,
+          stage: j.progress_message ?? "",
+          message: j.progress_message ?? "",
+          source: j.source,
+          source_ref: j.source_ref,
+          media_path: j.media_path,
+          language_code: j.language_code,
+          output_format: j.output_format,
+          created_at: j.created_at,
+          started_at: j.started_at,
+          finished_at: j.finished_at,
+          cancel_requested: j.cancel_requested,
+          audio_duration_seconds: j.audio_duration_seconds,
+          estimated_cost_usd: j.estimated_cost_usd,
         }
       }
       return { jobs }
