@@ -7,7 +7,7 @@ import json
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from sqlalchemy import (
     Boolean,
@@ -96,8 +96,8 @@ class Job(Base):
 
     __tablename__ = "jobs"
 
-    id: Mapped[UUID] = mapped_column(
-        String(36), primary_key=True, default=uuid4, unique=True
+    id: Mapped[str] = mapped_column(
+        String(36), primary_key=True, default=lambda: str(uuid4()), unique=True
     )
     status: Mapped[JobStatus] = mapped_column(
         String(20), nullable=False, default=JobStatus.QUEUED
@@ -181,7 +181,7 @@ class JobLog(Base):
     __tablename__ = "job_logs"
 
     id: Mapped[int] = mapped_column(Integer, primary_key=True, autoincrement=True)
-    job_id: Mapped[UUID | None] = mapped_column(
+    job_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
     )
     ts: Mapped[datetime] = mapped_column(
@@ -241,7 +241,7 @@ class BazarrCache(Base):
     last_polled: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=func.now()
     )
-    active_job_id: Mapped[UUID | None] = mapped_column(String(36), nullable=True)
+    active_job_id: Mapped[str | None] = mapped_column(String(36), nullable=True)
 
     __table_args__ = (
         CheckConstraint("kind IN ('movie','episode')", name="bazarr_cache_kind_check"),
