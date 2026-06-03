@@ -3,7 +3,7 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel, Field
 from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.orm import joinedload
@@ -55,7 +55,7 @@ from audio_to_subs.api.routes.jobs import JobResponse
 async def get_history(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
-    status_filter: list[JobStatus] | None = None,
+    status_filter: list[JobStatus] | None = Query(default=None),
     source_filter: JobSource | None = None,
     language_filter: str | None = None,
     since: datetime | None = None,

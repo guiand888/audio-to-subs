@@ -28,7 +28,7 @@ class JobLogResponse(BaseModel):
     model_config = {"from_attributes": True}
 
     id: int
-    job_id: UUID
+    job_id: UUID | None  # nullable — global logs have no associated job
     ts: datetime
     level: LogLevel
     message: str
@@ -56,7 +56,7 @@ async def get_job_logs(
     """
     # Verify job exists
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
@@ -67,7 +67,7 @@ async def get_job_logs(
         )
 
     # Build query
-    query = select(JobLog).where(JobLog.job_id == job_id)
+    query = select(JobLog).where(JobLog.job_id == str(job_id))
 
     # Apply level filter if provided
     if level_filter is not None:
@@ -75,7 +75,7 @@ async def get_job_logs(
 
     # Get total count
     count_result = await db.execute(
-        select(func.count(JobLog.id)).where(JobLog.job_id == job_id)
+        select(func.count(JobLog.id)).where(JobLog.job_id == str(job_id))
     )
     total = count_result.scalar()
 
@@ -108,7 +108,7 @@ async def create_job_log(
     """
     # Verify job exists
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
@@ -174,7 +174,7 @@ async def get_global_logs(
     conditions = []
 
     if job_id is not None:
-        conditions.append(JobLog.job_id == job_id)
+        conditions.append(JobLog.job_id == str(job_id))
 
     if level_filter is not None:
         conditions.append(JobLog.level == level_filter)

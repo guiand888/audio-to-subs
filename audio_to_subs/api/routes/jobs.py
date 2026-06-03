@@ -413,7 +413,7 @@ async def get_job(
 ) -> JobResponse:
     """Get details for a specific job."""
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
@@ -443,7 +443,7 @@ async def cancel_job(
 
     # Get current job state
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
@@ -528,7 +528,7 @@ async def delete_job(
     cannot be deleted (they have audit value).
     """
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
@@ -574,7 +574,7 @@ async def notify_bazarr(
 
     # Get the job
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
