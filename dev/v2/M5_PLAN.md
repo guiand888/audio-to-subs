@@ -160,7 +160,7 @@ Deliver feature-complete v2 with History page, Logs page, Settings page, cost di
 - Display form with sections:
 
   **Mistral Configuration:**
-  - Model selector (dropdown with common models: mistral-medium-latest, voxtral-mini-latest, etc.)
+  - Model selector (dropdown: voxtral-mini-latest, voxtral-mini-2602, voxtral-small-2507 — only voxtral-mini-latest supports timestamps)
   - Audio rate: `mistral_rate_usd_per_minute` (number input, USD per minute)
   - Input token rate: `mistral_input_token_rate_usd` (nullable number)
   - Output token rate: `mistral_output_token_rate_usd` (nullable number)
@@ -281,20 +281,20 @@ M5 IMPLEMENTATION ORDER
 ## File Checklist
 
 ### New Files
-- [ ] `audio_to_subs/api/routes/history.py`
-- [ ] `frontend/src/pages/HistoryPage.tsx`
-- [ ] `frontend/src/pages/LogsPage.tsx`
-- [ ] `frontend/src/pages/SettingsPage.tsx`
-- [ ] `tests/test_api_history.py`
+- [x] `audio_to_subs/api/routes/history.py`
+- [x] `frontend/src/pages/HistoryPage.tsx`
+- [x] `frontend/src/pages/LogsPage.tsx`
+- [x] `frontend/src/pages/SettingsPage.tsx`
+- [x] `tests/test_api_history.py`
 
 ### Modified Files
-- [ ] `audio_to_subs/api/routes/logs.py` (add GET /api/logs)
-- [ ] `audio_to_subs/api/routes/jobs.py` (add POST /api/jobs/{id}/notify-bazarr)
-- [ ] `audio_to_subs/api/app.py` (include history_router)
-- [ ] `audio_to_subs/bazarr/client.py` (implement rescan methods)
-- [ ] `frontend/src/routes/router.tsx` (replace ComingSoon with real pages)
-- [ ] `frontend/src/pages/QueuePage.tsx` (add cost display)
-- [ ] `frontend/src/pages/HistoryPage.tsx` (ensure aggregate cost)
+- [x] `audio_to_subs/api/routes/logs.py` (add GET /api/logs)
+- [x] `audio_to_subs/api/routes/jobs.py` (add POST /api/jobs/{id}/notify-bazarr)
+- [x] `audio_to_subs/api/app.py` (include history_router)
+- [x] `audio_to_subs/bazarr/client.py` (implement rescan methods)
+- [x] `frontend/src/routes/router.tsx` (replace ComingSoon with real pages)
+- [x] `frontend/src/pages/QueuePage.tsx` (add cost display)
+- [x] `frontend/src/pages/HistoryPage.tsx` (ensure aggregate cost)
 
 ---
 
@@ -302,19 +302,19 @@ M5 IMPLEMENTATION ORDER
 
 From the milestone definition:
 
-- [ ] Complete several jobs of varying lengths/languages; History shows them with correct duration and cost
-- [ ] Settings page edits persist and take effect (poll interval honoured on the next tick; cost rates used for new jobs immediately)
-- [ ] Logs page surfaces the milestone messages (stage transitions, errors) for each job
+- [x] Complete several jobs of varying lengths/languages; History shows them with correct duration and cost
+- [x] Settings page edits persist and take effect (poll interval honoured on the next tick; cost rates used for new jobs immediately)
+- [x] Logs page surfaces the milestone messages (stage transitions, errors) for each job
 
 Additional technical acceptance:
 
-- [ ] `/api/history` returns completed jobs with aggregate stats
-- [ ] `/api/logs` returns paginated logs with filters
-- [ ] `/api/jobs/{id}/notify-bazarr` triggers rescan (202 Accepted)
-- [ ] Bazarr client rescan methods make real API calls
-- [ ] Settings page allows editing all cost-related settings
-- [ ] Cost displayed in Queue and History pages
-- [ ] All tests pass, lints clean, coverage >= 80%
+- [x] `/api/history` returns completed jobs with aggregate stats
+- [x] `/api/logs` returns paginated logs with filters
+- [x] `/api/jobs/{id}/notify-bazarr` triggers rescan (202 Accepted)
+- [x] Bazarr client rescan methods make real API calls
+- [x] Settings page allows editing all cost-related settings
+- [x] Cost displayed in Queue and History pages
+- [x] All tests pass, lints clean, coverage >= 80%
 
 ---
 

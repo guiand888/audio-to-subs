@@ -79,7 +79,7 @@ def __init__(
     structured_progress_callback: StructuredProgressCallback | None = None,
     cancel_token: CancelToken | None = None,
     temp_dir: str | None = None,
-    transcription_model: str = "voxtral-mini-latest",
+    transcription_model: str = "voxtral-mini-2602",
     language: str | None = None,
     verbose_progress: bool = False,
 ) -> None: ...

@@ -13,7 +13,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M3 — Bazarr + `/api/wanted` | ✅ Done | 2026-06-02 | Depends on M2 |
 | M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
 | M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
-| M5.1 — M5 cleanup and verification | 🔄 In Progress | - | Depends on M5 |
+| M5.1 — M5 cleanup and verification | ✅ Done | 2026-07-01 | Depends on M5 |
 | M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | 🔄 In Progress | - | Depends on M5.1 |
 | M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.2 |
 
