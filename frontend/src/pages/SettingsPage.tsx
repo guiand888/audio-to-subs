@@ -23,6 +23,7 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
+import * as SelectPrimitive from "@radix-ui/react-select"
 import { Badge } from "@/components/ui/badge"
 import {
   Table,
@@ -60,13 +61,57 @@ function countChanges(formData: Partial<SettingsPatch>, settings: SettingsOut): 
   return n
 }
 
-// Common Mistral models
-const MISTRAL_MODEL_OPTIONS = [
-  { value: "mistral-medium-latest", label: "Mistral Medium Latest" },
-  { value: "voxtral-mini-latest", label: "Voxtral Mini Latest" },
-  { value: "mistral-small-latest", label: "Mistral Small Latest" },
-  { value: "mistral-large-latest", label: "Mistral Large Latest" },
+const MISTRAL_MODELS = [
+  {
+    value: "voxtral-mini-latest",
+    label: "Voxtral Mini (latest)",
+    ratePerMin: 0.003,
+    inputTokenRate: null as number | null,
+    outputTokenRate: null as number | null,
+    pricingLine: "$0.003 / min",
+  },
+  {
+    value: "voxtral-mini-2602",
+    label: "Voxtral Mini 2602",
+    ratePerMin: 0.003,
+    inputTokenRate: null as number | null,
+    outputTokenRate: null as number | null,
+    pricingLine: "$0.003 / min",
+  },
+  {
+    value: "voxtral-small-2507",
+    label: "Voxtral Small 2507",
+    ratePerMin: 0.004,
+    inputTokenRate: 0.0000001,
+    outputTokenRate: 0.0000003,
+    pricingLine: "$0.004 / min · in $0.1/M · out $0.3/M",
+  },
 ]
+
+function formatDecimal(v: number | null | undefined): string {
+  if (v == null) return ""
+  if (v === 0) return "0"
+  return v.toFixed(10).replace(/(\.\d*[1-9])0+$/, "$1").replace(/\.0+$/, "")
+}
+
+function ModelSelectItem({ model }: { model: (typeof MISTRAL_MODELS)[0] }) {
+  return (
+    <SelectPrimitive.Item
+      value={model.value}
+      className="relative flex w-full cursor-default select-none items-center rounded-sm py-1.5 pl-2 pr-8 text-sm outline-none focus:bg-accent focus:text-accent-foreground data-[disabled]:pointer-events-none data-[disabled]:opacity-50"
+    >
+      <span className="absolute right-2 flex h-3.5 w-3.5 items-center justify-center">
+        <SelectPrimitive.ItemIndicator>
+          <Check className="h-4 w-4" />
+        </SelectPrimitive.ItemIndicator>
+      </span>
+      <div className="flex flex-col min-w-0">
+        <SelectPrimitive.ItemText>{model.label}</SelectPrimitive.ItemText>
+        <span className="text-xs text-muted-foreground">{model.pricingLine}</span>
+      </div>
+    </SelectPrimitive.Item>
+  )
+}
 
 // Output format options
 const FORMAT_OPTIONS: { value: string; label: string }[] = [
@@ -183,6 +228,18 @@ export function SettingsPage() {
     setFormData({ ...formData, [field]: value })
   }
 
+  const handleModelChange = (value: string) => {
+    const model = MISTRAL_MODELS.find((m) => m.value === value)
+    if (!model) return
+    setFormData((prev) => ({
+      ...prev,
+      mistral_model: value,
+      mistral_rate_usd_per_minute: model.ratePerMin,
+      mistral_input_token_rate_usd: model.inputTokenRate,
+      mistral_output_token_rate_usd: model.outputTokenRate,
+    }))
+  }
+
   // Path mappings management
   const addPathMapping = () => {
     const currentMappings = (formData.path_mappings as Array<{ from: string; to: string }>) || []
@@ -290,28 +347,24 @@ export function SettingsPage() {
               <Label htmlFor="mistral-model">Model</Label>
               <Select
                 value={formData.mistral_model || ""}
-                onValueChange={handleSelectChange("mistral_model")}
+                onValueChange={handleModelChange}
               >
                 <SelectTrigger className="w-full">
                   <SelectValue placeholder="Select model" />
                 </SelectTrigger>
                 <SelectContent>
-                  {MISTRAL_MODEL_OPTIONS.map((opt) => (
-                    <SelectItem key={opt.value} value={opt.value}>
-                      {opt.label}
-                    </SelectItem>
+                  {MISTRAL_MODELS.map((m) => (
+                    <ModelSelectItem key={m.value} model={m} />
                   ))}
                 </SelectContent>
               </Select>
             </div>
 
             <div className="space-y-2">
-              <Label htmlFor="audio-rate">
-                Audio Rate (USD per minute)
-                <Badge variant="outline" className="ml-2 text-xs">
-                  Primary billing
-                </Badge>
-              </Label>
+              <div className="flex items-center gap-2">
+                <Label htmlFor="audio-rate">Audio Rate (USD per minute)</Label>
+                <Badge variant="outline" className="text-xs">Primary Billing</Badge>
+              </div>
               <Input
                 id="audio-rate"
                 type="number"
@@ -328,37 +381,45 @@ export function SettingsPage() {
 
             <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
               <div className="space-y-2">
-                <Label htmlFor="input-token-rate">
-                  Input Token Rate (USD per token)
-                  <Badge variant="outline" className="ml-2 text-xs">
-                    Optional
-                  </Badge>
-                </Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="input-token-rate">Input Token Rate (USD per token)</Label>
+                  <Badge variant="outline" className="text-xs">Optional</Badge>
+                </div>
                 <Input
                   id="input-token-rate"
-                  type="number"
-                  min="0"
-                  step="0.000001"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="0.00"
-                  value={formData.mistral_input_token_rate_usd ?? ""}
-                  onChange={handleNumberChange("mistral_input_token_rate_usd")}
+                  value={formatDecimal(formData.mistral_input_token_rate_usd)}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    const num = raw === "" ? null : parseFloat(raw)
+                    setFormData((prev) => ({
+                      ...prev,
+                      mistral_input_token_rate_usd: num !== null && !isNaN(num) ? num : null,
+                    }))
+                  }}
                 />
               </div>
               <div className="space-y-2">
-                <Label htmlFor="output-token-rate">
-                  Output Token Rate (USD per token)
-                  <Badge variant="outline" className="ml-2 text-xs">
-                    Optional
-                  </Badge>
-                </Label>
+                <div className="flex items-center gap-2">
+                  <Label htmlFor="output-token-rate">Output Token Rate (USD per token)</Label>
+                  <Badge variant="outline" className="text-xs">Optional</Badge>
+                </div>
                 <Input
                   id="output-token-rate"
-                  type="number"
-                  min="0"
-                  step="0.000001"
+                  type="text"
+                  inputMode="decimal"
                   placeholder="0.00"
-                  value={formData.mistral_output_token_rate_usd ?? ""}
-                  onChange={handleNumberChange("mistral_output_token_rate_usd")}
+                  value={formatDecimal(formData.mistral_output_token_rate_usd)}
+                  onChange={(e) => {
+                    const raw = e.target.value
+                    const num = raw === "" ? null : parseFloat(raw)
+                    setFormData((prev) => ({
+                      ...prev,
+                      mistral_output_token_rate_usd: num !== null && !isNaN(num) ? num : null,
+                    }))
+                  }}
                 />
               </div>
             </div>

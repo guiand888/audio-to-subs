@@ -176,7 +176,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         api_key=deps.mistral_api_key,
         structured_progress_callback=bridge.on_event,
         cancel_token=token,
-        transcription_model=getattr(deps.settings, "mistral_model", "voxtral-mini-latest"),
+        transcription_model=getattr(deps.settings, "mistral_model", "voxtral-mini-2602"),
         language=claimed.language_code,
         verbose_progress=False,  # We use structured callback
     )

@@ -101,7 +101,7 @@ class Pipeline:
         api_key: str,
         progress_callback: Optional[ProgressCallback] = None,
         temp_dir: Optional[str] = None,
-        transcription_model: str = "voxtral-mini-latest",
+        transcription_model: str = "voxtral-mini-2602",
         language: Optional[str] = None,
         verbose_progress: bool = False,
         *,

@@ -21,8 +21,8 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 # Default settings values
 DEFAULT_SETTINGS = {
-    "mistral_model": "mistral-medium-latest",
-    "mistral_rate_usd_per_minute": 0.0,
+    "mistral_model": "voxtral-mini-latest",
+    "mistral_rate_usd_per_minute": 0.003,
     "mistral_input_token_rate_usd": None,
     "mistral_output_token_rate_usd": None,
     "bazarr_poll_interval": 3600,
