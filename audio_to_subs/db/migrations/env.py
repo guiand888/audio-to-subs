@@ -1,5 +1,6 @@
 """Alembic environment configuration for audio_to_subs."""
 
+import os
 from logging.config import fileConfig
 
 from alembic import context
@@ -19,6 +20,10 @@ config = context.config
 
 if config.config_file_name is not None:
     fileConfig(config.config_file_name)
+
+# Override URL from environment, converting async driver to sync for alembic
+if db_url := os.environ.get("DATABASE_URL"):
+    config.set_main_option("sqlalchemy.url", db_url.replace("+aiosqlite", ""))
 
 # Add your model's MetaData object here
 # for 'autogenerate' support

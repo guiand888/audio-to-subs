@@ -1,0 +1,51 @@
+services:
+  sonarr:
+    image: lscr.io/linuxserver/sonarr:latest
+    container_name: sonarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+    volumes:
+      - sonarr-config:/config:Z
+      - audio-to-subs-tv:/tv:z
+    restart: unless-stopped
+    ports:
+      - 8989:8989
+
+  radarr:
+    image: lscr.io/linuxserver/radarr:latest
+    container_name: radarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+    volumes:
+      - radarr-config:/config:Z
+      - audio-to-subs-movies:/movies:z
+    restart: unless-stopped
+    ports:
+      - 7878:7878
+
+  bazarr:
+    image: lscr.io/linuxserver/bazarr:latest
+    container_name: bazarr
+    environment:
+      - PUID=1000
+      - PGID=1000
+      - TZ=Asia/Singapore
+    volumes:
+      - bazarr-config:/config:Z
+      - audio-to-subs-movies:/movies:z
+      - audio-to-subs-tv:/tv:z
+    restart: unless-stopped
+    ports:
+      - 6767:6767
+
+volumes:
+  sonarr-config:
+    driver: local
+  radarr-config:
+    driver: local
+  bazarr-config:
+    driver: local

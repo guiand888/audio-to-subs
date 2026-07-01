@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field, field_validator
+from pydantic import Field, ValidationInfo, field_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -15,28 +15,28 @@ class Settings(BaseSettings):
         description="Database connection URL",
     )
 
-    # Session
-    SESSION_SECRET: str | None = Field(
-        default=None,
-        description="Session secret key",
-    )
+    # Session — FILE must come before SECRET so it's available in the validator
     SESSION_SECRET_FILE: str | None = Field(
         default=None,
         description="Path to file containing session secret",
     )
+    SESSION_SECRET: str | None = Field(
+        default=None,
+        description="Session secret key",
+    )
 
-    # Admin credentials
+    # Admin credentials — FILE must come before PASSWORD so it's available in the validator
     ADMIN_USERNAME: str | None = Field(
         default=None,
         description="Admin username for bootstrap",
     )
-    ADMIN_PASSWORD: str | None = Field(
-        default=None,
-        description="Admin password for bootstrap",
-    )
     ADMIN_PASSWORD_FILE: str | None = Field(
         default=None,
         description="Path to file containing admin password",
+    )
+    ADMIN_PASSWORD: str | None = Field(
+        default=None,
+        description="Admin password for bootstrap",
     )
 
     # Security
@@ -61,14 +61,14 @@ class Settings(BaseSettings):
         description="Bazarr API key",
     )
 
-    # Mistral
-    MISTRAL_API_KEY: str | None = Field(
-        default=None,
-        description="Mistral API key",
-    )
+    # Mistral — FILE must come before KEY so it's available in the validator
     MISTRAL_API_KEY_FILE: str | None = Field(
         default=None,
         description="Path to file containing Mistral API key",
+    )
+    MISTRAL_API_KEY: str | None = Field(
+        default=None,
+        description="Mistral API key",
     )
 
     # Application
@@ -101,58 +101,49 @@ class Settings(BaseSettings):
     @field_validator("ADMIN_PASSWORD", mode="before")
     @classmethod
     def load_admin_password_from_file(
-        cls, v: str | None, values: dict[str, Any]
+        cls, v: str | None, info: ValidationInfo
     ) -> str | None:
-        """Load admin password from file if ADMIN_PASSWORD_FILE is set."""
         if v is not None:
             return v
-        
-        password_file = values.get("ADMIN_PASSWORD_FILE")
+        password_file = info.data.get("ADMIN_PASSWORD_FILE")
         if password_file is not None:
             try:
-                with open(password_file, "r") as f:
+                with open(password_file) as f:
                     return f.read().strip()
             except FileNotFoundError:
                 return None
-        
         return None
 
     @field_validator("MISTRAL_API_KEY", mode="before")
     @classmethod
     def load_mistral_api_key_from_file(
-        cls, v: str | None, values: dict[str, Any]
+        cls, v: str | None, info: ValidationInfo
     ) -> str | None:
-        """Load Mistral API key from file if MISTRAL_API_KEY_FILE is set."""
         if v is not None:
             return v
-        
-        api_key_file = values.get("MISTRAL_API_KEY_FILE")
+        api_key_file = info.data.get("MISTRAL_API_KEY_FILE")
         if api_key_file is not None:
             try:
-                with open(api_key_file, "r") as f:
+                with open(api_key_file) as f:
                     return f.read().strip()
             except FileNotFoundError:
                 return None
-        
         return None
 
     @field_validator("SESSION_SECRET", mode="before")
     @classmethod
     def load_session_secret_from_file(
-        cls, v: str | None, values: dict[str, Any]
+        cls, v: str | None, info: ValidationInfo
     ) -> str | None:
-        """Load session secret from file if SESSION_SECRET_FILE is set."""
         if v is not None:
             return v
-        
-        secret_file = values.get("SESSION_SECRET_FILE")
+        secret_file = info.data.get("SESSION_SECRET_FILE")
         if secret_file is not None:
             try:
-                with open(secret_file, "r") as f:
+                with open(secret_file) as f:
                     return f.read().strip()
             except FileNotFoundError:
                 return None
-        
         return None
 
     @property

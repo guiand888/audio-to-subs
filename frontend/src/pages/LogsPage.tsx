@@ -74,20 +74,20 @@ interface LogsFiltersProps {
 }
 
 function LogsFiltersForm({ filters, onChange }: LogsFiltersProps) {
-  const [level, setLevel] = useState<LogLevel | undefined>(filters.level_filter)
+  const [level, setLevel] = useState<LogLevel | "_all">(filters.level_filter ?? "_all")
   const [jobId, setJobId] = useState<string | undefined>(filters.job_id)
 
   const handleApply = () => {
     onChange({
       ...filters,
-      level_filter: level,
+      level_filter: level !== "_all" ? (level as LogLevel) : undefined,
       job_id: jobId || undefined,
       offset: 0,
     })
   }
 
   const handleReset = () => {
-    setLevel(undefined)
+    setLevel("_all")
     setJobId(undefined)
     onChange({ offset: 0 })
   }
@@ -102,13 +102,13 @@ function LogsFiltersForm({ filters, onChange }: LogsFiltersProps) {
           <Label htmlFor="level-filter">Level</Label>
           <Select
             value={level}
-            onValueChange={(v) => setLevel(v as LogLevel)}
+            onValueChange={(v) => setLevel(v as LogLevel | "_all")}
           >
             <SelectTrigger className="w-full">
               <SelectValue placeholder="All levels" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All levels</SelectItem>
+              <SelectItem value="_all">All levels</SelectItem>
               {LEVEL_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   <span className={opt.color}>{opt.label}</span>

@@ -20,17 +20,13 @@ from audio_to_subs.api.routes.wanted import router as wanted_router
 from audio_to_subs.api.routes.history import router as history_router
 from audio_to_subs.api.settings import get_settings
 from audio_to_subs.auth.bootstrap import bootstrap_admin
-from audio_to_subs.bazarr.poller import run_bazarr_poller, stop_poller
-from audio_to_subs.db.session import init_db
+from audio_to_subs.bazarr.poller import start_poller, stop_poller
 from audio_to_subs.queue_.reaper import reap_stale_running
 
 logger = logging.getLogger(__name__)
 
 # Global reaper task
 _reaper_task: asyncio.Task | None = None
-
-# Global poller task
-_poller_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
@@ -44,11 +40,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting up...")
 
-    # Initialize database
-    logger.info("Initializing database...")
-    await init_db(settings.DATABASE_URL)
-
-    # Run migrations
+    # Run migrations (Alembic is the single source of truth for the schema)
     logger.info("Running database migrations...")
     import subprocess
 
@@ -62,6 +54,20 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("Failed to run migrations: %s", result.stderr)
         raise RuntimeError(f"Migration failed: {result.stderr}")
     logger.info("Database migrations applied")
+
+    # Bootstrap session secret: generate and persist one if not provided via
+    # SESSION_SECRET and no secret file exists yet. Persisted to the data
+    # volume so sessions survive restarts.
+    if not settings.SESSION_SECRET and settings.SESSION_SECRET_FILE:
+        from pathlib import Path
+
+        from audio_to_subs.auth.sessions import SessionManager
+
+        if not Path(settings.SESSION_SECRET_FILE).exists():
+            SessionManager.write_secret_file(settings.SESSION_SECRET_FILE)
+            logger.info(
+                "Generated new session secret at %s", settings.SESSION_SECRET_FILE
+            )
 
     # Bootstrap admin user
     logger.info("Bootstrapping admin user...")
@@ -85,9 +91,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     )
     logger.info("Reaper task started")
 
-    # Start Bazarr poller task
-    global _poller_task
-    _poller_task = asyncio.create_task(run_bazarr_poller(app))
+    # Create the shutdown event that run_bazarr_poller watches, then start the
+    # poller via the canonical helper that manages app.state.poller_task.
+    app.state.shutdown = asyncio.Event()
+    await start_poller(app)
     logger.info("Bazarr poller task started")
 
     logger.info("Startup complete")
@@ -97,13 +104,9 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Shutdown
     logger.info("Shutting down...")
 
-    # Cancel Bazarr poller task
-    if _poller_task:
-        _poller_task.cancel()
-        try:
-            await _poller_task
-        except asyncio.CancelledError:
-            pass
+    # Signal and await the Bazarr poller via the matching helper.
+    app.state.shutdown.set()
+    await stop_poller(app)
 
     # Cancel reaper task
     if _reaper_task:
@@ -123,7 +126,7 @@ async def _run_reaper_periodically(database_url: str) -> None:
             from audio_to_subs.db.session import get_async_session
 
             async with get_async_session(database_url) as session:
-                reaped = reap_stale_running(session, stale_seconds=120)
+                reaped = await reap_stale_running(session, stale_seconds=120)
                 if reaped > 0:
                     logger.info(f"Reaper: {reaped} stale jobs requeued")
         except Exception as e:
@@ -157,14 +160,16 @@ def create_app() -> FastAPI:
         allow_headers=["*"],
     )
 
-    # Include routers
+    # Include routers.
+    # stream_router MUST come before jobs_router: /api/jobs/stream is a literal
+    # path that would otherwise be shadowed by jobs_router's /{job_id} pattern.
     app.include_router(healthz.router)
     app.include_router(auth.router)
     app.include_router(settings_router)
     app.include_router(wanted_router)
-    app.include_router(jobs_router)
     app.include_router(stream_router)
     app.include_router(jobs_logs_router)
+    app.include_router(jobs_router)
     app.include_router(global_logs_router)
     app.include_router(history_router)
 

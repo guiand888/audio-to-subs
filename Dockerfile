@@ -50,7 +50,7 @@ COPY --from=builder /install /usr/local
 
 # Copy application source
 COPY audio_to_subs/ /app/audio_to_subs/
-COPY pyproject.toml /app/
+COPY pyproject.toml alembic.ini /app/
 
 # Set working directory
 WORKDIR /app

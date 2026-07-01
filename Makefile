@@ -1,4 +1,4 @@
-.PHONY: help build build-dev test test-watch lint format typecheck quality clean run shell frontend-install frontend-build frontend-dev frontend-shell
+.PHONY: help build build-dev test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell
 
 # Variables
 IMAGE_NAME := audio-to-subs
@@ -84,6 +84,9 @@ secret-rm:  ## Remove Mistral API key secret
 
 # Frontend targets — Node runs inside an ephemeral container; never on the host.
 FRONTEND_RUN := podman run --rm -v ./frontend:/app:Z -w /app node:24-alpine
+
+frontend-test:  ## Run frontend tests (vitest) in container
+	$(FRONTEND_RUN) sh -c "npm install && npm run test"
 
 frontend-install:  ## Install frontend dependencies (generates package-lock.json)
 	$(FRONTEND_RUN) sh -c "npm install"

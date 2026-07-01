@@ -1,10 +1,10 @@
 """Health check endpoint."""
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, HTTPException, status
 from pydantic import BaseModel
+from sqlalchemy import text
 
 from audio_to_subs.api.deps import SettingsDep
-from audio_to_subs.api.settings import Settings
 from audio_to_subs.db.session import get_async_session
 
 router = APIRouter(prefix="/api", tags=["healthz"])
@@ -20,7 +20,7 @@ class HealthResponse(BaseModel):
 
 @router.get("/healthz", response_model=HealthResponse)
 async def healthz(
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
 ) -> HealthResponse:
     """Health check endpoint.
     
@@ -31,7 +31,7 @@ async def healthz(
     try:
         async with get_async_session(settings.DATABASE_URL) as session:
             # Simple query to verify connection
-            await session.execute("SELECT 1")
+            await session.execute(text("SELECT 1"))
         db_status = "ok"
     except Exception as e:
         db_status = f"error: {str(e)}"

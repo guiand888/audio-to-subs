@@ -20,6 +20,6 @@ ipython==8.21.0
 pre-commit==3.7.0
 
 # Type stubs
-types-click==8.1.7
+types-click
 types-PyYAML==6.0.2
-types-itsdangerous==2.2.0
+types-itsdangerous

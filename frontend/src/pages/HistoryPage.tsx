@@ -86,23 +86,23 @@ interface HistoryFiltersProps {
 }
 
 function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
-  const [status, setStatus] = useState<JobStatus | undefined>(filters.status_filter?.[0])
-  const [source, setSource] = useState<JobSource | undefined>(filters.source_filter)
+  const [status, setStatus] = useState<JobStatus | "_all">(filters.status_filter?.[0] ?? "_all")
+  const [source, setSource] = useState<JobSource | "_all">(filters.source_filter ?? "_all")
   const [language, setLanguage] = useState<string | undefined>(filters.language_filter)
 
   const handleApply = () => {
     onChange({
       ...filters,
-      status_filter: status ? [status] : undefined,
-      source_filter: source,
+      status_filter: status !== "_all" ? [status as JobStatus] : undefined,
+      source_filter: source !== "_all" ? (source as JobSource) : undefined,
       language_filter: language || undefined,
-      offset: 0, // Reset to first page on filter change
+      offset: 0,
     })
   }
 
   const handleReset = () => {
-    setStatus(undefined)
-    setSource(undefined)
+    setStatus("_all")
+    setSource("_all")
     setLanguage(undefined)
     onChange({ offset: 0 })
   }
@@ -117,13 +117,13 @@ function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
           <Label htmlFor="status-filter">Status</Label>
           <Select
             value={status}
-            onValueChange={(v) => setStatus(v as JobStatus)}
+            onValueChange={(v) => setStatus(v as JobStatus | "_all")}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select status" />
+              <SelectValue placeholder="All statuses" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All statuses</SelectItem>
+              <SelectItem value="_all">All statuses</SelectItem>
               {STATUS_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
@@ -137,13 +137,13 @@ function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
           <Label htmlFor="source-filter">Source</Label>
           <Select
             value={source}
-            onValueChange={(v) => setSource(v as JobSource)}
+            onValueChange={(v) => setSource(v as JobSource | "_all")}
           >
             <SelectTrigger className="w-full">
-              <SelectValue placeholder="Select source" />
+              <SelectValue placeholder="All sources" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="">All sources</SelectItem>
+              <SelectItem value="_all">All sources</SelectItem>
               {SOURCE_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
                   {opt.label}
