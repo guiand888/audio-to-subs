@@ -8,10 +8,10 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
+from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from audio_to_subs.api.deps import SettingsDep, get_db
-from audio_to_subs.api.settings import Settings
 from audio_to_subs.db.models import Job, JobStatus
 
 if TYPE_CHECKING:
@@ -44,12 +44,17 @@ def _get_global_queue() -> asyncio.Queue:
 
 
 async def _event_generator(
+    request: Request,
     job_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events for a job or globally.
 
+    Polls the queue with a 1-second timeout so that client disconnect is
+    detected promptly rather than blocking forever on an empty queue.
+
     Args:
-        job_id: Specific job ID to stream, or None for global stream
+        request: FastAPI/Starlette request used to detect client disconnect.
+        job_id: Specific job ID to stream, or None for global stream.
     """
     if job_id:
         queue = _get_job_queue(job_id)
@@ -58,14 +63,19 @@ async def _event_generator(
 
     try:
         while True:
-            event_data = await queue.get()
-            yield f"data: {json.dumps(event_data)}\n\n"
+            if await request.is_disconnected():
+                logger.debug("SSE client disconnected for job %s", job_id)
+                break
+            try:
+                event_data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                yield f"data: {json.dumps(event_data)}\n\n"
+            except asyncio.TimeoutError:
+                continue  # re-check disconnect on next iteration
     except asyncio.CancelledError:
-        logger.debug(f"SSE connection cancelled for job {job_id}")
+        logger.debug("SSE connection cancelled for job %s", job_id)
     except Exception as e:
-        logger.error(f"SSE error for job {job_id}: {e}")
+        logger.error("SSE error for job %s: %s", job_id, e)
     finally:
-        # Clean up if this was the last listener
         if job_id and job_id in _job_event_queues:
             del _job_event_queues[job_id]
 
@@ -73,7 +83,7 @@ async def _event_generator(
 @router.get("/stream")
 async def global_stream(
     request: Request,
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
 ) -> EventSourceResponse:
     """Global SSE stream for all job events.
 
@@ -81,7 +91,7 @@ async def global_stream(
     job lifecycle events (new, progress, cancel, done).
     """
     return EventSourceResponse(
-        _event_generator(None),
+        _event_generator(request, None),
         media_type="text/event-stream",
     )
 
@@ -91,7 +101,7 @@ async def job_stream(
     job_id: UUID,
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
-    settings: Settings = Depends(SettingsDep),
+    settings: SettingsDep,
 ) -> EventSourceResponse:
     """Per-job SSE stream for progress updates.
 
@@ -111,7 +121,7 @@ async def job_stream(
         )
 
     return EventSourceResponse(
-        _event_generator(str(job_id)),
+        _event_generator(request, str(job_id)),
         media_type="text/event-stream",
     )
 
