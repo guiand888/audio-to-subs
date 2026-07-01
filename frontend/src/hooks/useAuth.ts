@@ -23,8 +23,12 @@ export function useLogin() {
   return useMutation({
     mutationFn: (credentials: { username: string; password: string }) =>
       api.post<LoginResponse>("/api/auth/login", credentials),
-    onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: ["auth", "me"] })
+    onSuccess: (data) => {
+      // Set cache synchronously so AppLayout sees the user before the navigate
+      // fires. invalidateQueries() leaves the stale null in place until the
+      // background refetch completes, causing the auth guard to redirect back
+      // to /login immediately after a successful login.
+      queryClient.setQueryData(["auth", "me"], data.user)
     },
   })
 }
