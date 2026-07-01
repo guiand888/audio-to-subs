@@ -480,6 +480,10 @@ class TestPollerIntegration:
         mock_app.state.shutdown = asyncio.Event()
         lifecycle: list[str] = []
 
+        # Capture the real wait_for before any patching to avoid self-recursion
+        # when the patch replaces asyncio.wait_for on the shared asyncio module.
+        real_wait_for = asyncio.wait_for
+
         @asynccontextmanager
         async def _tracked_session(_url: str):
             lifecycle.append("enter")
@@ -490,10 +494,12 @@ class TestPollerIntegration:
             lifecycle.append(f"wait:{int(timeout)}")
             # Trigger shutdown so the poller terminates after one iteration.
             mock_app.state.shutdown.set()
-            await asyncio.wait_for(coro, timeout=1.0)
+            await real_wait_for(coro, timeout=1.0)
 
         with (
-            patch("audio_to_subs.bazarr.poller.get_async_session", _tracked_session),
+            # get_async_session is imported locally inside run_bazarr_poller, so
+            # patch at the source module (not the poller module attribute).
+            patch("audio_to_subs.db.session.get_async_session", _tracked_session),
             patch(
                 "audio_to_subs.bazarr.poller._get_poll_interval",
                 new=AsyncMock(return_value=3600),
@@ -504,7 +510,7 @@ class TestPollerIntegration:
             ),
             patch("audio_to_subs.bazarr.poller.asyncio.wait_for", _tracked_wait_for),
         ):
-            await asyncio.wait_for(run_bazarr_poller(mock_app), timeout=5.0)
+            await real_wait_for(run_bazarr_poller(mock_app), timeout=5.0)
 
         exit_idx = lifecycle.index("exit")
         wait_idx = next(i for i, e in enumerate(lifecycle) if e.startswith("wait:3600"))
