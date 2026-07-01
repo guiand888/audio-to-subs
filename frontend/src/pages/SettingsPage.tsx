@@ -1,7 +1,8 @@
 // Settings page: Mistral pricing, Bazarr config, path mappings, defaults.
 // Fetches from GET /api/settings and saves with PATCH /api/settings.
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useMemo } from "react"
+import { useBlocker } from "@tanstack/react-router"
 import { useQuery, useMutation, useQueryClient } from "@tanstack/react-query"
 import { Check, Plus, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
@@ -31,7 +32,33 @@ import {
   TableHeader,
   TableRow,
 } from "@/components/ui/table"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { ApiError } from "@/lib/api"
+
+function countChanges(formData: Partial<SettingsPatch>, settings: SettingsOut): number {
+  let n = 0
+  const diff = (a: unknown, b: unknown) => { if (a !== b) n++ }
+  diff(formData.mistral_model, settings.mistral_model)
+  diff(formData.mistral_rate_usd_per_minute, settings.mistral_rate_usd_per_minute)
+  diff(formData.mistral_input_token_rate_usd, settings.mistral_input_token_rate_usd)
+  diff(formData.mistral_output_token_rate_usd, settings.mistral_output_token_rate_usd)
+  diff(formData.bazarr_poll_interval, settings.bazarr_poll_interval)
+  diff(formData.bazarr_track_no_subs, settings.bazarr_track_no_subs)
+  diff(formData.default_language, settings.default_language)
+  diff(formData.default_output_format, settings.default_output_format)
+  diff(formData.movies_root_path ?? "", settings.movies_root_path || "")
+  diff(formData.tv_root_path ?? "", settings.tv_root_path || "")
+  diff(formData.subtitles_same_directory ?? true, settings.subtitles_same_directory ?? true)
+  diff(JSON.stringify(formData.path_mappings ?? []), JSON.stringify(settings.path_mappings ?? []))
+  return n
+}
 
 // Common Mistral models
 const MISTRAL_MODEL_OPTIONS = [
@@ -97,6 +124,18 @@ export function SettingsPage() {
 
   // Form state
   const [formData, setFormData] = useState<Partial<SettingsPatch>>({})
+
+  const changeCount = useMemo(
+    () => (settings ? countChanges(formData, settings) : 0),
+    [formData, settings],
+  )
+
+  const blocker = useBlocker({
+    shouldBlockFn: () => changeCount > 0,
+    withResolver: true,
+    enableBeforeUnload: true,
+    disabled: changeCount === 0,
+  })
 
   // Sync form data with fetched settings
   useEffect(() => {
@@ -194,20 +233,48 @@ export function SettingsPage() {
             Configure transcription and integration settings
           </p>
         </div>
-        <Button onClick={handleSave} disabled={mutation.isPending}>
-          {mutation.isPending ? (
-            <>
-              <Loader2 className="h-4 w-4 mr-2 animate-spin" />
-              Saving...
-            </>
-          ) : (
-            <>
-              <Check className="h-4 w-4 mr-2" />
-              Save Settings
-            </>
+        <div className="flex items-center gap-3">
+          {changeCount > 0 && (
+            <span className="text-xs text-muted-foreground">
+              {changeCount} {changeCount === 1 ? "change" : "changes"}
+            </span>
           )}
-        </Button>
+          <Button onClick={handleSave} disabled={mutation.isPending}>
+            {mutation.isPending ? (
+              <>
+                <Loader2 className="h-4 w-4 mr-2 animate-spin" />
+                Saving...
+              </>
+            ) : (
+              <>
+                <Check className="h-4 w-4 mr-2" />
+                Save Settings
+              </>
+            )}
+          </Button>
+        </div>
       </div>
+
+      {/* Unsaved-changes navigation guard */}
+      <Dialog open={blocker.status === "blocked"} onOpenChange={() => blocker.reset?.()}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Unsaved changes</DialogTitle>
+            <DialogDescription>
+              You have {changeCount} unsaved {changeCount === 1 ? "change" : "changes"}.
+              Leave without saving?
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => blocker.reset?.()}>
+              Stay
+            </Button>
+            <Button variant="destructive" onClick={() => blocker.proceed?.()}>
+              Leave
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
 
       <div className="space-y-6 max-w-4xl">
         {/* Mistral Configuration */}
@@ -326,16 +393,18 @@ export function SettingsPage() {
               </p>
             </div>
 
-            <div className="space-y-2">
-              <Label htmlFor="track-no-subs">Track Items with No Subtitles</Label>
+            <div className="flex items-center justify-between">
+              <div>
+                <Label htmlFor="track-no-subs">Track Items with No Subtitles</Label>
+                <p className="text-sm text-muted-foreground">
+                  Include items that have no subtitles in any language.
+                </p>
+              </div>
               <Switch
                 id="track-no-subs"
                 checked={formData.bazarr_track_no_subs ?? false}
                 onCheckedChange={handleBooleanChange("bazarr_track_no_subs")}
               />
-              <p className="text-sm text-muted-foreground">
-                Include items that have no subtitles in any language.
-              </p>
             </div>
           </CardContent>
         </Card>
