@@ -155,6 +155,12 @@ Allow a small fudge factor on timing; if flakiness becomes a problem, retry the 
 - Assert the worker thread raises `Cancelled` within 500 ms.
 - For FFmpeg termination: use a subprocess sentinel (`yes > /tmp/sink`) and assert it's killed within 1 s of cancel.
 
+### `test_bazarr_poller.py` — session-before-sleep regression
+
+`TestPollerIntegration.test_poller_releases_session_before_sleep` verifies that `run_bazarr_poller` closes its DB session *before* the inter-poll `asyncio.wait_for` sleep, not during it. Uses a lifecycle list to record `enter`/`exit` of the session context manager and the `wait:N` event, then asserts `exit` precedes `wait:3600`.
+
+`TestHealthz.test_healthz_returns_503_when_db_unavailable` (in `test_api_healthz.py`) verifies that `GET /api/healthz` returns 503 with a `database` error detail when `get_async_session` raises `OperationalError` (e.g. database locked).
+
 ### `test_bazarr_*`
 
 `respx` mocks the httpx client:

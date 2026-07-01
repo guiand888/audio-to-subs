@@ -2,6 +2,7 @@
 
 import asyncio
 import json
+from contextlib import asynccontextmanager
 from datetime import datetime, timezone, timedelta
 from unittest.mock import AsyncMock, Mock, patch
 
@@ -418,3 +419,95 @@ class TestPollerIntegration:
 
         assert task.cancelled()
         assert mock_app.state.poller_task is None
+
+    @pytest.mark.asyncio
+    async def test_run_bazarr_poller_exits_when_shutdown_set(self):
+        """run_bazarr_poller must return promptly when shutdown is already set.
+
+        Before the fix, run_bazarr_poller checked app.state.shutdown at the top
+        of its loop and raised AttributeError because the lifespan never created
+        the event.  After the fix the function reads the event, sees it is set,
+        and returns immediately.
+        """
+        mock_app = Mock()
+        mock_app.state = Mock()
+        mock_app.state.shutdown = asyncio.Event()
+        mock_app.state.shutdown.set()  # already shut down
+
+        # Should return in well under 2 seconds; if it hangs the fix is broken.
+        await asyncio.wait_for(run_bazarr_poller(mock_app), timeout=2.0)
+
+    @pytest.mark.asyncio
+    async def test_run_bazarr_poller_wait_for_no_suppress_timeout_kwarg(self):
+        """The interval wait inside run_bazarr_poller must not raise TypeError.
+
+        Before the fix, asyncio.wait_for was called with suppress_timeout=True
+        which is not a valid kwarg and raises TypeError immediately after the
+        first Bazarr-not-configured sleep attempt.
+        After the fix the interval wait uses try/except asyncio.TimeoutError.
+        """
+        mock_app = Mock()
+        mock_app.state = Mock()
+        mock_app.state.shutdown = asyncio.Event()
+
+        # Signal shutdown after a short delay so the poller exercises the
+        # wait_for path (Bazarr not configured → interval wait) at least once.
+        async def _trigger():
+            await asyncio.sleep(0.2)
+            mock_app.state.shutdown.set()
+
+        asyncio.create_task(_trigger())
+
+        # Patch the DB session so the poller can get the interval without a DB.
+        with patch(
+            "audio_to_subs.bazarr.poller._get_poll_interval",
+            new=AsyncMock(return_value=60),
+        ):
+            # TypeError from suppress_timeout=True would propagate here and fail.
+            await asyncio.wait_for(run_bazarr_poller(mock_app), timeout=3.0)
+
+    @pytest.mark.asyncio
+    async def test_poller_releases_session_before_sleep(self):
+        """Regression: DB session must exit before the inter-poll wait.
+
+        Before the fix, the asyncio.wait_for sleep (when Bazarr is not
+        configured) ran inside the async-with get_async_session() block.
+        This held a BEGIN IMMEDIATE write lock for the full poll interval
+        (default 3600 s), blocking every other writer (reaper, health check).
+        """
+        mock_app = Mock()
+        mock_app.state = Mock()
+        mock_app.state.shutdown = asyncio.Event()
+        lifecycle: list[str] = []
+
+        @asynccontextmanager
+        async def _tracked_session(_url: str):
+            lifecycle.append("enter")
+            yield Mock()
+            lifecycle.append("exit")
+
+        async def _tracked_wait_for(coro, timeout):
+            lifecycle.append(f"wait:{int(timeout)}")
+            # Trigger shutdown so the poller terminates after one iteration.
+            mock_app.state.shutdown.set()
+            await asyncio.wait_for(coro, timeout=1.0)
+
+        with (
+            patch("audio_to_subs.bazarr.poller.get_async_session", _tracked_session),
+            patch(
+                "audio_to_subs.bazarr.poller._get_poll_interval",
+                new=AsyncMock(return_value=3600),
+            ),
+            patch(
+                "audio_to_subs.bazarr.poller.get_bazarr_client",
+                new=AsyncMock(return_value=None),
+            ),
+            patch("audio_to_subs.bazarr.poller.asyncio.wait_for", _tracked_wait_for),
+        ):
+            await asyncio.wait_for(run_bazarr_poller(mock_app), timeout=5.0)
+
+        exit_idx = lifecycle.index("exit")
+        wait_idx = next(i for i, e in enumerate(lifecycle) if e.startswith("wait:3600"))
+        assert exit_idx < wait_idx, (
+            f"Session must close before the inter-poll sleep; lifecycle={lifecycle}"
+        )

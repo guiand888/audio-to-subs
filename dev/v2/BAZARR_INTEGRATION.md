@@ -61,14 +61,22 @@ If during implementation the endpoint is discovered, fill it in and remove the w
 
 ```python
 async def run_bazarr_poller(app):
+    interval = 3600  # default if session fails before _get_poll_interval
     while not app.state.shutdown.is_set():
-        interval = await get_setting(app.state.db, "bazarr_poll_interval_seconds", 3600)
         try:
-            await poll_once(app)
+            async with get_async_session(settings.DATABASE_URL) as db:
+                interval = await _get_poll_interval(db)
+                client = await get_bazarr_client(...)
+                if client is not None:
+                    path_map = await get_path_map(db)
+                    await poll_once(db, client, path_map)
         except Exception as e:
-            log.warning("Bazarr poll failed: %s", e)
-        await asyncio.wait_for(app.state.shutdown.wait(), timeout=interval, suppress_timeout=True)
+            log.error("Bazarr poller error: %s", e)
+        # Session is CLOSED before this sleep — no write lock held during wait.
+        await asyncio.wait_for(app.state.shutdown.wait(), timeout=interval)
 ```
+
+**Session lifetime rule**: the `get_async_session()` context must always exit *before* any `asyncio.wait_for` / `asyncio.sleep` that spans the inter-poll interval. Holding the session open during a sleep holds the `BEGIN IMMEDIATE` write lock for the full duration, blocking the reaper, health check, and every API write. The wait is always placed *after* the `async with` block closes.
 
 `poll_once`:
 1. Records `started_at = utcnow()`.

@@ -1,5 +1,3 @@
-version: '3.8'
-
 services:
   backend:
     build:
@@ -7,8 +5,6 @@ services:
       dockerfile: Dockerfile
     image: audio-to-subs:backend
     container_name: audio-to-subs-backend
-    
-    # Environment variables
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
@@ -19,79 +15,66 @@ services:
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - BEHIND_TLS=false
       - DEBUG=true
-    
+
     # Secrets for sensitive data
     secrets:
       - admin_password
-    
-    # Volume mounts
     volumes:
       # Database and session data (shared with worker)
       - audio-to-subs-data:/data:z
       # Movie files (aligned with Radarr/Bazarr)
-      - ./movies:/movies:z
+      - audio-to-subs-movies:/movies:z
       # TV series files (aligned with Sonarr/Bazarr)
-      - ./tv:/tv:z
+      - audio-to-subs-tv:/tv:z
       # Temporary processing
-      - /tmp/audio-to-subs:z
-    
-    # Ports
+      - audio-to-subs-tmp:/tmp/audio-to-subs:z
     ports:
       - "8000:8000"
-    
-    # Dependencies
+    # Health check (defined here, not in the Dockerfile: Podman builds OCI
+    # images and silently drops Dockerfile HEALTHCHECK instructions)
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
     depends_on:
       redis:
         condition: service_healthy
-    
-    # Resource limits
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          cpus: "2.0"
           memory: 2G
         reservations:
-          cps: '0.5'
+          cpus: "0.5"
           memory: 512M
-    
-    # Restart policy
     restart: unless-stopped
-    
-    # Security options
     security_opt:
       - no-new-privileges:true
-    
-    # User
     user: "1000:1000"
 
   redis:
     image: redis:8-alpine
     container_name: audio-to-subs-redis
-    
-    # Ports
     ports:
       - "6379:6379"
-    
     # Persistence (optional, Redis can be stateless for our use case)
     volumes:
       - audio-to-subs-redis-data:/data:z
-    
-    # Health check
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
       timeout: 5s
       retries: 5
       start_period: 5s
-    
-    # Restart policy
     restart: unless-stopped
-    
-    # Security options
     security_opt:
       - no-new-privileges:true
-    
-    # User
     user: "1000:1000"
 
   worker:
@@ -100,8 +83,6 @@ services:
       dockerfile: Dockerfile
     image: audio-to-subs:worker
     container_name: audio-to-subs-worker
-    
-    # Environment variables
     environment:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
@@ -110,48 +91,35 @@ services:
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=admin
       - DEBUG=true
-    
-    # Secrets for sensitive data
     secrets:
       - mistral_api_key
-    
-    # Volume mounts (shared with backend)
     volumes:
       - audio-to-subs-data:/data:z
-      # Movie and TV files (aligned with Radarr/Sonarr/Bazarr)
-      - ./movies:/movies:z
-      - ./tv:/tv:z
-      - /tmp/audio-to-subs:z
-    
-    # Dependencies
+      - audio-to-subs-movies:/movies:z
+      - audio-to-subs-tv:/tv:z
+      - audio-to-subs-tmp:/tmp/audio-to-subs:z
     depends_on:
       backend:
         condition: service_healthy
       redis:
         condition: service_healthy
-    
-    # Resource limits
     deploy:
       resources:
         limits:
-          cpus: '1.0'
+          cpus: "1.0"
           memory: 1G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
-    
-    # Restart policy
     restart: unless-stopped
-    
-    # Security options
     security_opt:
       - no-new-privileges:true
-    
-    # User
     user: "1000:1000"
-    
-    # Command
-    command: python -m audio_to_subs.worker
+
+    # Entrypoint override: the image's ENTRYPOINT runs uvicorn (the API).
+    # The worker must replace it entirely, so override entrypoint (not command,
+    # which would just be appended to the uvicorn entrypoint as arguments).
+    entrypoint: ["python", "-m", "audio_to_subs.worker"]
 
   frontend:
     build:
@@ -159,25 +127,26 @@ services:
       dockerfile: Dockerfile
     image: audio-to-subs:frontend
     container_name: audio-to-subs-frontend
-
     ports:
-      - "8080:80"
-
+      - "8080:8080"
     depends_on:
       backend:
         condition: service_healthy
-
     restart: unless-stopped
-
     security_opt:
       - no-new-privileges:true
-
-    user: "101:101"  # nginx default user in nginx:alpine
+    user: "101:101" # nginx user in nginx-unprivileged image
 
 volumes:
   audio-to-subs-data:
     driver: local
   audio-to-subs-redis-data:
+    driver: local
+  audio-to-subs-movies:
+    driver: local
+  audio-to-subs-tv:
+    driver: local
+  audio-to-subs-tmp:
     driver: local
 
 secrets:

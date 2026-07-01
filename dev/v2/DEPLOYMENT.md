@@ -70,10 +70,15 @@ services:
       redis:
         condition: service_healthy
     healthcheck:
-      test: ["CMD-SHELL", "wget -qO- http://localhost:8000/api/healthz | grep -q '\"db\"'"]
-      interval: 30s
+      test:
+        - CMD
+        - python
+        - -c
+        - "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz', timeout=3)"
+      interval: 10s
       timeout: 5s
-      retries: 3
+      retries: 5
+      start_period: 10s
 
   worker:
     build: .
@@ -181,6 +186,8 @@ Short answer: not for a homelab personal tool with 1–3 workers.
 - WAL mode lets readers (the API) read concurrently with one writer (a worker or the API).
 - The only write hotspot is the **claim** statement, which is a single `UPDATE … RETURNING` inside `BEGIN IMMEDIATE` with `busy_timeout=5000`. N workers serialise on this safely.
 - Reaper writes (every 60 s) are tiny.
+
+**Important**: any async task that acquires a `get_async_session()` context must **not** hold it open across an `await asyncio.sleep()` or `asyncio.wait_for()` call. The `BEGIN IMMEDIATE` write lock is held for the entire session lifetime; sleeping inside the context blocks every other writer for the full duration. Always exit the `async with` block before waiting.
 
 When to migrate to Postgres:
 

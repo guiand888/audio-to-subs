@@ -459,13 +459,13 @@ async def run_bazarr_poller(app: "FastAPI") -> None:
     # Get DB session factory
     from audio_to_subs.db.session import get_async_session
 
+    interval = 3600  # fallback if the session fails before _get_poll_interval runs
+
     while not app.state.shutdown.is_set():
         try:
-            # Get settings from DB (poll interval)
             async with get_async_session(settings.DATABASE_URL) as db:
                 interval = await _get_poll_interval(db)
 
-                # Get Bazarr client if configured
                 client = await get_bazarr_client(
                     settings.BAZARR_URL,
                     settings.BAZARR_API_KEY,
@@ -476,36 +476,26 @@ async def run_bazarr_poller(app: "FastAPI") -> None:
                         "Bazarr not configured, skipping poll (waiting %d seconds)",
                         interval,
                     )
-                    await asyncio.wait_for(
-                        app.state.shutdown.wait(),
-                        timeout=interval,
-                        suppress_timeout=True,
-                    )
-                    continue
-
-                # Get path map
-                path_map = await get_path_map(db)
-
-                # Perform poll
-                try:
-                    await poll_once(db, client, path_map)
-                except Exception as e:
-                    logger.warning("Bazarr poll failed: %s", e)
-                finally:
-                    await client.close()
+                else:
+                    path_map = await get_path_map(db)
+                    try:
+                        await poll_once(db, client, path_map)
+                    except Exception as e:
+                        logger.warning("Bazarr poll failed: %s", e)
+                    finally:
+                        await client.close()
 
         except Exception as e:
             logger.error("Bazarr poller error: %s", e, exc_info=True)
 
-        # Wait for next poll or shutdown
+        # Session is closed before this sleep — no write lock held during wait.
         try:
             await asyncio.wait_for(
                 app.state.shutdown.wait(),
                 timeout=interval,
-                suppress_timeout=True,
             )
         except asyncio.TimeoutError:
-            pass  # Expected - continue to next poll
+            pass  # interval elapsed → next poll
         except asyncio.CancelledError:
             break
 

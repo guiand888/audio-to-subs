@@ -13,7 +13,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M3 — Bazarr + `/api/wanted` | ✅ Done | 2026-06-02 | Depends on M2 |
 | M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
 | M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
-| M5.1 — M5 cleanup and verification | ⏳ Not Started | - | Depends on M5 |
+| M5.1 — M5 cleanup and verification | 🔄 In Progress | - | Depends on M5 |
 | M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | 🔄 In Progress | - | Depends on M5.1 |
 | M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.2 |
 
@@ -175,6 +175,18 @@ Acceptance:
 - No unused imports or dead code from M4/M5 transition
 - All tests pass
 - Lint and format checks clean
+
+### Bug fixes found during stack integration testing (2026-07-01)
+
+Discovered by running `podman-compose up` for the first time against the full stack:
+
+| # | Severity | File | Description | Fix |
+|---|----------|------|-------------|-----|
+| 1 | Critical | `bazarr/poller.py` | `run_bazarr_poller()` held `BEGIN IMMEDIATE` write lock for the full poll interval (default 3600 s) when Bazarr was not configured — the inter-poll sleep ran inside the `async with get_async_session()` block. Blocked reaper, health check, and all API writers, causing the backend health check to return 503 permanently and preventing worker + frontend from ever starting. | Restructured loop so the session always exits before `asyncio.wait_for`. Added `interval = 3600` default before the loop to handle session failures. |
+| 2 | Medium | `docker-compose.yml` | Health check `urlopen` had no `timeout=` argument; Podman killed it after the container-level 5 s timeout, reporting exit code 125 with empty output. | Added `timeout=3`. |
+| 3 | Low | `docker-compose.yml` | `deploy.resources.reservations.cps` typo on the backend service; CPU reservation was silently ignored. | Fixed to `cpus`. |
+
+Regression tests added: `test_poller_releases_session_before_sleep` in `test_bazarr_poller.py` and `test_healthz_returns_503_when_db_unavailable` in `test_api_healthz.py`.
 
 ## M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr
 
