@@ -568,6 +568,8 @@ async def notify_bazarr(
     For bazarr_episode jobs: triggers rescan for the Sonarr episode
     For manual jobs: returns 202 without action (no Bazarr source)
 
+    Uses database settings first, falling back to environment variables.
+
     Returns 202 Accepted in all cases - the rescan is best-effort.
     """
     logger = logging.getLogger(__name__)
@@ -589,11 +591,14 @@ async def notify_bazarr(
         logger.info(f"Job {job_id} is manual source, skipping Bazarr rescan")
         return {"status": "skipped", "reason": "Manual job has no Bazarr source"}
 
-    # Check if Bazarr is configured (needed only for Bazarr-sourced jobs)
-    bazarr_url = getattr(settings, "BAZARR_URL", None)
-    bazarr_api_key = getattr(settings, "BAZARR_API_KEY", None)
+    # Get Bazarr client using database settings first, then environment fallback
+    from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
+    
+    client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
+        db, settings
+    )
 
-    if not bazarr_url or not bazarr_api_key:
+    if client is None:
         logger.info(
             f"Bazarr not configured (URL or API key missing), "
             f"skipping rescan for job {job_id}"
@@ -604,13 +609,6 @@ async def notify_bazarr(
     if job.source == JobSource.BAZARR_MOVIE:
         logger.info(f"Triggering Bazarr rescan for movie job {job_id}")
         try:
-            from audio_to_subs.bazarr.client import BazarrClient
-
-            client = BazarrClient(
-                base_url=bazarr_url,
-                api_key=bazarr_api_key,
-            )
-
             if job.source_ref:
                 radarr_id = int(job.source_ref)
                 await client.rescan_movie(radarr_id)
@@ -621,18 +619,12 @@ async def notify_bazarr(
 
         except Exception as e:
             logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
+            await client.close()
             return {"status": "failed", "error": str(e)}
 
     elif job.source == JobSource.BAZARR_EPISODE:
         logger.info(f"Triggering Bazarr rescan for episode job {job_id}")
         try:
-            from audio_to_subs.bazarr.client import BazarrClient
-
-            client = BazarrClient(
-                base_url=bazarr_url,
-                api_key=bazarr_api_key,
-            )
-
             if job.source_ref:
                 sonarr_episode_id = int(job.source_ref)
                 # Fetch series_id from Bazarr since rescan_episode requires it
@@ -662,9 +654,11 @@ async def notify_bazarr(
 
         except Exception as e:
             logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
+            await client.close()
             return {"status": "failed", "error": str(e)}
 
     else:
         # Unknown Bazarr source type — shouldn't happen given the enum, but guard it
         logger.warning(f"Unhandled source {job.source!r} for job {job_id}")
+        await client.close()
         return {"status": "skipped", "reason": f"Unhandled source: {job.source}"}

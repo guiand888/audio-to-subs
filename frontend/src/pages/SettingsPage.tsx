@@ -52,6 +52,9 @@ function countChanges(formData: Partial<SettingsPatch>, settings: SettingsOut): 
   diff(formData.mistral_output_token_rate_usd, settings.mistral_output_token_rate_usd)
   diff(formData.bazarr_poll_interval, settings.bazarr_poll_interval)
   diff(formData.bazarr_track_no_subs, settings.bazarr_track_no_subs)
+  diff(formData.bazarr_url ?? "", settings.bazarr_url || "")
+  diff(formData.bazarr_api_key ?? "", settings.bazarr_api_key || "")
+  diff(formData.bazarr_timeout, settings.bazarr_timeout)
   diff(formData.default_language, settings.default_language)
   diff(formData.default_output_format, settings.default_output_format)
   diff(formData.movies_root_path ?? "", settings.movies_root_path || "")
@@ -192,6 +195,9 @@ export function SettingsPage() {
         mistral_output_token_rate_usd: settings.mistral_output_token_rate_usd,
         bazarr_poll_interval: settings.bazarr_poll_interval,
         bazarr_track_no_subs: settings.bazarr_track_no_subs,
+        bazarr_url: settings.bazarr_url || "",
+        bazarr_api_key: settings.bazarr_api_key || "",
+        bazarr_timeout: settings.bazarr_timeout,
         path_mappings: settings.path_mappings as any,
         default_language: settings.default_language,
         default_output_format: settings.default_output_format,
@@ -209,6 +215,18 @@ export function SettingsPage() {
       if (value !== undefined) {
         // @ts-expect-error - dynamic key access
         cleanData[key] = value
+      }
+    }
+    // bazarr_url/bazarr_api_key use an empty string as an explicit "disable
+    // Bazarr" signal server-side (it's not overridden by env-var fallback).
+    // Only send them when the user actually changed them, so saving an
+    // unrelated field doesn't silently disable env-configured Bazarr.
+    if (settings) {
+      if ((formData.bazarr_url ?? "") === (settings.bazarr_url || "")) {
+        delete cleanData.bazarr_url
+      }
+      if ((formData.bazarr_api_key ?? "") === (settings.bazarr_api_key || "")) {
+        delete cleanData.bazarr_api_key
       }
     }
     mutation.mutate(cleanData)
@@ -439,6 +457,51 @@ export function SettingsPage() {
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
+            <div className="space-y-2">
+              <Label htmlFor="bazarr-url">Bazarr API URL</Label>
+              <Input
+                id="bazarr-url"
+                type="url"
+                placeholder="http://bazarr:6767"
+                value={formData.bazarr_url ?? ""}
+                onChange={(e) => setFormData({ ...formData, bazarr_url: e.target.value })}
+              />
+              <p className="text-sm text-muted-foreground">
+                Base URL for Bazarr API (e.g., http://bazarr:6767)
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="bazarr-api-key">API Key</Label>
+              <Input
+                id="bazarr-api-key"
+                type="password"
+                placeholder="Enter your Bazarr API key"
+                value={formData.bazarr_api_key ?? ""}
+                onChange={(e) => setFormData({ ...formData, bazarr_api_key: e.target.value })}
+              />
+              <p className="text-sm text-muted-foreground">
+                Bazarr API key for authentication
+              </p>
+            </div>
+
+            <div className="space-y-2">
+              <Label htmlFor="bazarr-timeout">API Timeout (seconds)</Label>
+              <Input
+                id="bazarr-timeout"
+                type="number"
+                min="1"
+                max="300"
+                step="0.1"
+                placeholder="30"
+                value={formData.bazarr_timeout ?? ""}
+                onChange={handleNumberChange("bazarr_timeout")}
+              />
+              <p className="text-sm text-muted-foreground">
+                Timeout for Bazarr API requests (1-300 seconds)
+              </p>
+            </div>
+
             <div className="space-y-2">
               <Label htmlFor="poll-interval">Poll Interval (seconds)</Label>
               <Input

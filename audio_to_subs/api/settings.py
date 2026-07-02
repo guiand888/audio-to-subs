@@ -51,14 +51,22 @@ class Settings(BaseSettings):
         description="Redis connection URL",
     )
 
-    # Bazarr
+    # Bazarr — FILE must come before KEY so it's available in the validator
     BAZARR_URL: str | None = Field(
         default=None,
         description="Bazarr API URL",
     )
+    BAZARR_API_KEY_FILE: str | None = Field(
+        default=None,
+        description="Path to file containing Bazarr API key",
+    )
     BAZARR_API_KEY: str | None = Field(
         default=None,
         description="Bazarr API key",
+    )
+    BAZARR_TIMEOUT: float = Field(
+        default=30.0,
+        description="Bazarr API timeout in seconds",
     )
 
     # Mistral — FILE must come before KEY so it's available in the validator
@@ -114,6 +122,22 @@ class Settings(BaseSettings):
                 return None
         return None
 
+    @field_validator("BAZARR_API_KEY", mode="before")
+    @classmethod
+    def load_bazarr_api_key_from_file(
+        cls, v: str | None, info: ValidationInfo
+    ) -> str | None:
+        if v is not None:
+            return v
+        api_key_file = info.data.get("BAZARR_API_KEY_FILE")
+        if api_key_file is not None:
+            try:
+                with open(api_key_file) as f:
+                    return f.read().strip()
+            except FileNotFoundError:
+                return None
+        return None
+
     @field_validator("MISTRAL_API_KEY", mode="before")
     @classmethod
     def load_mistral_api_key_from_file(
@@ -155,6 +179,21 @@ class Settings(BaseSettings):
         if self.ADMIN_PASSWORD_FILE is not None:
             try:
                 with open(self.ADMIN_PASSWORD_FILE, "r") as f:
+                    return f.read().strip()
+            except FileNotFoundError:
+                return None
+        
+        return None
+
+    @property
+    def bazarr_api_key(self) -> str | None:
+        """Get Bazarr API key (from env or file)."""
+        if self.BAZARR_API_KEY is not None:
+            return self.BAZARR_API_KEY
+        
+        if self.BAZARR_API_KEY_FILE is not None:
+            try:
+                with open(self.BAZARR_API_KEY_FILE, "r") as f:
                     return f.read().strip()
             except FileNotFoundError:
                 return None

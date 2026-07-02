@@ -17,6 +17,7 @@ from audio_to_subs.bazarr.poller import (
     start_poller,
     stop_poller,
     get_bazarr_client,
+    get_bazarr_client_with_settings,
     get_path_map,
     get_settings_value,
     get_track_no_subs,
@@ -44,6 +45,22 @@ class TestGetBazarrClient:
         assert client is not None
         assert client.base_url == "http://test:6767"
         assert client.api_key == "test-key"
+        
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_with_timeout(self):
+        """Test getting client with custom timeout."""
+        client = await get_bazarr_client(
+            bazarr_url="http://test:6767",
+            bazarr_api_key="test-key",
+            bazarr_timeout=60.0,
+        )
+        
+        assert client is not None
+        assert client.base_url == "http://test:6767"
+        assert client.api_key == "test-key"
+        # Note: timeout is stored in the client but not directly accessible
         
         await client.close()
 
@@ -76,6 +93,189 @@ class TestGetBazarrClient:
         )
         
         assert client is None
+
+
+class TestGetBazarrClientWithSettings:
+    """Test get_bazarr_client_with_settings function."""
+
+    @pytest.mark.asyncio
+    async def test_get_client_with_database_settings(self, mock_db_session):
+        """Test getting client with database settings."""
+        # Set up database settings
+        db_settings = [
+            Setting(key="bazarr_url", value_json=json.dumps("http://db-bazarr:6767")),
+            Setting(key="bazarr_api_key", value_json=json.dumps("db-api-key")),
+            Setting(key="bazarr_timeout", value_json=json.dumps(60.0)),
+        ]
+        for setting in db_settings:
+            mock_db_session.add(setting)
+        await mock_db_session.commit()
+
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(mock_db_session)
+        
+        assert client is not None
+        assert client.base_url == "http://db-bazarr:6767"
+        assert client.api_key == "db-api-key"
+        assert url == "http://db-bazarr:6767"
+        assert api_key == "db-api-key"
+        assert timeout == 60.0
+        
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_fallback_to_env_settings(self, mock_db_session):
+        """Test getting client falls back to environment settings when database is empty."""
+        # Create mock environment settings
+        from audio_to_subs.api.settings import Settings
+        mock_env_settings = Settings(
+            BAZARR_URL="http://env-bazarr:6767",
+            BAZARR_API_KEY="env-api-key",
+            BAZARR_TIMEOUT=90.0
+        )
+
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(
+            mock_db_session, mock_env_settings
+        )
+        
+        assert client is not None
+        assert client.base_url == "http://env-bazarr:6767"
+        assert client.api_key == "env-api-key"
+        assert url == "http://env-bazarr:6767"
+        assert api_key == "env-api-key"
+        assert timeout == 90.0
+        
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_database_priority_over_env(self, mock_db_session):
+        """Test that database settings take priority over environment settings."""
+        # Set up database settings
+        db_settings = [
+            Setting(key="bazarr_url", value_json=json.dumps("http://db-bazarr:6767")),
+            Setting(key="bazarr_api_key", value_json=json.dumps("db-api-key")),
+            Setting(key="bazarr_timeout", value_json=json.dumps(60.0)),
+        ]
+        for setting in db_settings:
+            mock_db_session.add(setting)
+        await mock_db_session.commit()
+
+        # Create mock environment settings with different values
+        from audio_to_subs.api.settings import Settings
+        mock_env_settings = Settings(
+            BAZARR_URL="http://env-bazarr:6767",  # Should be ignored
+            BAZARR_API_KEY="env-api-key",      # Should be ignored
+            BAZARR_TIMEOUT=90.0                # Should be ignored
+        )
+
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(
+            mock_db_session, mock_env_settings
+        )
+        
+        assert client is not None
+        assert client.base_url == "http://db-bazarr:6767"  # DB takes priority
+        assert client.api_key == "db-api-key"      # DB takes priority
+        assert url == "http://db-bazarr:6767"
+        assert api_key == "db-api-key"
+        assert timeout == 60.0  # DB takes priority
+        
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_empty_string_url_no_fallback(self, mock_db_session):
+        """Test that empty string URL in DB does NOT fall back to env (sentinel fix)."""
+        # Set DB setting to empty string (user explicitly cleared it)
+        db_settings = [
+            Setting(key="bazarr_url", value_json=json.dumps("")),
+            Setting(key="bazarr_api_key", value_json=json.dumps("db-api-key")),
+        ]
+        for setting in db_settings:
+            mock_db_session.add(setting)
+        await mock_db_session.commit()
+
+        # Create mock environment settings with non-empty values
+        from audio_to_subs.api.settings import Settings
+        mock_env_settings = Settings(
+            BAZARR_URL="http://env-bazarr:6767",  # Should NOT be used
+            BAZARR_API_KEY="env-api-key",
+        )
+
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(
+            mock_db_session, mock_env_settings
+        )
+        
+        # Client should be None because URL is empty string (falsy but explicitly set)
+        assert client is None
+        assert url == ""  # Empty string from DB, not env fallback
+        
+    @pytest.mark.asyncio
+    async def test_get_client_timeout_30_no_fallback(self, mock_db_session):
+        """Test that timeout=30.0 in DB does NOT fall back to env (sentinel fix)."""
+        # Set DB setting to 30.0 (the default value)
+        db_settings = [
+            Setting(key="bazarr_url", value_json=json.dumps("http://db-bazarr:6767")),
+            Setting(key="bazarr_api_key", value_json=json.dumps("db-api-key")),
+            Setting(key="bazarr_timeout", value_json=json.dumps(30.0)),
+        ]
+        for setting in db_settings:
+            mock_db_session.add(setting)
+        await mock_db_session.commit()
+
+        # Create mock environment settings with different timeout
+        from audio_to_subs.api.settings import Settings
+        mock_env_settings = Settings(
+            BAZARR_URL="http://db-bazarr:6767",
+            BAZARR_API_KEY="db-api-key",
+            BAZARR_TIMEOUT=90.0,  # Should NOT be used
+        )
+
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(
+            mock_db_session, mock_env_settings
+        )
+
+        assert client is not None
+        assert timeout == 30.0  # DB value, not env fallback
+
+        await client.close()
+
+    @pytest.mark.asyncio
+    async def test_get_client_seeded_null_falls_back_to_env(self, mock_db_session):
+        """Test that seeded DEFAULT_SETTINGS rows (JSON null) still fall back to env.
+
+        Reproduces the scenario created by `_seed_default_settings`, which is
+        called on every `GET /api/settings` and inserts a row for every key in
+        DEFAULT_SETTINGS -- including bazarr_url=None and bazarr_api_key=None --
+        the first time the settings table is empty. Before the fix, a DB row
+        holding JSON `null` decoded to a real `None`, which was indistinguishable
+        from an explicit "disable Bazarr" and therefore never fell back to env.
+
+        bazarr_timeout is seeded to a real value (30.0, DEFAULT_SETTINGS'
+        default), not None, so it's correctly treated as explicitly set and
+        stays sticky -- only bazarr_url/bazarr_api_key (seeded as None) should
+        fall back to env here.
+        """
+        from audio_to_subs.api.routes.settings import DEFAULT_SETTINGS
+
+        for key, value in DEFAULT_SETTINGS.items():
+            mock_db_session.add(Setting(key=key, value_json=json.dumps(value)))
+        await mock_db_session.commit()
+
+        from audio_to_subs.api.settings import Settings
+        mock_env_settings = Settings(
+            BAZARR_URL="http://env-bazarr:6767",
+            BAZARR_API_KEY="env-api-key",
+            BAZARR_TIMEOUT=45.0,
+        )
+
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(
+            mock_db_session, mock_env_settings
+        )
+
+        assert client is not None
+        assert url == "http://env-bazarr:6767"
+        assert api_key == "env-api-key"
+        assert timeout == 30.0  # seeded DB value, not env fallback
+
+        await client.close()
 
 
 class TestGetPathMap:

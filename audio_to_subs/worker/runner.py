@@ -287,6 +287,8 @@ async def _rescan_bazarr_movie(
 ) -> None:
     """Trigger rescan for a Bazarr movie.
 
+    Uses database settings first, falling back to environment variables.
+
     Args:
         deps: Worker dependencies
         source_ref: Radarr ID as string
@@ -298,29 +300,26 @@ async def _rescan_bazarr_movie(
 
     try:
         radarr_id = int(source_ref)
-        from audio_to_subs.bazarr.client import BazarrClient
+        from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
 
-        # Get Bazarr settings from deps
-        bazarr_url = getattr(deps.settings, "BAZARR_URL", None)
-        bazarr_api_key = getattr(deps.settings, "BAZARR_API_KEY", None)
+        # Get Bazarr client using database settings first, then environment fallback
+        client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
+            deps.session, deps.settings
+        )
 
-        if not bazarr_url or not bazarr_api_key:
+        if client is None:
             logger.info(
                 f"Bazarr not configured (URL or API key missing), "
                 f"skipping rescan for job {job_id}"
             )
             return
 
-        # Create client and trigger rescan
-        client = BazarrClient(
-            base_url=bazarr_url,
-            api_key=bazarr_api_key,
-        )
-
-        await client.rescan_movie(radarr_id)
-        logger.info(f"Triggered Bazarr rescan for movie {radarr_id} (job {job_id})")
-
-        await client.close()
+        try:
+            # Trigger rescan
+            await client.rescan_movie(radarr_id)
+            logger.info(f"Triggered Bazarr rescan for movie {radarr_id} (job {job_id})")
+        finally:
+            await client.close()
 
     except ValueError:
         logger.warning(
@@ -340,6 +339,8 @@ async def _rescan_bazarr_episode(
 ) -> None:
     """Trigger rescan for a Bazarr episode.
 
+    Uses database settings first, falling back to environment variables.
+
     Args:
         deps: Worker dependencies
         source_ref: Sonarr Episode ID as string
@@ -351,53 +352,47 @@ async def _rescan_bazarr_episode(
 
     try:
         sonarr_episode_id = int(source_ref)
-        from audio_to_subs.bazarr.client import BazarrClient
+        from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
 
-        # Get Bazarr settings from deps
-        bazarr_url = getattr(deps.settings, "BAZARR_URL", None)
-        bazarr_api_key = getattr(deps.settings, "BAZARR_API_KEY", None)
+        # Get Bazarr client using database settings first, then environment fallback
+        client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
+            deps.session, deps.settings
+        )
 
-        if not bazarr_url or not bazarr_api_key:
+        if client is None:
             logger.info(
                 f"Bazarr not configured (URL or API key missing), "
                 f"skipping rescan for job {job_id}"
             )
             return
 
-        # Create client
-        client = BazarrClient(
-            base_url=bazarr_url,
-            api_key=bazarr_api_key,
-        )
-
-        # Fetch episode to get series_id (Bazarr doesn't support per-episode rescan)
         try:
-            episode = await client.get_episode(sonarr_episode_id)
-        except Exception as e:
-            logger.warning(
-                f"Failed to fetch series_id for episode {sonarr_episode_id}: {e}"
+            # Fetch episode to get series_id (Bazarr doesn't support per-episode rescan)
+            try:
+                episode = await client.get_episode(sonarr_episode_id)
+            except Exception as e:
+                logger.warning(
+                    f"Failed to fetch series_id for episode {sonarr_episode_id}: {e}"
+                )
+                return
+
+            if episode is None:
+                logger.warning(
+                    f"Episode {sonarr_episode_id} not found in Bazarr. "
+                    f"Job {job_id}: skipping rescan."
+                )
+                return
+
+            series_id = episode.sonarrSeriesId
+
+            # Trigger rescan with series_id
+            await client.rescan_episode(sonarr_episode_id, series_id=series_id)
+            logger.info(
+                f"Triggered Bazarr rescan for series {series_id} "
+                f"(containing episode {sonarr_episode_id}, job {job_id})"
             )
+        finally:
             await client.close()
-            return
-
-        if episode is None:
-            logger.warning(
-                f"Episode {sonarr_episode_id} not found in Bazarr. "
-                f"Job {job_id}: skipping rescan."
-            )
-            await client.close()
-            return
-
-        series_id = episode.sonarrSeriesId
-
-        # Trigger rescan with series_id
-        await client.rescan_episode(sonarr_episode_id, series_id=series_id)
-        logger.info(
-            f"Triggered Bazarr rescan for series {series_id} "
-            f"(containing episode {sonarr_episode_id}, job {job_id})"
-        )
-
-        await client.close()
 
     except ValueError:
         logger.warning(

@@ -27,6 +27,9 @@ DEFAULT_SETTINGS = {
     "mistral_output_token_rate_usd": None,
     "bazarr_poll_interval": 3600,
     "bazarr_track_no_subs": False,
+    "bazarr_url": None,
+    "bazarr_api_key": None,
+    "bazarr_timeout": 30.0,
     "path_mappings": [],
     "default_language": "en",
     "default_output_format": "srt",
@@ -55,6 +58,15 @@ class SettingsResponse(BaseModel):
     )
     bazarr_track_no_subs: bool = Field(
         description="Track items with no subtitles in any language"
+    )
+    bazarr_url: str | None = Field(
+        default=None, description="Bazarr API base URL"
+    )
+    bazarr_api_key: str | None = Field(
+        default=None, description="Bazarr API key"
+    )
+    bazarr_timeout: float = Field(
+        default=30.0, description="Bazarr API timeout in seconds"
     )
     path_mappings: list[dict[str, str]] = Field(
         default_factory=list, description="List of path mapping dicts"
@@ -101,6 +113,15 @@ class SettingsUpdate(BaseModel):
     )
     bazarr_track_no_subs: bool | None = Field(
         default=None, description="Track items with no subtitles in any language"
+    )
+    bazarr_url: str | None = Field(
+        default=None, description="Bazarr API base URL"
+    )
+    bazarr_api_key: str | None = Field(
+        default=None, description="Bazarr API key"
+    )
+    bazarr_timeout: float | None = Field(
+        default=None, description="Bazarr API timeout in seconds"
     )
     path_mappings: list[dict[str, str]] | None = Field(
         default=None, description="List of path mapping dicts"

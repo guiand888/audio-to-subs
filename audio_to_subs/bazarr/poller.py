@@ -19,6 +19,7 @@ from audio_to_subs.db.models import BazarrCache
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
     from fastapi import FastAPI
+    from audio_to_subs.api.settings import Settings
 
 logger = logging.getLogger(__name__)
 
@@ -32,14 +33,16 @@ class PollerState:
 
 
 async def get_bazarr_client(
-    bazarr_url: str | None,
-    bazarr_api_key: str | None,
+    bazarr_url: str | None = None,
+    bazarr_api_key: str | None = None,
+    bazarr_timeout: float = 30.0,
 ) -> BazarrClient | None:
     """Get Bazarr client if configured.
 
     Args:
         bazarr_url: Bazarr API URL from settings
         bazarr_api_key: Bazarr API key from settings
+        bazarr_timeout: Bazarr API timeout in seconds
 
     Returns:
         Configured BazarrClient or None if not configured
@@ -51,7 +54,67 @@ async def get_bazarr_client(
     return BazarrClient(
         base_url=bazarr_url,
         api_key=bazarr_api_key,
+        timeout=bazarr_timeout,
     )
+
+
+async def get_bazarr_client_with_settings(
+    db: "AsyncSession",
+    env_settings: "Settings | None" = None,
+) -> tuple[BazarrClient | None, str | None, str | None, float]:
+    """Get Bazarr client with settings from database first, then environment fallback.
+
+    This function prioritizes database settings over environment variables. A
+    missing DB row or a DB value of None (including the row seeded by
+    `_seed_default_settings`, before a user has ever configured Bazarr) falls
+    back to the environment; an explicit empty string in the DB is treated as
+    the user deliberately disabling Bazarr and is not overridden.
+
+    Args:
+        db: Async database session
+        env_settings: Optional environment settings (for testing)
+
+    Returns:
+        Tuple of (BazarrClient or None, bazarr_url, bazarr_api_key, bazarr_timeout)
+        Returns None for client if not configured
+    """
+    import json
+
+    from audio_to_subs.db.models import Setting
+
+    keys = ("bazarr_url", "bazarr_api_key", "bazarr_timeout")
+    db_values: dict[str, Any] = {}
+    try:
+        result = await db.execute(
+            select(Setting.key, Setting.value_json).where(Setting.key.in_(keys))
+        )
+        for key, value_json in result.all():
+            if value_json:
+                db_values[key] = json.loads(value_json)
+    except Exception as e:
+        logger.warning("Failed to load Bazarr settings: %s", e)
+
+    bazarr_url = db_values.get("bazarr_url")
+    bazarr_api_key = db_values.get("bazarr_api_key")
+    bazarr_timeout = db_values.get("bazarr_timeout")
+
+    # Fall back to environment settings if database settings are not set
+    if env_settings is None:
+        from audio_to_subs.api.settings import get_settings
+        env_settings = get_settings()
+
+    # A DB value of None (row absent, or seeded default) falls back to env.
+    # An explicit "" is a deliberate "disable Bazarr" signal and is kept as-is.
+    if bazarr_url is None:
+        bazarr_url = env_settings.BAZARR_URL
+    if bazarr_api_key is None:
+        # Use the property which handles file-based loading from BAZARR_API_KEY_FILE
+        bazarr_api_key = env_settings.bazarr_api_key
+    if bazarr_timeout is None:
+        bazarr_timeout = env_settings.BAZARR_TIMEOUT
+
+    client = await get_bazarr_client(bazarr_url, bazarr_api_key, bazarr_timeout)
+    return client, bazarr_url, bazarr_api_key, bazarr_timeout
 
 
 async def get_path_map(
@@ -513,9 +576,8 @@ async def run_bazarr_poller(app: "FastAPI") -> None:
             async with get_async_session(settings.DATABASE_URL) as db:
                 interval = await _get_poll_interval(db)
 
-                client = await get_bazarr_client(
-                    settings.BAZARR_URL,
-                    settings.BAZARR_API_KEY,
+                client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
+                    db, settings
                 )
 
                 if client is None:

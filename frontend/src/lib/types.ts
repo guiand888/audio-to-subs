@@ -107,6 +107,9 @@ export interface SettingsOut {
   mistral_output_token_rate_usd: number | null
   bazarr_poll_interval: number
   bazarr_track_no_subs: boolean
+  bazarr_url: string | null
+  bazarr_api_key: string | null
+  bazarr_timeout: number
   path_mappings: Record<string, string>[]
   default_language: string
   default_output_format: string
@@ -122,6 +125,9 @@ export interface SettingsPatch {
   mistral_output_token_rate_usd?: number | null
   bazarr_poll_interval?: number
   bazarr_track_no_subs?: boolean
+  bazarr_url?: string | null
+  bazarr_api_key?: string | null
+  bazarr_timeout?: number
   path_mappings?: Record<string, string>[]
   default_language?: string
   default_output_format?: string
@@ -171,6 +177,9 @@ export interface SettingsFormData {
   mistral_output_token_rate_usd: number | null
   bazarr_poll_interval: number
   bazarr_track_no_subs: boolean
+  bazarr_url: string | null
+  bazarr_api_key: string | null
+  bazarr_timeout: number
   path_mappings: Array<{ from: string; to: string }>
   default_language: string
   default_output_format: OutputFormat
