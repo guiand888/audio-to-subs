@@ -635,8 +635,27 @@ async def notify_bazarr(
 
             if job.source_ref:
                 sonarr_episode_id = int(job.source_ref)
-                await client.rescan_episode(sonarr_episode_id)
-                logger.info(f"Triggered Bazarr rescan for episode {sonarr_episode_id}")
+                # Fetch series_id from Bazarr since rescan_episode requires it
+                # (Bazarr only supports series-level scan, not per-episode)
+                episode = await client.get_episode(sonarr_episode_id)
+                if episode:
+                    success = await client.rescan_episode(
+                        sonarr_episode_id, series_id=episode.sonarrSeriesId
+                    )
+                    if not success:
+                        logger.warning(
+                            f"Bazarr rescan failed for episode {sonarr_episode_id}"
+                        )
+                        await client.close()
+                        return {"status": "failed", "error": "Bazarr rescan failed"}
+                    logger.info(f"Triggered Bazarr rescan for episode {sonarr_episode_id}")
+                else:
+                    logger.warning(
+                        f"Cannot trigger Bazarr rescan for episode {sonarr_episode_id}: "
+                        "episode not found in Bazarr"
+                    )
+                    await client.close()
+                    return {"status": "failed", "error": "episode not found in Bazarr"}
 
             await client.close()
             return {"status": "triggered", "source": "bazarr_episode", "source_ref": job.source_ref}

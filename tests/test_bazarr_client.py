@@ -252,15 +252,14 @@ class TestBazarrClientRequests:
             assert result.total == 0
 
 
-class TestRescanStubs:
-    """Test rescan methods (previously stubs, now real HTTP calls)."""
+class TestRescan:
+    """Test rescan methods using PATCH endpoints."""
 
     @pytest.mark.asyncio
-    async def test_rescan_movie_stub(self, respx_mock):
-        """Test that rescan_movie returns True on 202 response."""
-        respx_mock.post("http://test-bazarr:6767/api/movies/123/rescan").mock(
-            return_value=httpx.Response(202)
-        )
+    async def test_rescan_movie_uses_patch(self, respx_mock):
+        """Test that rescan_movie uses PATCH /api/movies with action=scan-disk."""
+        route = respx_mock.patch("http://test-bazarr:6767/api/movies")
+        route.mock(return_value=httpx.Response(202))
 
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
@@ -268,17 +267,200 @@ class TestRescanStubs:
         ) as client:
             result = await client.rescan_movie(123)
             assert result is True
+            # Verify the request was made with correct params
+            assert len(route.calls) == 1
+            assert route.calls[0].request.url.params.get("radarrid") == "123"
+            assert route.calls[0].request.url.params.get("action") == "scan-disk"
 
     @pytest.mark.asyncio
-    async def test_rescan_episode_stub(self, respx_mock):
-        """Test that rescan_episode returns True on 202 response."""
-        respx_mock.post("http://test-bazarr:6767/api/episodes/456/rescan").mock(
-            return_value=httpx.Response(202)
+    async def test_rescan_episode_uses_patch(self, respx_mock):
+        """Test that rescan_episode uses PATCH /api/series with action=scan-disk."""
+        route = respx_mock.patch("http://test-bazarr:6767/api/series")
+        route.mock(return_value=httpx.Response(202))
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.rescan_episode(456, series_id=789)
+            assert result is True
+            # Verify the request was made with correct params
+            assert len(route.calls) == 1
+            assert route.calls[0].request.url.params.get("seriesid") == "789"
+            assert route.calls[0].request.url.params.get("action") == "scan-disk"
+
+    @pytest.mark.asyncio
+    async def test_rescan_episode_requires_series_id(self, respx_mock):
+        """Test that rescan_episode requires series_id and returns False without it."""
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            # Call without series_id should return False
+            result = await client.rescan_episode(456)
+            assert result is False
+
+    @pytest.mark.asyncio
+    async def test_rescan_movie_single_call(self, respx_mock):
+        """Test that rescan_movie makes only one call (no outer retry loop)."""
+        route = respx_mock.patch("http://test-bazarr:6767/api/movies")
+        route.mock(return_value=httpx.Response(202))
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.rescan_movie(123)
+            assert result is True
+            # Verify only one call was made (no outer retry loop)
+            assert len(route.calls) == 1
+
+    @pytest.mark.asyncio
+    async def test_rescan_episode_single_call(self, respx_mock):
+        """Test that rescan_episode makes only one call (no outer retry loop)."""
+        route = respx_mock.patch("http://test-bazarr:6767/api/series")
+        route.mock(return_value=httpx.Response(202))
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.rescan_episode(456, series_id=789)
+            assert result is True
+            # Verify only one call was made (no outer retry loop)
+            assert len(route.calls) == 1
+
+
+class TestSeries:
+    """Test series endpoint."""
+
+    @pytest.mark.asyncio
+    async def test_list_all_series(self, respx_mock):
+        """Test list_all_series returns SeriesPage."""
+        mock_response = {
+            "data": [
+                {
+                    "sonarrSeriesId": 123,
+                    "title": "Test Series",
+                    "path": "/tv/Test Series",
+                    "tvdbId": 456,
+                    "imdbId": "tt1234567",
+                    "monitored": True,
+                    "profileId": 1,
+                    "seriesType": "standard",
+                    "tags": [],
+                    "alternativeTitles": [],
+                    "ended": False,
+                    "lastAired": None,
+                    "fanart": None,
+                    "poster": None,
+                    "overview": "Test overview",
+                    "year": "2024",
+                    "audio_language": {},
+                }
+            ],
+            "total": 1,
+        }
+        respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json=mock_response)
         )
 
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="test-key",
         ) as client:
-            result = await client.rescan_episode(456)
-            assert result is True
+            result = await client.list_all_series()
+            assert len(result.data) == 1
+            assert result.total == 1
+            assert result.data[0].sonarrSeriesId == 123
+            assert result.data[0].title == "Test Series"
+
+    @pytest.mark.asyncio
+    async def test_list_episodes(self, respx_mock):
+        """Test list_episodes uses seriesid[] parameter."""
+        mock_response = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 100,
+                    "sonarrSeriesId": 123,
+                    "title": "Test Episode",
+                    "subtitles": [],
+                    "season": 1,
+                    "episode": 1,
+                    "path": "/tv/Test Series/Season 01/Episode 01.mkv",
+                    "sceneName": "/tv/Test Series/Season 01/Episode 01.mkv",
+                }
+            ],
+            "total": 1,
+        }
+        
+        respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_episodes(seriesid=123)
+            
+            assert len(result.data) == 1
+            assert result.total == 1
+            assert result.data[0].sonarrEpisodeId == 100
+            assert result.data[0].sonarrSeriesId == 123
+            # Verify the request was made with correct parameter name
+            assert len(respx_mock.calls) == 1
+            query_string = str(respx_mock.calls[0].request.url.query)
+            # seriesid[] is URL-encoded as seriesid%5B%5D
+            assert "seriesid%5B%5D" in query_string or "seriesid[]" in query_string
+
+    @pytest.mark.asyncio
+    async def test_get_episode(self, respx_mock):
+        """Test get_episode fetches specific episode by ID."""
+        mock_response = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 100,
+                    "sonarrSeriesId": 123,
+                    "title": "Test Episode",
+                    "subtitles": [],
+                    "season": 1,
+                    "episode": 1,
+                    "path": "/tv/Test Series/Season 01/Episode 01.mkv",
+                    "sceneName": "/tv/Test Series/Season 01/Episode 01.mkv",
+                }
+            ],
+            "total": 1,
+        }
+        
+        respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.get_episode(100)
+            
+            assert result is not None
+            assert result.sonarrEpisodeId == 100
+            assert result.sonarrSeriesId == 123
+            assert result.title == "Test Episode"
+
+    @pytest.mark.asyncio
+    async def test_get_episode_not_found(self, respx_mock):
+        """Test get_episode returns None when episode not found."""
+        mock_response = {"data": [], "total": 0}
+        
+        respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.get_episode(999)
+            
+            assert result is None

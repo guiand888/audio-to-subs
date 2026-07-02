@@ -24,6 +24,8 @@ from audio_to_subs.bazarr.poller import (
     _process_episode,
     _delete_stale,
     _get_poll_interval,
+    _poll_all_episodes,
+    _poll_all_movies,
 )
 from audio_to_subs.db.models import BazarrCache, Setting
 
@@ -517,3 +519,87 @@ class TestPollerIntegration:
         assert exit_idx < wait_idx, (
             f"Session must close before the inter-poll sleep; lifecycle={lifecycle}"
         )
+
+
+class TestPollAllEpisodes:
+    """Test _poll_all_episodes implementation."""
+
+    @pytest.mark.asyncio
+    async def test_poll_all_episodes_implementation(self, mock_db_session):
+        """Test that _poll_all_episodes fetches and caches episodes with no subtitles."""
+        from audio_to_subs.bazarr.client import BazarrClient
+        from audio_to_subs.bazarr.pathmap import PathMap
+
+        # Create mock client
+        mock_client = AsyncMock(spec=BazarrClient)
+        
+        # Mock series and episodes responses
+        from audio_to_subs.bazarr.schemas import Series, Episode, SeriesPage, EpisodesPage
+        
+        mock_series = Series(
+            sonarrSeriesId=1,
+            title="Test Series",
+            path="/tv/Test Series",
+            tvdbId=123,
+            imdbId=None,
+            monitored=True,
+            profileId=None,
+            seriesType="standard",
+            tags=[],
+            alternativeTitles=[],
+            ended=False,
+            lastAired=None,
+            fanart=None,
+            poster=None,
+            overview=None,
+            year=None,
+            audio_language=None,
+        )
+        
+        mock_episode_no_subs = Episode(
+            sonarrEpisodeId=100,
+            sonarrSeriesId=789,
+            title="Test Episode",
+            subtitles=[],  # No subtitles
+            season=1,
+            episode=1,
+            path="/bazarr/tv/Test Series/Season 01/Episode 01.mkv",
+            sceneName="/bazarr/tv/Test Series/Season 01/Episode 01.mkv",
+        )
+        
+        mock_episode_with_subs = Episode(
+            sonarrEpisodeId=101,
+            sonarrSeriesId=789,
+            title="Test Episode 2",
+            subtitles=[{"code2": "en", "code3": "eng", "name": "English", "forced": False, "hi": False}],  # Has subtitles
+            season=1,
+            episode=2,
+            path="/bazarr/tv/Test Series/Season 01/Episode 02.mkv",
+            sceneName="/bazarr/tv/Test Series/Season 01/Episode 02.mkv",
+        )
+        
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[mock_series],
+            total=1,
+        )
+        mock_client.list_episodes.return_value = EpisodesPage(
+            data=[mock_episode_no_subs, mock_episode_with_subs],
+            total=2,
+        )
+        
+        path_map = PathMap([("/bazarr/tv", "/local/tv")])
+        started_at = datetime.now(timezone.utc)
+        
+        # Call the function
+        await _poll_all_episodes(mock_db_session, mock_client, path_map, started_at)
+        
+        # Verify only episode without subtitles was cached
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.kind == "episode")
+        )
+        cached = result.scalars().all()
+        
+        assert len(cached) == 1
+        assert cached[0].ext_id == 100  # Only the episode without subs
+        assert cached[0].has_any_subs is False
+        assert "/local/tv" in cached[0].media_path  # Path was translated

@@ -15,6 +15,7 @@ from audio_to_subs.bazarr.schemas import (
     FileEntry,
     Movie,
     MoviesPage,
+    SeriesPage,
     WantedEpisode,
     WantedEpisodesPage,
     WantedMovie,
@@ -177,6 +178,71 @@ class BazarrClient:
         except httpx.RequestError as e:
             raise BazarrServerError(f"Request failed: {e}") from e
 
+    async def _patch(
+        self,
+        path: str,
+        params: dict[str, Any] | None = None,
+        *,
+        retry: bool = True,
+    ) -> httpx.Response:
+        """Make a PATCH request to Bazarr API.
+
+        Args:
+            path: API endpoint path (e.g., /api/movies)
+            params: Query parameters
+            retry: Whether to retry on server errors
+
+        Returns:
+            httpx.Response object (caller checks status code)
+
+        Raises:
+            BazarrAuthError: If authentication fails (401)
+            BazarrNotFoundError: If resource not found (404)
+            BazarrRateLimited: If rate limited (429)
+            BazarrServerError: If server error (5xx) and retry fails
+        """
+        client = await self._ensure_client()
+
+        try:
+            response = await client.patch(path, params=params)
+
+            if response.status_code == 401:
+                raise BazarrAuthError("Authentication failed: Invalid API key")
+
+            elif response.status_code == 404:
+                raise BazarrNotFoundError(f"Resource not found: {path}")
+
+            elif response.status_code == 429:
+                retry_after = response.headers.get("Retry-After")
+                retry_after_seconds = None
+                if retry_after:
+                    try:
+                        retry_after_seconds = int(retry_after)
+                    except ValueError:
+                        pass
+                raise BazarrRateLimited(retry_after=retry_after_seconds)
+
+            elif response.status_code >= 500:
+                if retry:
+                    logger.warning(
+                        "Server error %s on %s, retrying once...",
+                        response.status_code,
+                        path,
+                    )
+                    await asyncio.sleep(2)
+                    return await self._patch(path, params, retry=False)
+                else:
+                    raise BazarrServerError(
+                        f"Server error {response.status_code}: {response.text}"
+                    )
+
+            return response
+
+        except httpx.TimeoutException as e:
+            raise BazarrServerError(f"Request timeout: {e}") from e
+        except httpx.RequestError as e:
+            raise BazarrServerError(f"Request failed: {e}") from e
+
     # --- Wanted lists (the main listing endpoints) ---
 
     async def list_wanted_movies(
@@ -261,9 +327,54 @@ class BazarrClient:
         Returns:
             EpisodesPage with episodes for the series
         """
-        params = {"sonarrSeriesId": seriesid}
+        params = {"seriesid[]": seriesid}
         data = await self._get("/api/episodes", params)
         return EpisodesPage.model_validate(data)
+
+    async def list_all_series(
+        self,
+        *,
+        start: int = 0,
+        length: int = -1,
+        seriesid: list[int] | None = None,
+    ) -> SeriesPage:
+        """List all series.
+
+        Args:
+            start: Paging start (default 0)
+            length: Paging length (default -1 for all)
+            seriesid: Filter by specific Sonarr series IDs
+
+        Returns:
+            SeriesPage with all series
+        """
+        params: dict[str, Any] = {"start": start, "length": length}
+        if seriesid:
+            params["seriesid[]"] = seriesid
+
+        data = await self._get("/api/series", params)
+        return SeriesPage.model_validate(data)
+
+    async def get_episode(self, sonarr_episode_id: int) -> Episode | None:
+        """Get a specific episode by Sonarr Episode ID.
+
+        Args:
+            sonarr_episode_id: Sonarr Episode ID to look up
+
+        Returns:
+            Episode object if found, None if no episode matches that ID.
+
+        Raises:
+            BazarrAuthError: If authentication fails (401)
+            BazarrRateLimited: If rate limited (429)
+            BazarrServerError: If server error (5xx) and retry fails
+        """
+        params = {"episodeid[]": sonarr_episode_id}
+        data = await self._get("/api/episodes", params)
+        episodes_page = EpisodesPage.model_validate(data)
+        if episodes_page.data:
+            return episodes_page.data[0]
+        return None
 
     # --- File resolution ---
 
@@ -297,109 +408,103 @@ class BazarrClient:
 
     # --- Rescan endpoints ---
 
-    async def rescan_movie(self, radarr_id: int, retries: int = 2) -> bool:
+    async def rescan_movie(self, radarr_id: int) -> bool:
         """Rescan a movie in Bazarr.
 
         Triggers Bazarr to rescan the movie directory for new subtitle files.
-        Uses POST /api/movies/{radarrId}/rescan endpoint.
+        Uses PATCH /api/movies?radarrid={radarrId}&action=scan-disk endpoint.
+        _patch handles retry internally on server errors (5xx).
 
         Args:
             radarr_id: Radarr ID of the movie to rescan
-            retries: Number of retry attempts on failure
 
         Returns:
             True if rescan was triggered successfully, False otherwise
         """
-        for attempt in range(retries):
-            try:
-                client = await self._ensure_client()
-                response = await client.post(f"/api/movies/{radarr_id}/rescan")
+        try:
+            response = await self._patch(
+                "/api/movies",
+                params={"radarrid": radarr_id, "action": "scan-disk"},
+            )
 
-                if response.status_code in (200, 201, 202, 204):
-                    logger.info(
-                        "Successfully triggered Bazarr rescan for movie radarr_id=%s",
-                        radarr_id,
-                    )
-                    return True
-
-                logger.warning(
-                    "Bazarr rescan for movie %s returned status %s",
+            if response.status_code in (200, 201, 202, 204):
+                logger.info(
+                    "Successfully triggered Bazarr rescan for movie radarr_id=%s",
                     radarr_id,
-                    response.status_code,
                 )
-                return False
+                return True
 
-            except (httpx.RequestError, BazarrError) as e:
-                if attempt < retries - 1:
-                    logger.warning(
-                        "Attempt %s/%s: Failed to rescan movie %s: %s",
-                        attempt + 1,
-                        retries,
-                        radarr_id,
-                        e,
-                    )
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-                logger.error(
-                    "Final attempt failed: Failed to rescan movie %s: %s",
-                    radarr_id,
-                    e,
-                )
-                return False
+            logger.warning(
+                "Bazarr rescan for movie %s returned status %s",
+                radarr_id,
+                response.status_code,
+            )
+            return False
 
-        return False
+        except (httpx.RequestError, BazarrError) as e:
+            logger.error("Failed to rescan movie %s: %s", radarr_id, e)
+            return False
 
-    async def rescan_episode(self, sonarr_episode_id: int, retries: int = 2) -> bool:
+    async def rescan_episode(
+        self,
+        sonarr_episode_id: int,
+        series_id: int | None = None,
+    ) -> bool:
         """Rescan an episode in Bazarr.
 
-        Triggers Bazarr to rescan the episode directory for new subtitle files.
-        Uses POST /api/episodes/{sonarrEpisodeId}/rescan endpoint.
+        Triggers Bazarr to rescan the series directory for new subtitle files.
+        Uses PATCH /api/series?seriesid={seriesId}&action=scan-disk endpoint.
+        
+        Note: Bazarr does NOT support per-episode rescan. Must scan the entire
+        series. series_id is required and will be fetched from Bazarr if not provided.
+        _patch handles retry internally on server errors (5xx).
 
         Args:
             sonarr_episode_id: Sonarr Episode ID of the episode to rescan
-            retries: Number of retry attempts on failure
+            series_id: Sonarr Series ID (required - Bazarr only supports series-level scan)
 
         Returns:
             True if rescan was triggered successfully, False otherwise
         """
-        for attempt in range(retries):
-            try:
-                client = await self._ensure_client()
-                response = await client.post(f"/api/episodes/{sonarr_episode_id}/rescan")
+        if series_id is None:
+            logger.warning(
+                "rescan_episode requires series_id. Bazarr only supports series-level scan. "
+                "Episode %s cannot be rescanned without series_id.",
+                sonarr_episode_id,
+            )
+            return False
 
-                if response.status_code in (200, 201, 202, 204):
-                    logger.info(
-                        "Successfully triggered Bazarr rescan for episode sonarr_episode_id=%s",
-                        sonarr_episode_id,
-                    )
-                    return True
+        try:
+            response = await self._patch(
+                "/api/series",
+                params={"seriesid": series_id, "action": "scan-disk"},
+            )
 
-                logger.warning(
-                    "Bazarr rescan for episode %s returned status %s",
+            if response.status_code in (200, 201, 202, 204):
+                logger.info(
+                    "Successfully triggered Bazarr rescan for series series_id=%s "
+                    "(containing episode %s)",
+                    series_id,
                     sonarr_episode_id,
-                    response.status_code,
                 )
-                return False
+                return True
 
-            except (httpx.RequestError, BazarrError) as e:
-                if attempt < retries - 1:
-                    logger.warning(
-                        "Attempt %s/%s: Failed to rescan episode %s: %s",
-                        attempt + 1,
-                        retries,
-                        sonarr_episode_id,
-                        e,
-                    )
-                    await asyncio.sleep(2 ** attempt)  # Exponential backoff
-                    continue
-                logger.error(
-                    "Final attempt failed: Failed to rescan episode %s: %s",
-                    sonarr_episode_id,
-                    e,
-                )
-                return False
+            logger.warning(
+                "Bazarr rescan for series %s (episode %s) returned status %s",
+                series_id,
+                sonarr_episode_id,
+                response.status_code,
+            )
+            return False
 
-        return False
+        except (httpx.RequestError, BazarrError) as e:
+            logger.error(
+                "Failed to rescan series %s (episode %s): %s",
+                series_id,
+                sonarr_episode_id,
+                e,
+            )
+            return False
 
     # --- Utility methods ---
 
@@ -413,23 +518,4 @@ class BazarrClient:
         for movie in page.data:
             if movie.radarrId == radarr_id:
                 return movie
-        return None
-
-    async def get_episode_by_id(self, sonarr_episode_id: int) -> Episode | None:
-        """Get a specific episode by Sonarr Episode ID.
-
-        Note: This requires knowing the series ID to use list_episodes.
-        For now, this searches through wanted episodes.
-        """
-        page = await self.list_wanted_episodes(length=1000)
-        for episode in page.data:
-            if episode.sonarrEpisodeId == sonarr_episode_id:
-                # Convert WantedEpisode to Episode
-                return Episode(
-                    sonarrEpisodeId=episode.sonarrEpisodeId,
-                    title=episode.episodeTitle,
-                    subtitles=[],  # Not available in wanted response
-                    season=None,
-                    episode=None,
-                )
         return None

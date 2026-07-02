@@ -84,12 +84,15 @@ class Episode(BaseModel):
     """Episode item from Bazarr episodes endpoint."""
 
     sonarrEpisodeId: int = Field(description="Sonarr episode ID")
+    sonarrSeriesId: int = Field(description="Sonarr series ID")
     title: str = Field(description="Episode title")
     subtitles: list[SubtitleLanguage] = Field(
         default_factory=list, description="List of existing subtitles"
     )
     season: int | None = Field(default=None, description="Season number")
     episode: int | None = Field(default=None, description="Episode number")
+    path: str | None = Field(default=None, description="File path for the episode")
+    sceneName: str | None = Field(default=None, description="Scene name for the episode")
 
 
 class EpisodesPage(BaseModel):
@@ -97,6 +100,39 @@ class EpisodesPage(BaseModel):
 
     data: list[Episode] = Field(description="List of episodes")
     total: int = Field(description="Total count of episodes")
+
+
+class Series(BaseModel):
+    """Series item from Bazarr series endpoint."""
+
+    sonarrSeriesId: int = Field(description="Sonarr series ID")
+    title: str = Field(description="Series title")
+    path: str = Field(description="File path for the series")
+    tvdbId: int | None = Field(default=None, description="TVDB ID")
+    imdbId: str | None = Field(default=None, description="IMDB ID")
+    monitored: bool = Field(description="Whether series is monitored")
+    profileId: int | None = Field(default=None, description="Languages profile ID")
+    seriesType: str | None = Field(default=None, description="Series type")
+    tags: list[str] = Field(default_factory=list, description="Series tags")
+    alternativeTitles: list[str] = Field(
+        default_factory=list, description="Alternative titles"
+    )
+    ended: bool = Field(description="Whether series has ended")
+    lastAired: str | None = Field(default=None, description="Last aired date")
+    fanart: str | None = Field(default=None, description="Fanart URL")
+    poster: str | None = Field(default=None, description="Poster URL")
+    overview: str | None = Field(default=None, description="Series overview")
+    year: str | None = Field(default=None, description="Series year")
+    audio_language: dict[str, Any] | None = Field(
+        default=None, description="Audio language"
+    )
+
+
+class SeriesPage(BaseModel):
+    """Response wrapper for series endpoint."""
+
+    data: list[Series] = Field(description="List of series")
+    total: int = Field(description="Total count of series")
 
 
 class FileEntry(BaseModel):

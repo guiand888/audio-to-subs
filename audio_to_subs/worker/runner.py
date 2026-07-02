@@ -364,15 +364,37 @@ async def _rescan_bazarr_episode(
             )
             return
 
-        # Create client and trigger rescan
+        # Create client
         client = BazarrClient(
             base_url=bazarr_url,
             api_key=bazarr_api_key,
         )
 
-        await client.rescan_episode(sonarr_episode_id)
+        # Fetch episode to get series_id (Bazarr doesn't support per-episode rescan)
+        try:
+            episode = await client.get_episode(sonarr_episode_id)
+        except Exception as e:
+            logger.warning(
+                f"Failed to fetch series_id for episode {sonarr_episode_id}: {e}"
+            )
+            await client.close()
+            return
+
+        if episode is None:
+            logger.warning(
+                f"Episode {sonarr_episode_id} not found in Bazarr. "
+                f"Job {job_id}: skipping rescan."
+            )
+            await client.close()
+            return
+
+        series_id = episode.sonarrSeriesId
+
+        # Trigger rescan with series_id
+        await client.rescan_episode(sonarr_episode_id, series_id=series_id)
         logger.info(
-            f"Triggered Bazarr rescan for episode {sonarr_episode_id} (job {job_id})"
+            f"Triggered Bazarr rescan for series {series_id} "
+            f"(containing episode {sonarr_episode_id}, job {job_id})"
         )
 
         await client.close()

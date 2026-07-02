@@ -395,6 +395,9 @@ async def _poll_all_episodes(
     """Poll all episodes and add those with no subtitles to cache.
 
     This is expensive and opt-in via bazarr_track_no_subs setting.
+    
+    Separates HTTP calls from DB operations to avoid holding DB transactions
+    during network I/O (follows short-transaction convention).
 
     Args:
         db: Async database session
@@ -402,10 +405,54 @@ async def _poll_all_episodes(
         path_map: PathMap for path translation
         started_at: Poll start time
     """
-    # This would need to iterate through all series first
-    # For now, skip this as it's very expensive
-    # Can be implemented if needed by fetching all series, then all episodes per series
-    logger.debug("Skipping all episodes poll - not yet implemented")
+    try:
+        # Phase 1: HTTP calls only - collect cache entries without DB access
+        cache_entries_to_add = []
+        
+        series_page = await client.list_all_series(length=200)
+        
+        for series in series_page.data:
+            episodes_page = await client.list_episodes(seriesid=series.sonarrSeriesId)
+            
+            for episode in episodes_page.data:
+                # Check if episode has no subtitles at all
+                if not episode.subtitles:
+                    media_path = episode.path or episode.sceneName or ""
+                    if media_path:
+                        media_path = path_map.translate(media_path)
+
+                    cache_id = BazarrCache.make_id("episode", episode.sonarrEpisodeId)
+                    cache_entries_to_add.append({
+                        "cache_id": cache_id,
+                        "ext_id": episode.sonarrEpisodeId,
+                        "title": f"{series.title} - {episode.title}",
+                        "media_path": media_path,
+                    })
+        
+        # Phase 2: DB operations only - upsert all collected entries
+        for entry in cache_entries_to_add:
+            result = await db.execute(
+                select(BazarrCache).where(BazarrCache.id == entry["cache_id"])
+            )
+            existing = result.scalar_one_or_none()
+
+            if not existing:
+                cache_entry = BazarrCache(
+                    id=entry["cache_id"],
+                    kind="episode",
+                    ext_id=entry["ext_id"],
+                    title=entry["title"],
+                    media_path=entry["media_path"],
+                    has_any_subs=False,
+                    missing_subtitles=[],  # Empty because we don't know what's missing
+                    last_polled=started_at,
+                    active_job_id=None,
+                )
+                db.add(cache_entry)
+
+        await db.commit()
+    except Exception as e:
+        logger.warning("Failed to poll all episodes: %s", e)
 
 
 async def _delete_stale(
