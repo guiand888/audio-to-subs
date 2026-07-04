@@ -86,11 +86,12 @@ Issues = "https://github.com/guiand888/audio-to-subs/issues"
 audio-to-subs = "audio_to_subs.cli:main"
 
 [tool.setuptools.packages.find]
-where = ["audio_to_subs"]
+where = ["."]
+include = ["audio_to_subs*"]
 
 [tool.pytest.ini_options]
 testpaths = ["tests", "features"]
-python_files = ["test_*.py", "*_test.py"]
+python_files = ["test_*.py", "*_test.py", "*_steps.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
 asyncio_mode = "auto"

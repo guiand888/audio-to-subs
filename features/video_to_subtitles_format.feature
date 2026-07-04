@@ -27,23 +27,14 @@ Feature: Video to Subtitle Format Validation
     And no output file should be created
 
   Scenario: Extract audio from various video formats
-    Given I have video files of different formats:
-      | format |
-      | mp4    |
-      | mkv    |
-      | avi    |
-      | mov    |
+    Given I have video files of formats mp4, mkv, avi, mov
     When I extract audio from each video
     Then all audio extractions should succeed
     And each audio file should be in WAV format
     And each audio file should have correct sample rate (16kHz)
 
   Scenario: Generate valid SRT format
-    Given I have transcription segments:
-      | start | end  | text              |
-      | 0.0   | 2.5  | Hello world       |
-      | 2.5   | 5.0  | This is a test    |
-      | 5.0   | 7.5  | SRT format works  |
+    Given I have three sample transcription segments
     When I generate SRT subtitles
     Then the output file should be valid SRT format
     And each subtitle should have an index
@@ -53,8 +44,9 @@ Feature: Video to Subtitle Format Validation
 
   Scenario: Handle transcription API errors
     Given I have a video file "test_video.mp4"
+    And I have a valid Mistral API key
     And the Mistral API is unavailable
-    When I try to process the video
+    When I try to process the video with an unavailable API
     Then I should get a transcription error
     And the error message should indicate API failure
     And no output file should be created

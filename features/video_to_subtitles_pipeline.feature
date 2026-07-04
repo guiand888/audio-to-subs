@@ -40,32 +40,18 @@ Feature: Video to Subtitle Pipeline
     And the exit code should be 1
 
   Scenario: Batch process multiple videos
-    Given video files exist:
-      | filename   |
-      | video1.mp4 |
-      | video2.mp4 |
-      | video3.mp4 |
+    Given video files "video1.mp4, video2.mp4, video3.mp4" exist
     And a valid Mistral API key is configured
     When I run audio-to-subs with multiple files "video1.mp4 video2.mp4 video3.mp4"
-    Then SRT files should be created:
-      | filename   |
-      | video1.srt |
-      | video2.srt |
-      | video3.srt |
+    Then 3 SRT files should be created
     And all temporary audio files should be cleaned up
 
   Scenario: Continue batch processing on single file failure
-    Given video files exist:
-      | filename   |
-      | valid1.mp4 |
-      | valid2.mp4 |
+    Given video files "valid1.mp4, valid2.mp4" exist
     And an invalid file "invalid.txt" exists
     And a valid Mistral API key is configured
     When I run audio-to-subs with multiple files "valid1.mp4 invalid.txt valid2.mp4"
-    Then SRT files should be created:
-      | filename    |
-      | valid1.srt  |
-      | valid2.srt  |
+    Then 2 SRT files should be created
     And I should see an error message about "invalid.txt"
     And the exit code should be 1
 
@@ -88,7 +74,7 @@ Feature: Video to Subtitle Pipeline
     Given FFmpeg is not available
     And a video file "sample.mp4" exists
     And a valid Mistral API key is configured
-    When I run audio-to-subs with "sample.mp4"
+    When I run audio-to-subs with "sample.mp4" without FFmpeg
     Then I should see an error message about FFmpeg not found
     And no SRT file should be created
     And the exit code should be 2
