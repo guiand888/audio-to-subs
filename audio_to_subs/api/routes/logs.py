@@ -73,10 +73,11 @@ async def get_job_logs(
     if level_filter is not None:
         query = query.where(JobLog.level == level_filter)
 
-    # Get total count
-    count_result = await db.execute(
-        select(func.count(JobLog.id)).where(JobLog.job_id == str(job_id))
-    )
+    # Get total count (respecting filters)
+    count_query = select(func.count(JobLog.id)).where(JobLog.job_id == str(job_id))
+    if level_filter is not None:
+        count_query = count_query.where(JobLog.level == level_filter)
+    count_result = await db.execute(count_query)
     total = count_result.scalar()
 
     # Get paginated logs

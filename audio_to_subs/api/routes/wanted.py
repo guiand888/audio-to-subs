@@ -270,7 +270,8 @@ async def get_wanted_item(
         )
         job = job_result.one_or_none()
         if job:
-            active_job_status = job.status.value
+            # job.status is stored as string in DB (Mapped[JobStatus] over String(20))
+            active_job_status = job.status
             active_job_progress = job.progress_percent
 
     return WantedItem(

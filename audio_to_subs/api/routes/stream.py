@@ -108,9 +108,9 @@ async def job_stream(
     Returns a Server-Sent Events stream that receives notifications for
     the specific job's progress and completion events.
     """
-    # Verify job exists
+    # Verify job exists (convert UUID to string for String(36) column comparison)
     result = await db.execute(
-        select(Job).where(Job.id == job_id)
+        select(Job).where(Job.id == str(job_id))
     )
     job = result.scalar_one_or_none()
 
