@@ -274,3 +274,70 @@ class TestBazarrApiKeyFile:
         assert settings.BAZARR_API_KEY is None
         assert settings.BAZARR_API_KEY_FILE == "/nonexistent/path/key.txt"
         assert settings.bazarr_api_key is None
+
+
+class TestBazarrConnectionTestEndpoint:
+    """Test the Bazarr connection test endpoint."""
+
+    def test_connection_test_endpoint_exists(self, client):
+        """Test that the connection test endpoint exists and returns appropriate response."""
+        # Without configuring Bazarr, the endpoint should still exist
+        # and return an appropriate response
+        response = client.post("/api/settings/test-bazarr-connection")
+        
+        # The endpoint should exist and return 200
+        assert response.status_code == 200
+        data = response.json()
+        assert "success" in data
+        assert "error" in data
+        # Without Bazarr configured, should return success=False with error
+        assert data["success"] is False
+        assert data["error"] == "bazarr_not_configured"
+
+    def test_connection_test_with_configured_settings(self, client):
+        """Test connection test with Bazarr settings configured."""
+        # Configure Bazarr settings
+        update_data = {
+            "bazarr_url": "http://localhost:6767",
+            "bazarr_api_key": "test-api-key-123",
+        }
+        client.patch("/api/settings", json=update_data)
+        
+        # Test the connection - will likely fail without real Bazarr,
+        # but endpoint should exist and return structured response
+        response = client.post("/api/settings/test-bazarr-connection")
+        
+        # Should return 200 with structured response
+        assert response.status_code == 200
+        data = response.json()
+        assert "success" in data
+        assert "error" in data
+        assert "message" in data
+        # Will likely fail without real Bazarr instance
+        assert isinstance(data["success"], bool)
+        assert isinstance(data["error"], str) or data["error"] is None
+
+    def test_connection_test_uses_request_overrides_not_saved_settings(self, client):
+        """Passing bazarr_url in the body should test those values, not saved settings."""
+        # Save one (empty/unconfigured) set of settings.
+        client.patch(
+            "/api/settings",
+            json={"bazarr_url": "", "bazarr_api_key": ""},
+        )
+
+        # Without an override, the saved (empty) settings mean Bazarr isn't configured.
+        response = client.post("/api/settings/test-bazarr-connection")
+        assert response.json()["error"] == "bazarr_not_configured"
+
+        # With an override in the body, the endpoint should attempt to use it
+        # instead of reporting "not configured" from the saved settings.
+        response = client.post(
+            "/api/settings/test-bazarr-connection",
+            json={
+                "bazarr_url": "http://localhost:6767",
+                "bazarr_api_key": "unsaved-key",
+            },
+        )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["error"] != "bazarr_not_configured"

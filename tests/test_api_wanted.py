@@ -149,3 +149,68 @@ class TestLastRefreshed:
         
         # Verify function exists
         assert callable(_get_last_refreshed)
+
+
+class TestWantedRefreshEndpoint:
+    """Test POST /api/wanted/refresh endpoint."""
+
+    def test_refresh_endpoint_exists(self, test_client):
+        """Test that the refresh endpoint exists and returns success."""
+        response = test_client.post("/api/wanted/refresh")
+        
+        # The endpoint should exist and return 200
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ["started", "completed", "failed"]
+        assert "movies_processed" in data
+        assert "episodes_processed" in data
+        assert isinstance(data["movies_processed"], int)
+        assert isinstance(data["episodes_processed"], int)
+
+    def test_refresh_all(self, test_client):
+        """Test refresh with all items (default)."""
+        response = test_client.post("/api/wanted/refresh", json={"item_type": "all"})
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ["started", "completed", "failed"]
+        assert "movies_processed" in data
+        assert "episodes_processed" in data
+        assert isinstance(data["movies_processed"], int)
+        assert isinstance(data["episodes_processed"], int)
+
+    def test_refresh_movies_only(self, test_client):
+        """Test refresh with movies only filter."""
+        response = test_client.post("/api/wanted/refresh", json={"item_type": "movie"})
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ["started", "completed", "failed"]
+        assert "movies_processed" in data
+        assert "episodes_processed" in data
+        assert isinstance(data["movies_processed"], int)
+        assert isinstance(data["episodes_processed"], int)
+
+    def test_refresh_episodes_only(self, test_client):
+        """Test refresh with episodes only filter."""
+        response = test_client.post("/api/wanted/refresh", json={"item_type": "episode"})
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ["started", "completed", "failed"]
+        assert "movies_processed" in data
+        assert "episodes_processed" in data
+        assert isinstance(data["movies_processed"], int)
+        assert isinstance(data["episodes_processed"], int)
+
+    def test_refresh_without_item_type(self, test_client):
+        """Test refresh without item_type parameter (should default to all)."""
+        response = test_client.post("/api/wanted/refresh")
+        
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] in ["started", "completed", "failed"]
+        assert "movies_processed" in data
+        assert "episodes_processed" in data
+        assert isinstance(data["movies_processed"], int)
+        assert isinstance(data["episodes_processed"], int)

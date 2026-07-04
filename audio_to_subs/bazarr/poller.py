@@ -191,7 +191,7 @@ async def poll_once(
     client: BazarrClient,
     path_map: PathMap,
 ) -> int:
-    """Perform a single poll of Bazarr wanted items.
+    """Perform a single scheduled poll of all Bazarr wanted items.
 
     Fetches wanted movies and episodes from Bazarr, translates paths,
     and updates the bazarr_cache table.
@@ -204,42 +204,88 @@ async def poll_once(
     Returns:
         Number of items processed
     """
-    from sqlalchemy import insert
+    movies_processed, episodes_processed = await poll_bazarr_manually(
+        db, client, path_map, "all"
+    )
+    return movies_processed + episodes_processed
 
+
+async def poll_bazarr_manually(
+    db: "AsyncSession",
+    client: BazarrClient,
+    path_map: PathMap,
+    item_type: str | None = None,
+) -> tuple[int, int]:
+    """Perform a poll of Bazarr items with optional type filtering.
+
+    Used both for the scheduled background poll (via poll_once, item_type="all")
+    and for on-demand manual refreshes triggered from the API. Respects the
+    bazarr_track_no_subs setting and returns separate counts for movies and
+    episodes processed.
+
+    Runs strictly sequentially: `db` is a single SQLAlchemy AsyncSession, which
+    does not support concurrent use from multiple coroutines (interleaved
+    `execute()`/`commit()` calls raise `IllegalStateChangeError`), so movies and
+    episodes cannot be processed via asyncio.gather() against the same session.
+
+    Args:
+        db: Async database session
+        client: BazarrClient instance
+        path_map: PathMap for path translation
+        item_type: Optional filter - one of "all", "movie", "episode".
+            If None or "all", polls both movies and episodes.
+            If "movie", polls only movies.
+            If "episode", polls only episodes.
+
+    Returns:
+        Tuple of (movies_processed, episodes_processed) counts
+    """
     started_at = datetime.now(timezone.utc)
-    logger.info("Starting Bazarr poll at %s", started_at.isoformat())
+    logger.info(
+        "Starting Bazarr poll at %s (item_type=%s)", started_at.isoformat(), item_type
+    )
 
-    total_processed = 0
+    movies_processed = 0
+    episodes_processed = 0
 
     try:
         # Check if we should track items with no subs at all
         track_no_subs = await get_track_no_subs(db)
 
+        # Determine which types to poll
+        poll_movies = item_type is None or item_type == "all" or item_type == "movie"
+        poll_episodes = item_type is None or item_type == "all" or item_type == "episode"
+
         # Process wanted movies
-        movies_page = await client.list_wanted_movies(length=200)
-        for movie in movies_page.data:
-            await _process_movie(db, movie, path_map, started_at)
-            total_processed += 1
+        if poll_movies:
+            movies_page = await client.list_wanted_movies(length=200)
+            for movie in movies_page.data:
+                await _process_movie(db, movie, path_map, started_at)
+                movies_processed += 1
 
         # Process wanted episodes
-        episodes_page = await client.list_wanted_episodes(length=200)
-        for episode in episodes_page.data:
-            await _process_episode(db, episode, path_map, started_at)
-            total_processed += 1
+        if poll_episodes:
+            episodes_page = await client.list_wanted_episodes(length=200)
+            for episode in episodes_page.data:
+                await _process_episode(db, episode, path_map, started_at)
+                episodes_processed += 1
 
         # If tracking no-subs items, also check all items
         if track_no_subs:
-            await _poll_all_movies(db, client, path_map, started_at)
-            await _poll_all_episodes(db, client, path_map, started_at)
+            if poll_movies:
+                await _poll_all_movies(db, client, path_map, started_at)
+            if poll_episodes:
+                await _poll_all_episodes(db, client, path_map, started_at)
 
-        # Delete stale items (no longer wanted)
-        deleted_count = await _delete_stale(db, started_at)
+        # Delete stale items (no longer wanted) - only for types that were polled
+        deleted_count = await _delete_stale(db, started_at, poll_movies, poll_episodes)
         if deleted_count > 0:
             logger.info("Deleted %d stale items from cache", deleted_count)
 
         logger.info(
-            "Bazarr poll complete: processed %d items, deleted %d stale",
-            total_processed,
+            "Bazarr poll complete: processed %d movies, %d episodes, deleted %d stale",
+            movies_processed,
+            episodes_processed,
             deleted_count,
         )
 
@@ -247,7 +293,7 @@ async def poll_once(
         logger.error("Error during Bazarr poll: %s", e, exc_info=True)
         raise
 
-    return total_processed
+    return movies_processed, episodes_processed
 
 
 async def _process_movie(
@@ -521,6 +567,8 @@ async def _poll_all_episodes(
 async def _delete_stale(
     db: "AsyncSession",
     started_at: datetime,
+    poll_movies: bool = True,
+    poll_episodes: bool = True,
 ) -> int:
     """Delete items that are no longer wanted.
 
@@ -530,13 +578,29 @@ async def _delete_stale(
     Args:
         db: Async database session
         started_at: Poll start time
+        poll_movies: Whether movies were polled (delete stale movies if True)
+        poll_episodes: Whether episodes were polled (delete stale episodes if True)
 
     Returns:
         Number of deleted items
     """
-    result = await db.execute(
-        delete(BazarrCache).where(BazarrCache.last_polled < started_at)
+    # Only delete items of the types that were actually polled. If neither
+    # flag is set, nothing was polled, so delete nothing rather than falling
+    # back to an unconditional (both-kinds) delete.
+    conditions = []
+    if poll_movies:
+        conditions.append(BazarrCache.kind == "movie")
+    if poll_episodes:
+        conditions.append(BazarrCache.kind == "episode")
+
+    if not conditions:
+        return 0
+
+    query = delete(BazarrCache).where(
+        BazarrCache.last_polled < started_at, or_(*conditions)
     )
+
+    result = await db.execute(query)
     await db.commit()
     return result.rowcount
 

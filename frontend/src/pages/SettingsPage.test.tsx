@@ -1,0 +1,201 @@
+import { describe, it, expect, vi, beforeEach } from "vitest"
+import { render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { toast } from "sonner"
+import { api } from "@/lib/api"
+import { SettingsPage } from "./SettingsPage"
+
+// vi.mock calls are hoisted to the top of the file by vitest, so they must be
+// declared once at module scope (not inside individual `it` blocks) - the
+// mocked module is shared across all tests in the file, configured per-test
+// via vi.mocked(...).mockResolvedValue/mockReturnValue in beforeEach/tests.
+vi.mock("sonner", () => ({
+  toast: { success: vi.fn(), error: vi.fn() },
+}))
+
+// SettingsPage's unsaved-changes guard uses useBlocker, which requires a
+// RouterProvider context we don't set up here - stub it to a no-op since
+// these tests exercise the Bazarr connection/config UI, not navigation.
+vi.mock("@tanstack/react-router", () => ({
+  useBlocker: () => ({ status: "idle" as const, proceed: undefined, reset: undefined }),
+}))
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    get: vi.fn(),
+    patch: vi.fn(),
+    post: vi.fn(),
+    delete: vi.fn(),
+  },
+  ApiError: class ApiError extends Error {
+    constructor(
+      public readonly status: number,
+      public readonly detail: string,
+    ) {
+      super(detail)
+      this.name = "ApiError"
+    }
+  },
+}))
+
+const MOCK_SETTINGS = {
+  mistral_model: "voxtral-mini-latest",
+  mistral_rate_usd_per_minute: 0.003,
+  mistral_input_token_rate_usd: null,
+  mistral_output_token_rate_usd: null,
+  bazarr_poll_interval: 3600,
+  bazarr_track_no_subs: false,
+  bazarr_url: "http://localhost:6767",
+  bazarr_api_key: "test-api-key",
+  bazarr_timeout: 30.0,
+  path_mappings: [],
+  default_language: "en",
+  default_output_format: "srt",
+  movies_root_path: "/movies",
+  tv_root_path: "/tv",
+  subtitles_same_directory: true,
+}
+
+const MOCK_CONNECTION_SUCCESS = {
+  success: true,
+  message: "Connected to Bazarr successfully",
+  error: null,
+}
+
+const MOCK_CONNECTION_FAILURE = {
+  success: false,
+  message: null,
+  error: "connection_failed",
+}
+
+function wrapper({ children }: { children: React.ReactNode }) {
+  const client = new QueryClient({
+    defaultOptions: {
+      queries: { retry: false },
+      mutations: { retry: false },
+    },
+  })
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+}
+
+describe("SettingsPage - Bazarr Connection Test", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.patch).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.post).mockResolvedValue(MOCK_CONNECTION_SUCCESS)
+  })
+
+  it("renders Test Connection button when Bazarr URL is configured", async () => {
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Connection")).toBeInTheDocument()
+    })
+  })
+
+  it("Test Connection button is disabled when Bazarr URL is empty", async () => {
+    vi.mocked(api.get).mockResolvedValue({ ...MOCK_SETTINGS, bazarr_url: null })
+
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      const button = screen.getByText("Test Connection")
+      expect(button).toBeInTheDocument()
+      expect(button).toBeDisabled()
+    })
+  })
+
+  it("shows loading state when connection test is in progress", async () => {
+    const user = userEvent.setup()
+    let resolveConnectionTest: (value: typeof MOCK_CONNECTION_SUCCESS) => void
+    const connectionTestPromise = new Promise<typeof MOCK_CONNECTION_SUCCESS>((resolve) => {
+      resolveConnectionTest = resolve
+    })
+    vi.mocked(api.post).mockReturnValue(connectionTestPromise)
+
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      const button = screen.getByText("Test Connection")
+      expect(button).toBeInTheDocument()
+      expect(button).not.toBeDisabled()
+    })
+
+    // Click the button
+    await user.click(screen.getByText("Test Connection"))
+
+    // Should show loading state
+    await waitFor(() => {
+      expect(screen.getByText("Testing...")).toBeInTheDocument()
+    })
+
+    // Resolve the promise so the test doesn't leave a dangling act() warning
+    resolveConnectionTest!(MOCK_CONNECTION_SUCCESS)
+  })
+
+  it("shows success indicator on successful connection test", async () => {
+    const user = userEvent.setup()
+
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Connection")).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText("Test Connection"))
+
+    // Success is surfaced via a toast and the "Connection failed" text going
+    // away (no dedicated test id exists on the success checkmark icon).
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Connected to Bazarr successfully")
+    })
+    expect(screen.queryByText("Connection failed")).not.toBeInTheDocument()
+  })
+
+  it("shows error message on failed connection test", async () => {
+    vi.mocked(api.post).mockResolvedValue(MOCK_CONNECTION_FAILURE)
+    const user = userEvent.setup()
+
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Test Connection")).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText("Test Connection"))
+
+    // Wait for error state
+    await waitFor(() => {
+      expect(screen.getByText("Connection failed")).toBeInTheDocument()
+    })
+  })
+})
+
+describe("SettingsPage - Bazarr Configuration Section", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.patch).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.post).mockResolvedValue(MOCK_CONNECTION_SUCCESS)
+  })
+
+  it("renders Bazarr configuration section", async () => {
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText(/Bazarr Configuration/i)).toBeInTheDocument()
+    })
+  })
+
+  it("renders Bazarr URL input field with configured value", async () => {
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      const urlInput = screen.getByLabelText(/Bazarr API URL/i)
+      expect(urlInput).toBeInTheDocument()
+      expect(urlInput).toHaveValue("http://localhost:6767")
+    })
+  })
+})

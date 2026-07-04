@@ -213,6 +213,27 @@ export type SseEventData =
   | { event: "cancel"; job_id: string }
   | { event: "done"; job_id: string; status: string; error?: string }
 
+// --------------- Bazarr Connection Test ---------------
+
+export interface BazarrConnectionTestResponse {
+  success: boolean
+  message: string | null
+  error: string | null
+}
+
+// --------------- Wanted Refresh ---------------
+
+export interface WantedRefreshRequest {
+  item_type: "all" | "movie" | "episode"
+}
+
+export interface WantedRefreshResponse {
+  status: "started" | "completed" | "failed"
+  movies_processed: number
+  episodes_processed: number
+  error: string | null
+}
+
 // --------------- History ---------------
 
 export interface HistoryStats {

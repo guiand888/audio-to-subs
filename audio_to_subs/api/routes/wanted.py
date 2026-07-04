@@ -5,12 +5,12 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated
 from enum import Enum
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, desc, func, or_, and_
 from sqlalchemy.orm import joinedload, Mapped
 
-from audio_to_subs.api.deps import get_db
+from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.db.models import BazarrCache, Job, JobStatus
 from audio_to_subs.bazarr.pathmap import PathMap
 
@@ -286,3 +286,111 @@ async def get_wanted_item(
         active_job_status=active_job_status,
         active_job_progress=active_job_progress,
     )
+
+
+# Refresh endpoint models
+class WantedRefreshRequest(BaseModel):
+    """Request model for wanted list refresh."""
+
+    item_type: WantedItemType = Field(
+        default=WantedItemType.ALL,
+        description="Filter by item type: all, movie, or episode",
+    )
+
+
+class WantedRefreshResponse(BaseModel):
+    """Response model for wanted list refresh."""
+
+    status: str = Field(description="Refresh status: started, completed, failed")
+    movies_processed: int = Field(
+        default=0, description="Number of movies processed"
+    )
+    episodes_processed: int = Field(
+        default=0, description="Number of episodes processed"
+    )
+    error: str | None = Field(default=None, description="Error message if failed")
+
+
+@router.post(
+    "/refresh",
+    response_model=WantedRefreshResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def refresh_wanted_list(
+    db: Annotated["AsyncSession", Depends(get_db)],
+    settings: SettingsDep,
+    refresh_request: WantedRefreshRequest = Body(default_factory=WantedRefreshRequest)
+) -> WantedRefreshResponse:
+    """Trigger a manual refresh of the wanted list from Bazarr.
+
+    This endpoint triggers an immediate poll of Bazarr for wanted items,
+    respecting the filtering scope specified in the request.
+
+    The refresh:
+    - Uses database settings first, falling back to environment variables
+    - Respects the item_type filter (all, movies, episodes)
+    - Respects the bazarr_track_no_subs setting
+    - Updates the local cache with fresh data from Bazarr
+    - Returns counts of items processed
+
+    Args:
+        item_type: Filter scope - "all" polls both movies and episodes,
+                   "movie" polls only movies, "episode" polls only episodes
+
+    Returns:
+        Refresh result with status and counts
+    """
+    from audio_to_subs.bazarr.poller import (
+        get_bazarr_client_with_settings,
+        get_path_map,
+        poll_bazarr_manually,
+    )
+
+    try:
+        # Get Bazarr client using database settings first, then environment fallback
+        client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
+            db, settings
+        )
+    except Exception as e:
+        logger.error("Failed to initialize Bazarr client: %s", type(e).__name__)
+        return WantedRefreshResponse(
+            status="failed",
+            movies_processed=0,
+            episodes_processed=0,
+            error="Bazarr client initialization failed",
+        )
+
+    if client is None:
+        return WantedRefreshResponse(
+            status="failed",
+            movies_processed=0,
+            episodes_processed=0,
+            error="Bazarr not configured",
+        )
+
+    # Everything from here on must close the client on every exit path,
+    # including failures in get_path_map (not just poll_bazarr_manually).
+    try:
+        path_map = await get_path_map(db)
+
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            db, client, path_map, refresh_request.item_type.value
+        )
+
+        return WantedRefreshResponse(
+            status="completed",
+            movies_processed=movies_processed,
+            episodes_processed=episodes_processed,
+            error=None,
+        )
+
+    except Exception as e:
+        logger.error("Failed to refresh wanted list: %s", type(e).__name__)
+        return WantedRefreshResponse(
+            status="failed",
+            movies_processed=0,
+            episodes_processed=0,
+            error="Refresh failed",
+        )
+    finally:
+        await client.close()

@@ -173,6 +173,11 @@ export function SettingsPage() {
   // Form state
   const [formData, setFormData] = useState<Partial<SettingsPatch>>({})
 
+  // Connection test state
+  const [testConnectionStatus, setTestConnectionStatus] = useState<
+    "idle" | "testing" | "success" | "error"
+  >("idle")
+
   const changeCount = useMemo(
     () => (settings ? countChanges(formData, settings) : 0),
     [formData, settings],
@@ -256,6 +261,37 @@ export function SettingsPage() {
       mistral_input_token_rate_usd: model.inputTokenRate,
       mistral_output_token_rate_usd: model.outputTokenRate,
     }))
+  }
+
+  // Bazarr connection test handler
+  const handleTestConnection = async () => {
+    setTestConnectionStatus("testing")
+    try {
+      // Send the current (possibly unsaved) form values so the test reflects
+      // what the user is looking at, not just what was last saved.
+      const data = await api.post("/api/settings/test-bazarr-connection", {
+        bazarr_url: formData.bazarr_url,
+        bazarr_api_key: formData.bazarr_api_key,
+        bazarr_timeout: formData.bazarr_timeout,
+      })
+      if (data.success) {
+        setTestConnectionStatus("success")
+        toast.success(data.message || "Connected to Bazarr successfully")
+        // Clear the success status after 3 seconds
+        setTimeout(() => setTestConnectionStatus("idle"), 3000)
+      } else {
+        setTestConnectionStatus("error")
+        toast.error("Failed to connect to Bazarr: " + (data.error || "Unknown error"))
+        // Clear the error status after 5 seconds
+        setTimeout(() => setTestConnectionStatus("idle"), 5000)
+      }
+    } catch (error) {
+      setTestConnectionStatus("error")
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      toast.error("Failed to connect to Bazarr: " + errorMessage)
+      // Clear the error status after 5 seconds
+      setTimeout(() => setTestConnectionStatus("idle"), 5000)
+    }
   }
 
   // Path mappings management
@@ -529,6 +565,33 @@ export function SettingsPage() {
                 checked={formData.bazarr_track_no_subs ?? false}
                 onCheckedChange={handleBooleanChange("bazarr_track_no_subs")}
               />
+            </div>
+
+            {/* Test Connection Button */}
+            <div className="flex items-center gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={
+                  !formData.bazarr_url || testConnectionStatus === "testing"
+                }
+                onClick={handleTestConnection}
+              >
+                {testConnectionStatus === "testing" ? (
+                  <>
+                    <Loader2 className="h-4 w-4 animate-spin" />
+                    Testing...
+                  </>
+                ) : (
+                  "Test Connection"
+                )}
+              </Button>
+              {testConnectionStatus === "success" && (
+                <Check className="h-4 w-4 text-green-500" />
+              )}
+              {testConnectionStatus === "error" && (
+                <span className="text-sm text-destructive">Connection failed</span>
+              )}
             </div>
           </CardContent>
         </Card>

@@ -3,7 +3,7 @@
 
 import { useState, useEffect, useMemo } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { Loader2, Search } from "lucide-react"
+import { Loader2, Search, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
@@ -36,7 +36,7 @@ import {
 import { useWanted } from "@/hooks/useWanted"
 import { useCreateJob } from "@/hooks/useJobs"
 import { useJobsStore } from "@/lib/jobsStore"
-import { ApiError } from "@/lib/api"
+import { ApiError, api } from "@/lib/api"
 import type { MissingSubtitle, OutputFormat, WantedItem } from "@/lib/types"
 
 type ItemType = "all" | "movie" | "episode"
@@ -184,6 +184,12 @@ export function WantedPage() {
   const [langFilter, setLangFilter] = useState<string>("")
   const [page, setPage] = useState(1)
   const [transcribeItem, setTranscribeItem] = useState<WantedItem | null>(null)
+  
+  // Refresh state
+  const [refreshScope, setRefreshScope] = useState<ItemType>("all")
+  const [refreshStatus, setRefreshStatus] = useState<
+    "idle" | "refreshing" | "success" | "error"
+  >("idle")
 
   // Invalidate wanted query when a job finishes
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
@@ -192,6 +198,34 @@ export function WantedPage() {
       void queryClient.invalidateQueries({ queryKey: ["wanted"] })
     }
   }, [lastTerminalJobId, queryClient])
+
+  // Refresh wanted list handler
+  const handleRefresh = async () => {
+    setRefreshStatus("refreshing")
+    try {
+      const data = await api.post("/api/wanted/refresh", {
+        item_type: refreshScope,
+      })
+      if (data.status === "completed") {
+        setRefreshStatus("success")
+        toast.success(
+          `Refreshed ${data.movies_processed} movies and ${data.episodes_processed} episodes`
+        )
+        // Invalidate the wanted query to refresh the UI
+        void queryClient.invalidateQueries({ queryKey: ["wanted"] })
+      } else {
+        setRefreshStatus("error")
+        toast.error(data.error || "Failed to refresh wanted list")
+      }
+    } catch (error) {
+      setRefreshStatus("error")
+      const errorMessage = error instanceof Error ? error.message : "Unknown error"
+      toast.error("Failed to refresh wanted list: " + errorMessage)
+    } finally {
+      // Reset status after a delay
+      setTimeout(() => setRefreshStatus("idle"), 3000)
+    }
+  }
 
   const { data, isLoading } = useWanted({
     item_type: itemType,
@@ -300,6 +334,42 @@ export function WantedPage() {
             </SelectContent>
           </Select>
         )}
+
+        {/* Refresh button with scope dropdown */}
+        <div className="flex items-center gap-2">
+          <Select
+            value={refreshScope}
+            onValueChange={(v) => setRefreshScope(v as ItemType)}
+            disabled={refreshStatus === "refreshing"}
+          >
+            <SelectTrigger className="w-[120px]">
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="all">All Items</SelectItem>
+              <SelectItem value="movie">Movies Only</SelectItem>
+              <SelectItem value="episode">TV Series Only</SelectItem>
+            </SelectContent>
+          </Select>
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={handleRefresh}
+            disabled={refreshStatus === "refreshing"}
+          >
+            {refreshStatus === "refreshing" ? (
+              <>
+                <Loader2 className="h-4 w-4 animate-spin" />
+                Refreshing...
+              </>
+            ) : (
+              <>
+                <RefreshCw className="h-4 w-4" />
+                Refresh
+              </>
+            )}
+          </Button>
+        </div>
       </div>
 
       {/* Table */}

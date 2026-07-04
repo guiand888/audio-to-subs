@@ -4,12 +4,12 @@ import json
 import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
-from audio_to_subs.api.deps import get_db
+from audio_to_subs.api.deps import SettingsDep, get_db
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -275,4 +275,148 @@ async def get_setting(
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to parse setting {key}",
+        )
+
+
+# Connection test models
+class BazarrConnectionTestRequest(BaseModel):
+    """Optional overrides for the Bazarr connection test.
+
+    When bazarr_url is provided, the test targets these values directly
+    instead of the saved DB/env settings - this lets the Settings page test
+    unsaved, currently-edited form values before the user clicks Save.
+    """
+
+    bazarr_url: str | None = Field(
+        default=None, description="Bazarr URL to test (overrides saved settings)"
+    )
+    bazarr_api_key: str | None = Field(
+        default=None, description="Bazarr API key to test (overrides saved settings)"
+    )
+    bazarr_timeout: float | None = Field(
+        default=None, description="Bazarr timeout to test (overrides saved settings)"
+    )
+
+
+class BazarrConnectionTestResponse(BaseModel):
+    """Response for Bazarr connection test."""
+
+    success: bool = Field(description="Whether the connection test succeeded")
+    message: str | None = Field(
+        default=None, description="Success message or detailed error description"
+    )
+    error: str | None = Field(default=None, description="Error type or category")
+
+
+@router.post(
+    "/test-bazarr-connection",
+    response_model=BazarrConnectionTestResponse,
+    status_code=status.HTTP_200_OK,
+)
+async def test_bazarr_connection(
+    db: Annotated["AsyncSession", Depends(get_db)],
+    settings: SettingsDep,
+    test_request: BazarrConnectionTestRequest = Body(
+        default_factory=BazarrConnectionTestRequest
+    ),
+) -> BazarrConnectionTestResponse:
+    """Test connectivity to Bazarr API.
+
+    Attempts to connect to Bazarr and verifies the connection is working. If
+    bazarr_url is provided in the request body, tests those (possibly unsaved)
+    values directly; otherwise uses configured settings (database first, then
+    environment variables).
+
+    This endpoint:
+    - Tests request-body overrides if provided, else DB settings, else env vars
+    - Makes a lightweight API call to test connectivity
+    - NEVER exposes API keys, URLs, or other sensitive data in responses or logs
+    - Returns success/failure with user-friendly messages
+
+    Returns:
+        Connection test result with success status and message
+    """
+    from audio_to_subs.bazarr.poller import get_bazarr_client, get_bazarr_client_with_settings
+
+    try:
+        if test_request.bazarr_url is not None:
+            # Test the values currently in the (possibly unsaved) settings form.
+            client = await get_bazarr_client(
+                test_request.bazarr_url,
+                test_request.bazarr_api_key,
+                test_request.bazarr_timeout
+                if test_request.bazarr_timeout is not None
+                else 30.0,
+            )
+        else:
+            # Get Bazarr client using database settings first, then environment fallback
+            client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
+                db, settings
+            )
+
+        if client is None:
+            return BazarrConnectionTestResponse(
+                success=False,
+                message=None,
+                error="bazarr_not_configured",
+            )
+
+        # Attempt a lightweight API call to test connectivity
+        # Use list_all_series with limit=1 to minimize impact
+        try:
+            series_page = await client.list_all_series(start=0, length=1)
+            # If we get here, the connection succeeded
+            await client.close()
+            return BazarrConnectionTestResponse(
+                success=True,
+                message="Connected to Bazarr successfully",
+                error=None,
+            )
+
+        except Exception as e:
+            # Handle various error types - never expose sensitive data
+            await client.close()
+            error_type = type(e).__name__
+
+            # Map error types to user-friendly messages
+            if error_type == "BazarrAuthError":
+                return BazarrConnectionTestResponse(
+                    success=False,
+                    message=None,
+                    error="authentication_failed",
+                )
+            elif error_type == "BazarrNotFoundError":
+                return BazarrConnectionTestResponse(
+                    success=False,
+                    message=None,
+                    error="resource_not_found",
+                )
+            elif error_type == "BazarrRateLimited":
+                return BazarrConnectionTestResponse(
+                    success=False,
+                    message=None,
+                    error="rate_limited",
+                )
+            elif error_type == "BazarrServerError":
+                return BazarrConnectionTestResponse(
+                    success=False,
+                    message=None,
+                    error="server_error",
+                )
+            else:
+                # Generic error - log it but don't expose details to user
+                logger.warning("Bazarr connection test failed: %s", error_type)
+                return BazarrConnectionTestResponse(
+                    success=False,
+                    message=None,
+                    error="connection_failed",
+                )
+
+    except Exception as e:
+        # Catch any unexpected errors during client creation
+        logger.error("Unexpected error during Bazarr connection test: %s", type(e).__name__)
+        return BazarrConnectionTestResponse(
+            success=False,
+            message=None,
+            error="internal_error",
         )

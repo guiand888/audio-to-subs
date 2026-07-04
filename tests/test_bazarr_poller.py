@@ -803,3 +803,324 @@ class TestPollAllEpisodes:
         assert cached[0].ext_id == 100  # Only the episode without subs
         assert cached[0].has_any_subs is False
         assert "/local/tv" in cached[0].media_path  # Path was translated
+
+
+class TestManualPolling:
+    """Test manual polling functionality with type filtering."""
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_all(self, mock_db_session):
+        """Test manual polling without type filter polls both movies and episodes."""
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.bazarr.schemas import (
+            WantedEpisode,
+            WantedEpisodesPage,
+            WantedMovie,
+            WantedMoviesPage,
+        )
+
+        # Create mock client
+        mock_client = AsyncMock(spec=BazarrClient)
+
+        movie = WantedMovie(
+            title="Test Movie",
+            radarrId=123,
+            sceneName="/bazarr/movies/Test Movie.mkv",
+        )
+        episode = WantedEpisode(
+            seriesTitle="Test Series",
+            episode_number="S01E01",
+            episodeTitle="Pilot",
+            sonarrSeriesId=1,
+            sonarrEpisodeId=456,
+        )
+
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=[movie], total=1
+        )
+        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+            data=[episode], total=1
+        )
+
+        path_map = PathMap()
+
+        # Call the function
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, None
+        )
+
+        # Verify both API calls were made
+        mock_client.list_wanted_movies.assert_awaited_once()
+        mock_client.list_wanted_episodes.assert_awaited_once()
+
+        # Verify counts
+        assert movies_processed == 1
+        assert episodes_processed == 1
+
+        await mock_client.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_movies_only(self, mock_db_session):
+        """Test manual polling for movies only skips episode API calls."""
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.api.routes.wanted import WantedItemType
+        from audio_to_subs.bazarr.schemas import (
+            WantedEpisodesPage,
+            WantedMovie,
+            WantedMoviesPage,
+        )
+
+        # Create mock client
+        mock_client = AsyncMock(spec=BazarrClient)
+
+        movie = WantedMovie(
+            title="Test Movie",
+            radarrId=123,
+            sceneName="/bazarr/movies/Test Movie.mkv",
+        )
+
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=[movie], total=1
+        )
+        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+            data=[], total=0
+        )
+
+        path_map = PathMap()
+
+        # Call the function with movies only filter
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, WantedItemType.MOVIE
+        )
+
+        # Verify only movie API call was made
+        mock_client.list_wanted_movies.assert_awaited_once()
+        # Episode API should not be called
+        mock_client.list_wanted_episodes.assert_not_awaited()
+
+        # Verify counts
+        assert movies_processed == 1
+        assert episodes_processed == 0
+
+        await mock_client.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_episodes_only(self, mock_db_session):
+        """Test manual polling for episodes only skips movie API calls."""
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.api.routes.wanted import WantedItemType
+        from audio_to_subs.bazarr.schemas import (
+            WantedEpisode,
+            WantedEpisodesPage,
+            WantedMoviesPage,
+        )
+
+        # Create mock client
+        mock_client = AsyncMock(spec=BazarrClient)
+
+        episode = WantedEpisode(
+            seriesTitle="Test Series",
+            episode_number="S01E01",
+            episodeTitle="Pilot",
+            sonarrSeriesId=1,
+            sonarrEpisodeId=456,
+        )
+
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=[], total=0
+        )
+        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+            data=[episode], total=1
+        )
+
+        path_map = PathMap()
+
+        # Call the function with episodes only filter
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, WantedItemType.EPISODE
+        )
+
+        # Verify only episode API call was made
+        mock_client.list_wanted_episodes.assert_awaited_once()
+        # Movie API should not be called
+        mock_client.list_wanted_movies.assert_not_awaited()
+
+        # Verify counts
+        assert movies_processed == 0
+        assert episodes_processed == 1
+
+        await mock_client.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_with_track_no_subs(self, mock_db_session):
+        """Test manual polling respects bazarr_track_no_subs setting."""
+        import json
+
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.api.routes.wanted import WantedItemType
+        from audio_to_subs.bazarr.schemas import (
+            Episode,
+            EpisodesPage,
+            Movie,
+            MoviesPage,
+            Series,
+            SeriesPage,
+            WantedEpisode,
+            WantedEpisodesPage,
+            WantedMovie,
+            WantedMoviesPage,
+        )
+        from audio_to_subs.db.models import Setting
+
+        # Enable track_no_subs setting
+        setting = Setting(
+            key="bazarr_track_no_subs",
+            value_json=json.dumps(True),
+        )
+        mock_db_session.add(setting)
+        await mock_db_session.commit()
+
+        # Create mock client
+        mock_client = AsyncMock(spec=BazarrClient)
+
+        movie = WantedMovie(
+            title="Test Movie",
+            radarrId=123,
+            sceneName="/bazarr/movies/Test Movie.mkv",
+        )
+        episode = WantedEpisode(
+            seriesTitle="Test Series",
+            episode_number="S01E01",
+            episodeTitle="Pilot",
+            sonarrSeriesId=1,
+            sonarrEpisodeId=456,
+        )
+
+        # Movie with no subtitles
+        movie_no_subs = Movie(
+            radarrId=789,
+            title="Movie No Subs",
+            sceneName="/bazarr/movies/No Subs.mkv",
+            subtitles=[],
+        )
+
+        # Series and episode with no subtitles
+        series_no_subs = Series(
+            sonarrSeriesId=101,
+            title="Series No Subs",
+            path="/bazarr/tv/Series No Subs",
+            monitored=True,
+            ended=False,
+        )
+        episode_no_subs = Episode(
+            sonarrEpisodeId=202,
+            sonarrSeriesId=101,
+            title="Episode No Subs",
+            path="/bazarr/tv/Series No Subs/ep1.mkv",
+            sceneName="/bazarr/tv/Series No Subs/ep1.mkv",
+            subtitles=[],
+        )
+
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=[movie], total=1
+        )
+        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+            data=[episode], total=1
+        )
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[movie_no_subs], total=1
+        )
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[series_no_subs], total=1
+        )
+        mock_client.list_episodes.return_value = EpisodesPage(
+            data=[episode_no_subs], total=1
+        )
+
+        path_map = PathMap()
+
+        # Call the function with ALL type (which should also poll all items when track_no_subs is enabled)
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, WantedItemType.ALL
+        )
+
+        # Verify all API calls were made (wanted + all for track_no_subs)
+        mock_client.list_wanted_movies.assert_awaited_once()
+        mock_client.list_wanted_episodes.assert_awaited_once()
+        mock_client.list_all_movies.assert_awaited_once()
+        mock_client.list_all_series.assert_awaited_once()
+        mock_client.list_episodes.assert_awaited_once()
+
+        # Verify counts include both wanted and no-subs items
+        assert movies_processed >= 1  # At least the wanted movie
+        assert episodes_processed >= 1  # At least the wanted episode
+
+        await mock_client.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_handles_client_error(self, mock_db_session):
+        """Test manual polling propagates Bazarr client errors instead of masking them as success."""
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.bazarr.client import BazarrServerError
+
+        # Create mock client that raises error
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_wanted_movies.side_effect = BazarrServerError("Server error")
+
+        path_map = PathMap()
+
+        # A failure fetching wanted movies must propagate, not be swallowed and
+        # reported as a successful poll with 0 items processed.
+        with pytest.raises(BazarrServerError):
+            await poll_bazarr_manually(mock_db_session, mock_client, path_map, None)
+
+        await mock_client.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_returns_counts(self, mock_db_session):
+        """Test manual polling returns accurate counts."""
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.bazarr.schemas import (
+            WantedEpisode,
+            WantedEpisodesPage,
+            WantedMovie,
+            WantedMoviesPage,
+        )
+
+        # Create mock client
+        mock_client = AsyncMock(spec=BazarrClient)
+
+        movies = [
+            WantedMovie(title=f"Movie {i}", radarrId=i, sceneName=f"/m{i}.mkv")
+            for i in range(1, 4)
+        ]
+        episodes = [
+            WantedEpisode(
+                seriesTitle="Series 1",
+                episode_number=f"S01E0{i}",
+                episodeTitle=f"Ep{i}",
+                sonarrSeriesId=1,
+                sonarrEpisodeId=100 + i,
+            )
+            for i in range(1, 3)
+        ]
+
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=movies, total=3
+        )
+        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+            data=episodes, total=2
+        )
+
+        path_map = PathMap()
+
+        # Call the function
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, None
+        )
+
+        # Verify counts are accurate
+        assert movies_processed == 3
+        assert episodes_processed == 2
+
+        await mock_client.close()
