@@ -47,6 +47,14 @@
           env = {
             # Keep venv + caches inside the repo, out of $HOME.
             PIP_DISABLE_PIP_VERSION_CHECK = "1";
+
+            # greenlet (SQLAlchemy / argon2-cffi dep) loads libstdc++.so.6 at
+            # import time; nixpkgs' gcc does not put it on the default library
+            # search path, so expose it explicitly. Without this, every test
+            # that touches SQLAlchemy async raises:
+            #   "the greenlet library is required to use this function.
+            #    libstdc++.so.6: cannot open shared object file"
+            LD_LIBRARY_PATH = "${pkgs.gcc.cc.lib}/lib";
           };
 
           shellHook = ''
