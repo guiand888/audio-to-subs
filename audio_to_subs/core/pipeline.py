@@ -492,29 +492,10 @@ class Pipeline:
                 # Extract usage from the last segment's response
                 # The Mistral response is on the transcription client
                 if idx == len(audio_segments):
-                    # Try to get usage from the client's last response
-                    last_response = getattr(
-                        self.transcription_client, "_last_response", None
-                    )
-                    if last_response is not None:
-                        # Try to extract usage
-                        if hasattr(last_response, "usage"):
-                            usage_attr = getattr(last_response, "usage")
-                            if usage_attr is not None:
-                                if hasattr(usage_attr, "model_dump"):
-                                    try:
-                                        mistral_usage = usage_attr.model_dump()
-                                    except Exception:
-                                        pass
-                                elif isinstance(usage_attr, dict):
-                                    mistral_usage = usage_attr.copy()
-                        elif hasattr(last_response, "model_dump"):
-                            try:
-                                dumped = last_response.model_dump()
-                                if isinstance(dumped, dict) and "usage" in dumped:
-                                    mistral_usage = dumped["usage"]
-                            except Exception:
-                                pass
+                    # Extract usage from the last transcription response
+                    last_usage = getattr(self.transcription_client, "_last_usage", None)
+                    if last_usage:
+                        mistral_usage = last_usage
 
                 # Reject if no timestamped segments
                 if not segments:
