@@ -51,6 +51,7 @@ class TranscriptionClient:
         self.model = model
         self.language = language
         self.progress_callback = progress_callback
+        self._last_usage: dict[str, Any] | None = None
         logger.debug(f"TranscriptionClient initialized: model={model}, language={language}")
         self.client = Mistral(api_key=self.api_key)
 
@@ -133,6 +134,13 @@ class TranscriptionClient:
                 logger.debug(f"Calling Mistral API: model={self.model}, language={lang}")
                 response = self.client.audio.transcriptions.complete(**kwargs)
                 logger.debug(f"Transcription response received, text length: {len(response.text)}")
+                # Capture usage for cost calculation
+                if hasattr(response, "usage"):
+                    usage_obj = getattr(response, "usage")
+                    if hasattr(usage_obj, "model_dump"):
+                        self._last_usage = usage_obj.model_dump()
+                    elif isinstance(usage_obj, dict):
+                        self._last_usage = usage_obj.copy()
             return response.text
         except Exception as e:
             logger.error(f"Transcription failed: {str(e)}")
@@ -226,6 +234,13 @@ class TranscriptionClient:
                 logger.debug(f"Transcription response type: {type(response)}")
                 logger.debug(f"Transcription response dir: {dir(response)}")
                 logger.debug(f"Transcription response: {response}")
+                # Capture usage for cost calculation
+                if hasattr(response, "usage"):
+                    usage_obj = getattr(response, "usage")
+                    if hasattr(usage_obj, "model_dump"):
+                        self._last_usage = usage_obj.model_dump()
+                    elif isinstance(usage_obj, dict):
+                        self._last_usage = usage_obj.copy()
 
             segments = []
             if hasattr(response, "segments"):
