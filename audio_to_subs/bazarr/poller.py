@@ -315,8 +315,8 @@ async def _process_movie(
     if media_path:
         media_path = path_map.translate(media_path)
 
-    # Check if this movie has any subtitles at all
-    has_any_subs = len(wanted_movie.missing_subtitles or []) > 0
+    # Check if this movie has any subtitles at all (no missing subtitles = has all)
+    has_any_subs = len(wanted_movie.missing_subtitles or []) == 0
 
     cache_id = BazarrCache.make_id("movie", wanted_movie.radarrId)
 
