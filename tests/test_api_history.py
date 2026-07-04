@@ -3,30 +3,12 @@
 import pytest
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
-
-from audio_to_subs.api.app import create_app
 from audio_to_subs.db.models import Job, JobStatus, JobSource
 
 
-@pytest.fixture
-def client():
-    """TestClient backed by the per-test file DB."""
-    import audio_to_subs.db.base as db_base
-    import audio_to_subs.api.settings as api_settings
-    import audio_to_subs.auth.sessions as auth_sessions
-
-    db_base._async_engine = None
-    api_settings._settings = None
-    auth_sessions._session_manager = None
-
-    app = create_app()
-    return TestClient(app, raise_server_exceptions=False)
-
-
-def test_get_history_empty(client):
+def test_get_history_empty(api_client):
     """GET /api/history returns empty results on a fresh database."""
-    response = client.get("/api/history")
+    response = api_client.get("/api/history")
 
     assert response.status_code == 200
     data = response.json()

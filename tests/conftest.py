@@ -13,6 +13,8 @@ the per-test file DB.  Tests that only need a raw SQLAlchemy session can use
 
 import os
 from typing import Generator
+from unittest.mock import MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -135,3 +137,70 @@ def api_client():
 
     app = create_app()
     return TestClient(app, raise_server_exceptions=False)
+
+
+def make_job(**kwargs):
+    """Factory to create Job objects with sensible defaults for testing.
+
+    Accepts any Job field as a kwarg override. Common fields:
+      - status: JobStatus enum value
+      - media_path: path string
+      - source: JobSource enum value
+      - language_code: ISO 639-1 code
+      - audio_duration_seconds: float
+      - estimated_cost_usd: float
+    """
+    from audio_to_subs.db.models import Job, JobStatus, JobSource
+
+    defaults = {
+        "id": str(uuid4()),
+        "status": JobStatus.DONE,
+        "source": JobSource.MANUAL,
+        "media_path": "/test/video.mp4",
+        "output_format": "srt",
+    }
+    defaults.update(kwargs)
+    return Job(**defaults)
+
+
+@pytest.fixture
+def mocked_pipeline_deps():
+    """Shared fixture for mocking all Pipeline dependencies.
+
+    Patches 7 dependencies used in pipeline tests:
+      - extract_audio
+      - get_audio_duration
+      - needs_splitting
+      - split_audio
+      - TranscriptionClient.transcribe_audio_with_timestamps
+      - SubtitleGenerator.generate
+      - Path (to avoid file existence checks)
+
+    Returns a dict with all mocks under their function names.
+    Yields to allow cleanup.
+    """
+    from audio_to_subs.core.transcription_client import TranscriptionClient
+
+    with patch("audio_to_subs.core.pipeline.extract_audio") as mock_extract, \
+         patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0) as mock_duration, \
+         patch("audio_to_subs.core.pipeline.needs_splitting") as mock_needs_splitting, \
+         patch("audio_to_subs.core.pipeline.split_audio") as mock_split, \
+         patch.object(TranscriptionClient, "transcribe_audio_with_timestamps") as mock_transcribe, \
+         patch("audio_to_subs.core.pipeline.SubtitleGenerator.generate") as mock_generate, \
+         patch("audio_to_subs.core.pipeline.Path") as mock_path:
+
+        # Configure defaults for common mocks
+        mock_path_instance = MagicMock()
+        mock_path_instance.exists.return_value = True
+        mock_path_instance.stat.return_value.st_size = 1000000
+        mock_path.return_value = mock_path_instance
+
+        yield {
+            "extract_audio": mock_extract,
+            "get_audio_duration": mock_duration,
+            "needs_splitting": mock_needs_splitting,
+            "split_audio": mock_split,
+            "transcribe_audio_with_timestamps": mock_transcribe,
+            "generate": mock_generate,
+            "path": mock_path,
+        }
