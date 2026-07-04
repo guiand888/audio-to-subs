@@ -247,8 +247,8 @@ class SubtitleGenerator:
         
         # Write to file
         output_file = Path(output_path)
-        output_file.write_text("\n".join(srt_lines))
-        
+        output_file.write_text("\n".join(srt_lines), encoding="utf-8")
+
         return str(output_path)
 
     def generate_vtt(self, segments: list[dict[str, Any]], output_path: str) -> str:
@@ -307,8 +307,8 @@ class SubtitleGenerator:
         
         # Write to file
         output_file = Path(output_path)
-        output_file.write_text("\n".join(vtt_lines))
-        
+        output_file.write_text("\n".join(vtt_lines), encoding="utf-8")
+
         return str(output_path)
 
     def generate_sbv(self, segments: list[dict[str, Any]], output_path: str) -> str:
@@ -368,8 +368,8 @@ class SubtitleGenerator:
         
         # Write to file
         output_file = Path(output_path)
-        output_file.write_text("\n".join(sbv_lines))
-        
+        output_file.write_text("\n".join(sbv_lines), encoding="utf-8")
+
         return str(output_path)
 
     def _generate_output_filename(self, output_path: str, output_format: str, language_code: Optional[str] = None) -> str:
