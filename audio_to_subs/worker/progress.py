@@ -102,10 +102,11 @@ class ProgressBridge:
             ):
                 await self._update_job_progress(percent, stage, message)
                 self._last_percent = percent
-                self._last_stage = stage
                 self._last_db_update = current_time
+                # Assign _last_stage at the end to preserve old value for log check
+                self._last_stage = stage
 
-            # Write to job_logs on stage transitions
+            # Write to job_logs on stage transitions (check before updating _last_stage)
             if stage != self._last_stage:
                 await self._write_job_log(stage, message)
                 self._last_stage = stage
