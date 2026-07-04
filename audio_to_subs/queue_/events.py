@@ -17,7 +17,7 @@ CHANNEL_NEW = "jobs:new"
 CHANNEL_GLOBAL = "jobs:global"
 
 
-def _publish(
+async def _publish(
     redis: Redis,
     channel: str,
     payload: dict[str, Any],
@@ -31,7 +31,7 @@ def _publish(
     """
     try:
         message = json.dumps(payload)
-        redis.publish(channel, message)
+        await redis.publish(channel, message)
         logger.debug(f"Published to {channel}: {payload}")
     except Exception as e:
         logger.error(f"Failed to publish to {channel}: {e}")
@@ -47,9 +47,9 @@ async def publish_new(redis: Redis, job_id: str) -> None:
     """
     payload = {"job_id": job_id}
     # Publish to specific channel
-    _publish(redis, f"{CHANNEL_NEW}", payload)
+    await _publish(redis, f"{CHANNEL_NEW}", payload)
     # Also publish to global fan-out channel
-    _publish(redis, CHANNEL_GLOBAL, {"event": "new", "job_id": job_id})
+    await _publish(redis, CHANNEL_GLOBAL, {"event": "new", "job_id": job_id})
 
 
 async def publish_progress(
@@ -74,9 +74,9 @@ async def publish_progress(
         "message": message,
     }
     # Publish to job-specific channel
-    _publish(redis, f"jobs:progress:{job_id}", payload)
+    await _publish(redis, f"jobs:progress:{job_id}", payload)
     # Also publish to global fan-out channel
-    _publish(redis, CHANNEL_GLOBAL, {"event": "progress", "job_id": job_id, **payload})
+    await _publish(redis, CHANNEL_GLOBAL, {"event": "progress", "job_id": job_id, **payload})
 
 
 async def publish_cancel(redis: Redis, job_id: str) -> None:
@@ -88,9 +88,9 @@ async def publish_cancel(redis: Redis, job_id: str) -> None:
     """
     payload = {}
     # Publish to job-specific channel
-    _publish(redis, f"jobs:cancel:{job_id}", payload)
+    await _publish(redis, f"jobs:cancel:{job_id}", payload)
     # Also publish to global fan-out channel
-    _publish(redis, CHANNEL_GLOBAL, {"event": "cancel", "job_id": job_id})
+    await _publish(redis, CHANNEL_GLOBAL, {"event": "cancel", "job_id": job_id})
 
 
 async def publish_done(
@@ -112,6 +112,6 @@ async def publish_done(
         payload["error"] = error
 
     # Publish to job-specific channel
-    _publish(redis, f"jobs:done:{job_id}", payload)
+    await _publish(redis, f"jobs:done:{job_id}", payload)
     # Also publish to global fan-out channel
-    _publish(redis, CHANNEL_GLOBAL, {"event": "done", "job_id": job_id, **payload})
+    await _publish(redis, CHANNEL_GLOBAL, {"event": "done", "job_id": job_id, **payload})
