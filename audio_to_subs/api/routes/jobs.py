@@ -136,15 +136,23 @@ async def list_jobs(
     if conditions:
         query = query.where(and_(*conditions))
 
-    # Count by status for summary
+    # Count total matching jobs (respecting filters)
     from sqlalchemy import case, cast, Integer
 
+    count_query = select(func.count(Job.id)).select_from(Job)
+    if conditions:
+        count_query = count_query.where(and_(*conditions))
+    total_count = (await db.execute(count_query)).scalar() or 0
+
+    # Count by status for summary (also respecting filters)
     status_counts = (
         await db.execute(
             select(
                 Job.status,
                 func.count(Job.id).label("count"),
             )
+            .select_from(Job)
+            .where(and_(*conditions) if conditions else True)
             .group_by(Job.status)
         )
     ).all()
@@ -161,7 +169,7 @@ async def list_jobs(
 
     return JobListResponse(
         jobs=[JobResponse.model_validate(job) for job in jobs],
-        total=len(jobs),
+        total=total_count,
         queued=counts[JobStatus.QUEUED],
         running=counts[JobStatus.RUNNING],
         done=counts[JobStatus.DONE],
