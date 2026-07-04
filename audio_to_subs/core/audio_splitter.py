@@ -247,6 +247,8 @@ def split_audio(
 
         return segments
 
+    except Cancelled:
+        raise
     except subprocess.CalledProcessError as e:
         raise AudioSplitterError(
             f"FFmpeg error during splitting: {e.stderr.decode()}"
