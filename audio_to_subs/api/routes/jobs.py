@@ -176,11 +176,11 @@ async def _get_path_map(db: "AsyncSession") -> PathMap:
 
     try:
         result = await db.execute(
-            select(Setting.value_json).where(Setting.key == "path_mappings")
+            select(Setting).where(Setting.key == "path_mappings")
         )
-        row = result.scalar_one_or_none()
-        if row and row.value_json:
-            path_mappings = json.loads(row.value_json)
+        setting = result.scalar_one_or_none()
+        if setting and setting.value_json:
+            path_mappings = json.loads(setting.value_json)
             return PathMap.from_settings(path_mappings)
     except Exception as e:
         logging.getLogger(__name__).warning(
@@ -329,6 +329,14 @@ async def create_job(
             job_request.output_format,
             subtitles_same_dir,
         )
+    elif output_path:
+        # Validate provided output_path is within safe directory
+        is_valid, error_msg = validate_media_path(output_path, movies_root, tv_root)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid output path: {error_msg}",
+            )
 
     # Use resolved source_ref
     source_ref = resolved_source_ref or job_request.source_ref
