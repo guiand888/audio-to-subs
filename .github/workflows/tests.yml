@@ -48,6 +48,15 @@ jobs:
       - name: Run tests with coverage
         run: pytest
 
+      - name: Check code formatting with black
+        run: black --check audio_to_subs/ tests/
+
+      - name: Lint with ruff
+        run: ruff check audio_to_subs/ tests/
+
+      - name: Type check with mypy
+        run: mypy audio_to_subs/
+
       - name: Generate coverage badge
         if: github.ref == 'refs/heads/main'
         run: genbadge coverage -i coverage.xml -o coverage.svg
