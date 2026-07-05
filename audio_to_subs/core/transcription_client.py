@@ -52,8 +52,79 @@ class TranscriptionClient:
         self.language = language
         self.progress_callback = progress_callback
         self._last_usage: dict[str, Any] | None = None
-        logger.debug(f"TranscriptionClient initialized: model={model}, language={language}")
+        logger.debug(
+            f"TranscriptionClient initialized: model={model}, language={language}"
+        )
         self.client = Mistral(api_key=self.api_key)
+
+    def _read_file_with_progress(
+        self,
+        audio_path: str,
+        segment_number: int | None,
+        total_segments: int | None,
+    ) -> "File":
+        """Read an audio file into a Mistral ``File`` object, reporting upload
+        progress in chunks if a progress callback and segment info are set.
+
+        Args:
+            audio_path: Path to audio file
+            segment_number: Optional segment number (for progress reporting)
+            total_segments: Optional total segments (for progress reporting)
+
+        Returns:
+            Mistral File object wrapping the file's full contents
+        """
+        file_size = os.path.getsize(audio_path)
+        uploaded_bytes = 0
+        chunk_size = 1024 * 1024  # 1MB chunks
+        report_progress = bool(
+            self.progress_callback and segment_number and total_segments
+        )
+
+        if report_progress:
+            self.progress_callback(
+                f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)",
+                0,
+            )
+
+        with open(audio_path, "rb") as audio_file:
+            file_content = b""
+            while uploaded_bytes < file_size:
+                chunk = audio_file.read(min(chunk_size, file_size - uploaded_bytes))
+                if not chunk:
+                    break
+                file_content += chunk
+                uploaded_bytes += len(chunk)
+
+                if report_progress:
+                    percentage = int((uploaded_bytes / file_size) * 100)
+                    mb_uploaded = uploaded_bytes / (1024 * 1024)
+                    mb_total = file_size / (1024 * 1024)
+                    self.progress_callback(
+                        f"Uploading segment {segment_number}/{total_segments}: {mb_uploaded:.1f}/{mb_total:.1f} MB ({percentage}%)",
+                        percentage,
+                    )
+
+        if report_progress:
+            self.progress_callback(
+                f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)",
+                100,
+            )
+
+        return File(
+            content=file_content,
+            fileName=Path(audio_path).name,
+            contentType="audio/wav",
+        )
+
+    def _capture_usage(self, response: Any) -> None:
+        """Store Mistral response usage stats (for cost calculation), if present."""
+        if hasattr(response, "usage"):
+            usage_obj = response.usage
+            if hasattr(usage_obj, "model_dump"):
+                self._last_usage = usage_obj.model_dump()
+            elif isinstance(usage_obj, dict):
+                self._last_usage = usage_obj.copy()
 
     def transcribe_audio(
         self,
@@ -85,62 +156,20 @@ class TranscriptionClient:
         try:
             logger.debug(f"Transcribing audio: {audio_path}")
             lang = language or self.language
-            file_size = os.path.getsize(audio_path)
-            uploaded_bytes = 0
-            chunk_size = 1024 * 1024  # 1MB chunks
 
-            # Report upload start if progress tracking enabled
-            if self.progress_callback and segment_number and total_segments:
-                self.progress_callback(
-                    f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)",
-                    0
-                )
+            file_obj = self._read_file_with_progress(
+                audio_path, segment_number, total_segments
+            )
 
-            with open(audio_path, "rb") as audio_file:
-                file_content = b""
-                while uploaded_bytes < file_size:
-                    chunk = audio_file.read(min(chunk_size, file_size - uploaded_bytes))
-                    if not chunk:
-                        break
-                    file_content += chunk
-                    uploaded_bytes += len(chunk)
-
-                    # Calculate and report progress
-                    if self.progress_callback and segment_number and total_segments:
-                        percentage = int((uploaded_bytes / file_size) * 100)
-                        mb_uploaded = uploaded_bytes / (1024 * 1024)
-                        mb_total = file_size / (1024 * 1024)
-                        self.progress_callback(
-                            f"Uploading segment {segment_number}/{total_segments}: {mb_uploaded:.1f}/{mb_total:.1f} MB ({percentage}%)",
-                            percentage
-                        )
-
-                file_obj = File(
-                    content=file_content,
-                    fileName=Path(audio_path).name,
-                    contentType="audio/wav",
-                )
-
-                # Report upload complete
-                if self.progress_callback and segment_number and total_segments:
-                    self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)",
-                        100
-                    )
-
-                kwargs = {"model": self.model, "file": file_obj}
-                if lang:
-                    kwargs["language"] = lang
-                logger.debug(f"Calling Mistral API: model={self.model}, language={lang}")
-                response = self.client.audio.transcriptions.complete(**kwargs)
-                logger.debug(f"Transcription response received, text length: {len(response.text)}")
-                # Capture usage for cost calculation
-                if hasattr(response, "usage"):
-                    usage_obj = getattr(response, "usage")
-                    if hasattr(usage_obj, "model_dump"):
-                        self._last_usage = usage_obj.model_dump()
-                    elif isinstance(usage_obj, dict):
-                        self._last_usage = usage_obj.copy()
+            kwargs = {"model": self.model, "file": file_obj}
+            if lang:
+                kwargs["language"] = lang
+            logger.debug(f"Calling Mistral API: model={self.model}, language={lang}")
+            response = self.client.audio.transcriptions.complete(**kwargs)
+            logger.debug(
+                f"Transcription response received, text length: {len(response.text)}"
+            )
+            self._capture_usage(response)
             return response.text
         except Exception as e:
             logger.error(f"Transcription failed: {str(e)}")
@@ -175,76 +204,32 @@ class TranscriptionClient:
 
         try:
             lang = language or self.language
-            file_size = os.path.getsize(audio_path)
-            uploaded_bytes = 0
-            chunk_size = 1024 * 1024  # 1MB chunks
 
-            # Report upload start if progress tracking enabled
-            if self.progress_callback and segment_number and total_segments:
-                self.progress_callback(
-                    f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)",
-                    0
-                )
+            file_obj = self._read_file_with_progress(
+                audio_path, segment_number, total_segments
+            )
 
-            with open(audio_path, "rb") as audio_file:
-                file_content = b""
-                while uploaded_bytes < file_size:
-                    chunk = audio_file.read(min(chunk_size, file_size - uploaded_bytes))
-                    if not chunk:
-                        break
-                    file_content += chunk
-                    uploaded_bytes += len(chunk)
-
-                    # Calculate and report progress
-                    if self.progress_callback and segment_number and total_segments:
-                        percentage = int((uploaded_bytes / file_size) * 100)
-                        mb_uploaded = uploaded_bytes / (1024 * 1024)
-                        mb_total = file_size / (1024 * 1024)
-                        self.progress_callback(
-                            f"Uploading segment {segment_number}/{total_segments}: {mb_uploaded:.1f}/{mb_total:.1f} MB ({percentage}%)",
-                            percentage
-                        )
-
-                file_obj = File(
-                    content=file_content,
-                    fileName=Path(audio_path).name,
-                    contentType="audio/wav",
-                )
-
-                # Report upload complete
-                if self.progress_callback and segment_number and total_segments:
-                    self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)",
-                        100
-                    )
-
-                kwargs = {
-                    "model": self.model,
-                    "file": file_obj,
-                    "timestamp_granularities": ["segment"],
-                }
-                # Note: language and timestamp_granularities are mutually exclusive per Mistral docs
-                # Timestamps are required for subtitle generation, so language is disabled for now.
-                # TODO: Support language parameter when Mistral API allows language + timestamps
-                # if lang:
-                #     kwargs.pop("timestamp_granularities", None)
-                #     kwargs["language"] = lang
-                logger.debug(f"Calling Mistral API with timestamps: {kwargs.keys()}")
-                response = self.client.audio.transcriptions.complete(**kwargs)
-                logger.debug(f"Transcription response type: {type(response)}")
-                logger.debug(f"Transcription response dir: {dir(response)}")
-                logger.debug(f"Transcription response: {response}")
-                # Capture usage for cost calculation
-                if hasattr(response, "usage"):
-                    usage_obj = getattr(response, "usage")
-                    if hasattr(usage_obj, "model_dump"):
-                        self._last_usage = usage_obj.model_dump()
-                    elif isinstance(usage_obj, dict):
-                        self._last_usage = usage_obj.copy()
+            kwargs = {
+                "model": self.model,
+                "file": file_obj,
+                "timestamp_granularities": ["segment"],
+            }
+            # Note: language and timestamp_granularities are mutually exclusive per Mistral docs
+            # Timestamps are required for subtitle generation, so language is disabled for now.
+            # TODO: Support language parameter when Mistral API allows language + timestamps
+            # if lang:
+            #     kwargs.pop("timestamp_granularities", None)
+            #     kwargs["language"] = lang
+            logger.debug(f"Calling Mistral API with timestamps: {kwargs.keys()}")
+            response = self.client.audio.transcriptions.complete(**kwargs)
+            logger.debug(f"Transcription response type: {type(response)}")
+            self._capture_usage(response)
 
             segments = []
             if hasattr(response, "segments"):
-                logger.debug(f"Response has segments attribute with {len(response.segments)} segments")
+                logger.debug(
+                    f"Response has segments attribute with {len(response.segments)} segments"
+                )
                 for segment in response.segments:
                     segments.append(
                         {
@@ -254,7 +239,9 @@ class TranscriptionClient:
                         }
                     )
             else:
-                logger.warning(f"Response does not have 'segments' attribute. Response attributes: {vars(response) if hasattr(response, '__dict__') else 'no __dict__'}")
+                logger.warning(
+                    f"Response does not have 'segments' attribute. Response attributes: {vars(response) if hasattr(response, '__dict__') else 'no __dict__'}"
+                )
 
             return segments
         except Exception as e:
