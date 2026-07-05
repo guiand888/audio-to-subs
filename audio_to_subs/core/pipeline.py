@@ -215,7 +215,8 @@ class Pipeline:
                     f"Failed: {input_path} - {str(e)}",
                     percent=100,
                 )
-                raise
+                # Log failure but continue processing other jobs in batch
+                logger.error(f"Job failed: {input_path} - {str(e)}")
             except Cancelled:
                 self._emit_progress(
                     "init",
