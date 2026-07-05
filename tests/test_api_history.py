@@ -6,9 +6,9 @@ from uuid import uuid4
 from audio_to_subs.db.models import Job, JobStatus, JobSource
 
 
-def test_get_history_empty(api_client):
+def test_get_history_empty(authenticated_client):
     """GET /api/history returns empty results on a fresh database."""
-    response = api_client.get("/api/history")
+    response = authenticated_client.get("/api/history")
 
     assert response.status_code == 200
     data = response.json()
@@ -18,7 +18,7 @@ def test_get_history_empty(api_client):
     assert data["stats"]["total_duration_seconds"] == 0
 
 
-def test_get_history_with_done_jobs(api_client, sync_session):
+def test_get_history_with_done_jobs(authenticated_client, sync_session):
     """GET /api/history returns done jobs with aggregated stats."""
     job1 = Job(
         id=str(uuid4()),
@@ -42,7 +42,7 @@ def test_get_history_with_done_jobs(api_client, sync_session):
     sync_session.add_all([job1, job2])
     sync_session.commit()
 
-    response = client.get("/api/history")
+    response = authenticated_client.get("/api/history")
     assert response.status_code == 200
     data = response.json()
 
@@ -56,7 +56,7 @@ def test_get_history_with_done_jobs(api_client, sync_session):
     assert data["stats"]["count_by_language"]["fr"] == 1
 
 
-def test_get_history_filters_by_status(api_client, sync_session):
+def test_get_history_filters_by_status(authenticated_client, sync_session):
     """GET /api/history can be filtered by status."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.DONE, source=JobSource.MANUAL, media_path="/test/v1.mp4"),
@@ -65,18 +65,18 @@ def test_get_history_filters_by_status(api_client, sync_session):
     ])
     sync_session.commit()
 
-    response = client.get("/api/history", params={"status_filter": ["done"]})
+    response = authenticated_client.get("/api/history", params={"status_filter": ["done"]})
     assert response.status_code == 200
     data = response.json()
     assert len(data["jobs"]) == 1
     assert data["jobs"][0]["status"] == "done"
 
-    response = client.get("/api/history", params={"status_filter": ["done", "failed"]})
+    response = authenticated_client.get("/api/history", params={"status_filter": ["done", "failed"]})
     assert response.status_code == 200
     assert len(response.json()["jobs"]) == 2
 
 
-def test_get_history_filters_by_source(api_client, sync_session):
+def test_get_history_filters_by_source(authenticated_client, sync_session):
     """GET /api/history can be filtered by source."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.DONE, source=JobSource.BAZARR_MOVIE, source_ref="123", media_path="/test/v1.mp4"),
@@ -84,14 +84,14 @@ def test_get_history_filters_by_source(api_client, sync_session):
     ])
     sync_session.commit()
 
-    response = client.get("/api/history", params={"source_filter": "bazarr_movie"})
+    response = authenticated_client.get("/api/history", params={"source_filter": "bazarr_movie"})
     assert response.status_code == 200
     data = response.json()
     assert len(data["jobs"]) == 1
     assert data["jobs"][0]["source"] == "bazarr_movie"
 
 
-def test_get_history_pagination(api_client, sync_session):
+def test_get_history_pagination(authenticated_client, sync_session):
     """GET /api/history supports limit/offset pagination."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.DONE, source=JobSource.MANUAL, media_path=f"/test/v{i}.mp4")
@@ -99,18 +99,18 @@ def test_get_history_pagination(api_client, sync_session):
     ])
     sync_session.commit()
 
-    resp1 = client.get("/api/history", params={"limit": 2, "offset": 0})
+    resp1 = authenticated_client.get("/api/history", params={"limit": 2, "offset": 0})
     assert resp1.status_code == 200
     data1 = resp1.json()
     assert len(data1["jobs"]) == 2
     assert data1["total"] == 5
 
-    resp2 = client.get("/api/history", params={"limit": 2, "offset": 4})
+    resp2 = authenticated_client.get("/api/history", params={"limit": 2, "offset": 4})
     assert resp2.status_code == 200
     assert len(resp2.json()["jobs"]) == 1
 
 
-def test_get_history_excludes_queued_and_running(api_client, sync_session):
+def test_get_history_excludes_queued_and_running(authenticated_client, sync_session):
     """GET /api/history excludes QUEUED and RUNNING jobs."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.QUEUED, source=JobSource.MANUAL, media_path="/test/v1.mp4"),
@@ -119,7 +119,7 @@ def test_get_history_excludes_queued_and_running(api_client, sync_session):
     ])
     sync_session.commit()
 
-    response = client.get("/api/history")
+    response = authenticated_client.get("/api/history")
     assert response.status_code == 200
     data = response.json()
 

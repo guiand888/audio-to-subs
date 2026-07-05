@@ -46,7 +46,7 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     monkeypatch.setenv("BEHIND_TLS", "false")
 
     # Reset module-level singletons so they re-read env on next access.
-    _db_base._async_engine = None
+    _db_base._async_engines.clear()
     _db_base._sync_engine = None
     _api_settings._settings = None
     _auth_sessions._session_manager = None
@@ -70,7 +70,7 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     yield
 
     # Cleanup: let the next test start completely fresh.
-    _db_base._async_engine = None
+    _db_base._async_engines.clear()
     _db_base._sync_engine = None
     _api_settings._settings = None
     _auth_sessions._session_manager = None
@@ -131,12 +131,29 @@ def api_client():
     import audio_to_subs.auth.sessions as auth_sessions
 
     # Reset again in case an earlier fixture call dirtied the cache.
-    db_base._async_engine = None
+    db_base._async_engines.clear()
     api_settings._settings = None
     auth_sessions._session_manager = None
 
     app = create_app()
     return TestClient(app, raise_server_exceptions=False)
+
+
+@pytest.fixture
+def authenticated_client(api_client):
+    """``api_client`` pre-authenticated as the seeded admin user.
+
+    Every route except healthz/login requires auth (Phase 4.C3). Tests that
+    exercise route behavior rather than the auth boundary itself should use
+    this fixture instead of ``api_client`` so requests carry a valid session
+    cookie.
+    """
+    response = api_client.post(
+        "/api/auth/login",
+        json={"username": "admin", "password": "test-secure-password-12345"},
+    )
+    assert response.status_code == 200, f"Fixture login failed: {response.text}"
+    return api_client
 
 
 def make_job(**kwargs):

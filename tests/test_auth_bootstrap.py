@@ -16,7 +16,7 @@ async def test_bootstrap_admin_creates_user():
     """Test that bootstrap_admin creates admin user when database is empty."""
     import audio_to_subs.db.base as db_base
 
-    db_base._async_engine = None  # start fresh so init_db owns the cache
+    db_base._async_engines.pop(_TEST_DSN, None)  # start fresh so init_db owns the cache
 
     await init_db(_TEST_DSN)
 
@@ -44,7 +44,7 @@ async def test_bootstrap_admin_skips_existing_user():
     from audio_to_subs.db.models import User
     from audio_to_subs.auth.passwords import hash_password
 
-    db_base._async_engine = None
+    db_base._async_engines.pop(_TEST_DSN, None)
 
     await init_db(_TEST_DSN)
 
@@ -75,7 +75,7 @@ async def test_bootstrap_admin_refuses_without_credentials():
     """Test that bootstrap_admin raises ValueError when no credentials and empty DB."""
     import audio_to_subs.db.base as db_base
 
-    db_base._async_engine = None
+    db_base._async_engines.pop(_TEST_DSN, None)
 
     await init_db(_TEST_DSN)
 
@@ -88,7 +88,7 @@ async def test_bootstrap_admin_refuses_without_password():
     """Test that bootstrap_admin raises ValueError when only username provided."""
     import audio_to_subs.db.base as db_base
 
-    db_base._async_engine = None
+    db_base._async_engines.pop(_TEST_DSN, None)
 
     await init_db(_TEST_DSN)
 
