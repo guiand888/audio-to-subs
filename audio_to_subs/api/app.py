@@ -35,16 +35,19 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     Runs on startup and shutdown.
     """
+    import asyncio
+    import subprocess
+
     settings = get_settings()
 
     # Startup
     logger.info("Starting up...")
 
     # Run migrations (Alembic is the single source of truth for the schema)
+    # Run in thread pool to avoid blocking the event loop
     logger.info("Running database migrations...")
-    import subprocess
-
-    result = subprocess.run(
+    result = await asyncio.to_thread(
+        subprocess.run,
         ["alembic", "upgrade", "head"],
         capture_output=True,
         text=True,
