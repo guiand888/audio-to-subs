@@ -24,13 +24,12 @@ class TestHashPassword:
         hashed2 = hash_password("password2")
         assert hashed1 != hashed2
 
-    def test_hash_password_same_for_same_input(self):
-        """Test that same password produces same hash (deterministic)."""
-        # Note: This is not guaranteed with argon2 due to salt
-        # Each hash will be different even for same input
+    def test_hash_password_different_for_same_input_due_to_salt(self):
+        """Test that same password produces different hashes (random salt)."""
+        # Argon2 uses a random salt, so each hash is unique even for the same input.
+        # This is a security feature, not a bug.
         hashed1 = hash_password("password123")
         hashed2 = hash_password("password123")
-        # They should be different due to random salt
         assert hashed1 != hashed2
 
 
