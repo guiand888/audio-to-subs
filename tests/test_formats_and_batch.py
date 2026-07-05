@@ -248,19 +248,23 @@ class TestBatchProcessing:
         # Should be called for each job
         assert callback.call_count >= 2
 
-    def test_process_batch_propagates_errors(self, pipeline_with_mock):
-        """Test batch processing propagates errors from process_video."""
+    def test_process_batch_continues_after_error(self, pipeline_with_mock):
+        """Batch processing logs a failed job and continues with the rest
+        (B25: does not abort the whole batch on the first failure)."""
         jobs = [
-            {"input": "bad_video.mp4", "output": "output.srt", "format": "srt"}
+            {"input": "bad_video.mp4", "output": "output1.srt", "format": "srt"},
+            {"input": "good_video.mp4", "output": "output2.srt", "format": "srt"},
         ]
 
         with patch.object(
             pipeline_with_mock,
             "process_video",
-            side_effect=PipelineError("Test error")
+            side_effect=[PipelineError("Test error"), "output2.srt"],
         ):
-            with pytest.raises(PipelineError):
-                pipeline_with_mock.process_batch(jobs)
+            results = pipeline_with_mock.process_batch(jobs)
+
+        assert "bad_video.mp4" not in results
+        assert results["good_video.mp4"] == "output2.srt"
 
     def test_process_batch_respects_format(self, pipeline_with_mock):
         """Test batch processing passes format to process_video."""
