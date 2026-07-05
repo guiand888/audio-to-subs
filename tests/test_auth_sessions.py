@@ -2,9 +2,9 @@
 
 import os
 import tempfile
-import time
 
 import pytest
+from freezegun import freeze_time
 
 from audio_to_subs.auth.sessions import (
     DEFAULT_SESSION_SECRET_FILE,
@@ -130,11 +130,12 @@ class TestSessionManagerValidate:
         """Test validating expired session."""
         manager = SessionManager(secret="test-secret", ttl=1)  # 1 second TTL
         token = manager.create_session(123)
-        
-        time.sleep(2)  # Wait for token to expire
-        
-        with pytest.raises(Exception):  # SignatureExpired
-            manager.validate_session(token)
+
+        with freeze_time("2024-01-01 00:00:00") as frozen_time:
+            frozen_time.move_to("2024-01-01 00:00:02")  # Advance 2 seconds
+
+            with pytest.raises(Exception):  # SignatureExpired
+                manager.validate_session(token)
 
 
 class TestSessionManagerRenewal:
@@ -161,17 +162,18 @@ class TestSessionManagerRenewal:
     def test_renew_session(self):
         """Test renewing a session token."""
         manager = SessionManager(secret="test-secret")
-        token = manager.create_session(123)
-        
-        # Wait >1 s so iat (int seconds) is different, guaranteeing a new token.
-        time.sleep(1.1)
+        with freeze_time("2024-01-01 00:00:00") as frozen_time:
+            token = manager.create_session(123)
 
-        # Renew
-        new_token = manager.renew_session(token)
-        
-        assert new_token != token
-        payload = manager.validate_session(new_token)
-        assert payload["user_id"] == 123
+            # Move >1 s so iat (int seconds) is different, guaranteeing a new token.
+            frozen_time.move_to("2024-01-01 00:00:02")
+
+            # Renew
+            new_token = manager.renew_session(token)
+
+            assert new_token != token
+            payload = manager.validate_session(new_token)
+            assert payload["user_id"] == 123
 
 
 class TestGetSessionManager:
