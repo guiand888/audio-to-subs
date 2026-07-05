@@ -11,6 +11,7 @@ import time
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Any, Callable, Dict, List, Literal, Optional, TypedDict
+from uuid import uuid4
 
 from audio_to_subs.core.audio_extractor import (
     extract_audio,
@@ -412,8 +413,8 @@ class Pipeline:
 
             logger.debug(f"Video file size: {video_file.stat().st_size} bytes")
 
-            # Generate temp audio file path
-            audio_path = Path(self.temp_dir) / f"audio_{video_file.stem}.wav"
+            # Generate temp audio file path (include uuid to avoid collision in concurrent batch jobs)
+            audio_path = Path(self.temp_dir) / f"audio_{video_file.stem}_{uuid4().hex[:8]}.wav"
 
             # Only pass progress callback if verbose_progress is True
             progress_callback = (

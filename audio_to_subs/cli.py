@@ -160,7 +160,7 @@ def main(
     # Batch processing mode
     if config_path:
         logger.debug(f"Batch mode: config_path={config_path}")
-        _process_batch(config_path, api_key, verbose)
+        _process_batch(config_path, api_key, model, progress, verbose)
         return
 
     # Single video processing
@@ -228,12 +228,20 @@ def main(
         sys.exit(1)
 
 
-def _process_batch(config_path: str, api_key: Optional[str], verbose: bool = False) -> None:
+def _process_batch(
+    config_path: str,
+    api_key: Optional[str],
+    model: str,
+    progress: bool,
+    verbose: bool = False,
+) -> None:
     """Process multiple videos from configuration file.
 
     Args:
         config_path: Path to .audio-to-subs.yaml configuration file
         api_key: Mistral AI API key
+        model: Transcription model to use
+        progress: Show detailed progress messages
         verbose: Enable debug logging
 
     Raises:
@@ -262,7 +270,7 @@ def _process_batch(config_path: str, api_key: Optional[str], verbose: bool = Fal
         pipeline = Pipeline(
             api_key=api_key,
             progress_callback=progress_callback,
-            transcription_model="voxtral-mini-latest",
+            transcription_model=model,
             language=None,
         )
 
