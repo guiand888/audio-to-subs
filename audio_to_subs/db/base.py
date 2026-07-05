@@ -7,7 +7,13 @@ SQLAlchemy 2.x ORM.
 from typing import AsyncGenerator
 
 from sqlalchemy import event
-from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.engine import Engine
+from sqlalchemy.ext.asyncio import (
+    AsyncEngine,
+    AsyncSession,
+    async_sessionmaker,
+    create_async_engine,
+)
 from sqlalchemy.orm import DeclarativeBase, sessionmaker
 
 # WAL pragmas to apply on every new connection
@@ -44,14 +50,21 @@ def get_async_engine(dsn: str) -> AsyncEngine:
     global _async_engines
     if dsn not in _async_engines:
         _async_engines[dsn] = create_async_engine(dsn, echo=False)
-        _configure_wal_pragmas_async(_async_engines[dsn])
+        _install_sqlite_listeners(_async_engines[dsn].sync_engine)
     return _async_engines[dsn]
 
 
-def _configure_wal_pragmas_async(engine: AsyncEngine) -> None:
-    """Configure WAL pragmas on async engine connections."""
+def _install_sqlite_listeners(sync_engine: Engine) -> None:
+    """Install WAL/BEGIN-IMMEDIATE pragma listeners on a sync engine.
 
-    @event.listens_for(engine.sync_engine, "connect")
+    SQLAlchemy always dispatches DBAPI-level connection events against the
+    underlying sync ``Engine`` object — for the async engine that means its
+    ``.sync_engine`` — so this single helper covers both the async engine
+    (worker/API) and the plain sync engine (used elsewhere) with identical
+    listener logic.
+    """
+
+    @event.listens_for(sync_engine, "connect")
     def _on_connect(dbapi_connection, connection_record):
         # Disable pysqlite's implicit transaction management so we can emit our
         # own BEGIN IMMEDIATE below. Without this, transactions start DEFERRED:
@@ -62,7 +75,7 @@ def _configure_wal_pragmas_async(engine: AsyncEngine) -> None:
         for key, value in WAL_PRAGMAS.items():
             dbapi_connection.execute(f"PRAGMA {key} = {value}")
 
-    @event.listens_for(engine.sync_engine, "begin")
+    @event.listens_for(sync_engine, "begin")
     def _on_begin(conn):
         # Acquire the write lock up front; busy_timeout then makes concurrent
         # writers wait politely instead of erroring.
@@ -70,15 +83,15 @@ def _configure_wal_pragmas_async(engine: AsyncEngine) -> None:
 
 
 # Sync engine for worker
-_sync_engine: None = None
+_sync_engine: Engine | None = None
 
 
-def get_sync_engine(dsn: str):
+def get_sync_engine(dsn: str) -> Engine:
     """Create and return sync SQLAlchemy engine with WAL pragmas.
-    
+
     Args:
         dsn: Database URL, e.g., 'sqlite:////data/audio-to-subs.db'
-    
+
     Returns:
         SQLAlchemy sync engine with WAL pragmas configured
     """
@@ -87,23 +100,8 @@ def get_sync_engine(dsn: str):
     global _sync_engine
     if _sync_engine is None:
         _sync_engine = create_engine(dsn.replace("sqlite+aiosqlite", "sqlite"), echo=False)
-        _configure_wal_pragmas_sync(_sync_engine)
+        _install_sqlite_listeners(_sync_engine)
     return _sync_engine
-
-
-def _configure_wal_pragmas_sync(engine):
-    """Configure WAL pragmas on sync engine connections."""
-
-    @event.listens_for(engine, "connect")
-    def _on_connect(dbapi_connection, connection_record):
-        # See _configure_wal_pragmas_async for rationale.
-        dbapi_connection.isolation_level = None
-        for key, value in WAL_PRAGMAS.items():
-            dbapi_connection.execute(f"PRAGMA {key} = {value}")
-
-    @event.listens_for(engine, "begin")
-    def _on_begin(conn):
-        conn.exec_driver_sql("BEGIN IMMEDIATE")
 
 
 # Async session factory
