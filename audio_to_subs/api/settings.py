@@ -44,6 +44,10 @@ class Settings(BaseSettings):
         default=False,
         description="Set Secure flag on cookies when behind TLS",
     )
+    CORS_ORIGINS: list[str] = Field(
+        default=["*"],
+        description="CORS allowed origins. Use ['*'] for all or restrict to specific domains",
+    )
 
     # Redis
     REDIS_URL: str = Field(
