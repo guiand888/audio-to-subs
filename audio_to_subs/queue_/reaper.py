@@ -8,8 +8,10 @@ import logging
 from datetime import datetime, timedelta, timezone
 from typing import TYPE_CHECKING, Optional
 
-from sqlalchemy import text, and_
+from sqlalchemy import delete, update
 from sqlalchemy.exc import IntegrityError
+
+from audio_to_subs.db.models import Job
 
 logger = logging.getLogger(__name__)
 
@@ -31,21 +33,24 @@ async def delete_stale_jobs(
         Number of jobs deleted
     """
     try:
-        # Calculate the cutoff timestamp
+        # Calculate the cutoff timestamp. Using the ORM delete() construct
+        # (rather than a raw SQL string with a manually-formatted timestamp)
+        # lets SQLAlchemy's DateTime bind processor format `cutoff` exactly
+        # the way it formats every other DateTime column write, so the
+        # string comparison SQLite performs underneath is correct. A prior
+        # version compared updated_at against cutoff.isoformat() (produces
+        # "...T...+00:00"), while ORM writes store "... " (space, no tz) —
+        # since ' ' sorts before 'T', that made the predicate true for any
+        # same-day row regardless of actual elapsed time.
         cutoff = datetime.now(timezone.utc) - stale_threshold
 
-        # Delete done/failed jobs that are stale
-        # Only delete non-active jobs to avoid losing work
-        delete_stmt = text("""
-            DELETE FROM jobs
-            WHERE status IN ('done', 'failed', 'cancelled')
-              AND updated_at < :cutoff
-        """)
-
-        result = await session.execute(
-            delete_stmt,
-            {"cutoff": cutoff.isoformat()},
+        delete_stmt = (
+            delete(Job)
+            .where(Job.status.in_(["done", "failed", "cancelled"]))
+            .where(Job.updated_at < cutoff)
         )
+
+        result = await session.execute(delete_stmt)
 
         deleted_count = result.rowcount
         if deleted_count > 0:
@@ -88,37 +93,37 @@ async def reap_stale_running(
         Exception: If database operations fail
     """
     try:
-        # Compute the stale threshold
-        stale_threshold = datetime.now(timezone.utc) - timedelta(seconds=stale_seconds)
-        now_iso = datetime.now(timezone.utc).isoformat()
+        # Compute the stale threshold. As in delete_stale_jobs, bind the
+        # cutoff as a real datetime through the ORM update() construct so
+        # SQLAlchemy's DateTime bind processor formats it the same way as
+        # every other DateTime write/comparison — a raw text() query here
+        # previously compared against stale_threshold.isoformat() (T
+        # separator + UTC offset), which does not sort correctly against
+        # ORM-stored "YYYY-MM-DD HH:MM:SS.ffffff" values.
+        now = datetime.now(timezone.utc)
+        stale_threshold = now - timedelta(seconds=stale_seconds)
 
-        # Atomic reaping statement
-        # Only requeue jobs that are still in 'running' state and haven't been updated recently
-        reap_stmt = text("""
-            UPDATE jobs
-            SET
-                status = 'queued',
-                worker_id = NULL,
-                progress_percent = 0,
-                progress_message = 'Requeued after worker restart',
-                started_at = NULL,
-                updated_at = :now
-            WHERE status = 'running'
-              AND updated_at < :stale_threshold
-            RETURNING id
-        """)
-
-        result = await session.execute(
-            reap_stmt,
-            {"stale_threshold": stale_threshold.isoformat(), "now": now_iso},
+        reap_stmt = (
+            update(Job)
+            .where(Job.status == "running")
+            .where(Job.updated_at < stale_threshold)
+            .values(
+                status="queued",
+                worker_id=None,
+                progress_percent=0,
+                progress_message="Requeued after worker restart",
+                started_at=None,
+                updated_at=now,
+            )
         )
 
-        reaped_ids = [row[0] for row in result.fetchall()]
-        count = len(reaped_ids)
+        result = await session.execute(reap_stmt)
+
+        count = result.rowcount
 
         if count > 0:
             await session.commit()
-            logger.info(f"Reaped {count} stale running jobs: {reaped_ids}")
+            logger.info(f"Reaped {count} stale running jobs")
         else:
             await session.rollback()
 

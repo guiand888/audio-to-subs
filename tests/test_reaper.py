@@ -6,7 +6,7 @@ from uuid import uuid4
 from sqlalchemy import select
 
 from audio_to_subs.db.models import Job, JobStatus, JobSource
-from audio_to_subs.queue_.reaper import delete_stale_jobs
+from audio_to_subs.queue_.reaper import delete_stale_jobs, reap_stale_running
 
 
 @pytest.mark.asyncio
@@ -151,3 +151,49 @@ async def test_reaper_timestamp_consistency(mock_db_session):
         select(Job).where(Job.id == stale.id)
     )
     assert result.scalar_one_or_none() is None
+
+
+@pytest.mark.asyncio
+async def test_reap_stale_running_requeues_only_stale_jobs(mock_db_session):
+    """reap_stale_running should requeue running jobs stale beyond stale_seconds,
+    and leave recently-updated running jobs alone (regression: previously used
+    isoformat() timestamps that didn't sort correctly against ORM-stored values,
+    making the WHERE clause always/never true depending on timezone offsets)."""
+    now = datetime.now(timezone.utc)
+
+    fresh_running = Job(
+        id=str(uuid4()),
+        status=JobStatus.RUNNING,
+        source=JobSource.MANUAL,
+        media_path="/test/fresh_running.mp4",
+        output_format="srt",
+        updated_at=now - timedelta(seconds=5),
+    )
+    stale_running = Job(
+        id=str(uuid4()),
+        status=JobStatus.RUNNING,
+        source=JobSource.MANUAL,
+        media_path="/test/stale_running.mp4",
+        output_format="srt",
+        updated_at=now - timedelta(seconds=300),
+        worker_id="dead-worker",
+    )
+
+    mock_db_session.add_all([fresh_running, stale_running])
+    await mock_db_session.flush()
+
+    count = await reap_stale_running(mock_db_session, stale_seconds=120)
+
+    assert count == 1
+
+    fresh_refreshed = (
+        await mock_db_session.execute(select(Job).where(Job.id == fresh_running.id))
+    ).scalar_one()
+    assert fresh_refreshed.status == JobStatus.RUNNING.value
+
+    stale_refreshed = (
+        await mock_db_session.execute(select(Job).where(Job.id == stale_running.id))
+    ).scalar_one()
+    assert stale_refreshed.status == JobStatus.QUEUED.value
+    assert stale_refreshed.worker_id is None
+    assert stale_refreshed.progress_percent == 0
