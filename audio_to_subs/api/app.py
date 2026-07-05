@@ -5,7 +5,7 @@ import logging
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator, Any
 
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from audio_to_subs.api.routes import auth, healthz
@@ -166,15 +166,22 @@ def create_app() -> FastAPI:
     # Include routers.
     # stream_router MUST come before jobs_router: /api/jobs/stream is a literal
     # path that would otherwise be shadowed by jobs_router's /{job_id} pattern.
+
+    # Healthz and auth endpoints stay open (no authentication required)
     app.include_router(healthz.router)
     app.include_router(auth.router)
-    app.include_router(settings_router)
-    app.include_router(wanted_router)
-    app.include_router(stream_router)
-    app.include_router(jobs_logs_router)
-    app.include_router(jobs_router)
-    app.include_router(global_logs_router)
-    app.include_router(history_router)
+
+    # All other routers require authentication
+    from audio_to_subs.auth.deps import get_current_user
+    auth_dependency = Depends(get_current_user)
+
+    app.include_router(settings_router, dependencies=[auth_dependency])
+    app.include_router(wanted_router, dependencies=[auth_dependency])
+    app.include_router(stream_router, dependencies=[auth_dependency])
+    app.include_router(jobs_logs_router, dependencies=[auth_dependency])
+    app.include_router(jobs_router, dependencies=[auth_dependency])
+    app.include_router(global_logs_router, dependencies=[auth_dependency])
+    app.include_router(history_router, dependencies=[auth_dependency])
 
     return app
 
