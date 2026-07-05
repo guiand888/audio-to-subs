@@ -14,14 +14,14 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import text
+from sqlalchemy import text, select
 from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.core.cancel import Cancelled, CancelToken
 from audio_to_subs.core.cost import compute_cost, extract_usage, CostBreakdown
 from audio_to_subs.core.path_utils import generate_output_path
 from audio_to_subs.core.pipeline import Pipeline, PipelineResult
-from audio_to_subs.db.models import Job, JobStatus, JobLog, LogLevel
+from audio_to_subs.db.models import Job, JobStatus, JobLog, LogLevel, Setting
 from audio_to_subs.queue_.claim import ClaimedJob
 from audio_to_subs.queue_.events import publish_done
 from audio_to_subs.worker.progress import ProgressBridge
@@ -121,6 +121,38 @@ async def persist_log(
         logger.error(f"Failed to write log for job {job_id}: {e}")
 
 
+async def _get_db_settings(session: "AsyncSession") -> dict[str, Any]:
+    """Fetch current settings from the database.
+
+    Returns a dict with settings that override environment defaults.
+    Worker must read from DB (not environment) so that UI-changed settings
+    affect active jobs.
+    """
+    settings_dict = {}
+    try:
+        result = await session.execute(select(Setting))
+        for setting in result.scalars().all():
+            if setting.key in (
+                "SUBTITLES_SAME_DIRECTORY",
+                "mistral_model",
+                "mistral_rate_usd_per_minute",
+                "mistral_input_token_rate_usd",
+                "mistral_output_token_rate_usd",
+            ):
+                # Parse JSON if needed
+                value = setting.value_json or setting.value
+                if setting.value_json:
+                    try:
+                        import json
+                        value = json.loads(value)
+                    except (json.JSONDecodeError, TypeError):
+                        value = setting.value
+                settings_dict[setting.key] = value
+    except Exception as e:
+        logger.warning(f"Failed to fetch settings from DB: {e}")
+    return settings_dict
+
+
 async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
     """Execute a claimed job through the pipeline.
 
@@ -156,13 +188,35 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         loop=loop,
     )
 
+    # Fetch settings from DB (worker must use DB settings, not cached env settings,
+    # so that UI-changed settings affect running jobs)
+    db_settings = await _get_db_settings(deps.session)
+
+    # Use DB settings with env defaults as fallback
+    subtitles_same_dir = db_settings.get(
+        "SUBTITLES_SAME_DIRECTORY",
+        getattr(deps.settings, "SUBTITLES_SAME_DIRECTORY", True)
+    )
+    mistral_model = db_settings.get(
+        "mistral_model",
+        getattr(deps.settings, "mistral_model", "voxtral-mini-2602")
+    )
+    mistral_rate = db_settings.get(
+        "mistral_rate_usd_per_minute",
+        getattr(deps.settings, "mistral_rate_usd_per_minute", 0.0)
+    )
+    input_token_rate = db_settings.get(
+        "mistral_input_token_rate_usd",
+        getattr(deps.settings, "mistral_input_token_rate_usd", None)
+    )
+    output_token_rate = db_settings.get(
+        "mistral_output_token_rate_usd",
+        getattr(deps.settings, "mistral_output_token_rate_usd", None)
+    )
+
     # Build output path if not provided
     output_path = claimed.output_path
     if not output_path:
-        # Check if we should save subtitles alongside source files
-        subtitles_same_dir = getattr(
-            deps.settings, "SUBTITLES_SAME_DIRECTORY", True
-        )
         # Generate output path from media path
         output_path = generate_output_path(
             claimed.media_path,
@@ -176,7 +230,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         api_key=deps.mistral_api_key,
         structured_progress_callback=bridge.on_event,
         cancel_token=token,
-        transcription_model=getattr(deps.settings, "mistral_model", "voxtral-mini-2602"),
+        transcription_model=mistral_model,
         language=claimed.language_code,
         verbose_progress=False,  # We use structured callback
     )
@@ -192,19 +246,13 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
             claimed.output_format,
         )
 
-        # Compute cost
+        # Compute cost using DB settings
         cost_breakdown = compute_cost(
             audio_duration_seconds=result.audio_duration_seconds,
             mistral_usage=result.mistral_usage,
-            rate_usd_per_minute=getattr(
-                deps.settings, "mistral_rate_usd_per_minute", 0.0
-            ),
-            input_token_rate_usd=getattr(
-                deps.settings, "mistral_input_token_rate_usd", None
-            ),
-            output_token_rate_usd=getattr(
-                deps.settings, "mistral_output_token_rate_usd", None
-            ),
+            rate_usd_per_minute=mistral_rate,
+            input_token_rate_usd=input_token_rate,
+            output_token_rate_usd=output_token_rate,
         )
 
         logger.info(
