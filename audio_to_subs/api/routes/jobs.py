@@ -303,9 +303,10 @@ async def create_job(
         raise
     except Exception as e:
         logger.error("Failed to resolve Bazarr source: %s", e)
+        logger.error(f"Failed to resolve source: {e}")
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Failed to resolve source: {e}",
+            detail="Failed to resolve source. Please check your source configuration.",
         )
 
     # Validate media_path against configured root paths (handles symlinks and traversal)

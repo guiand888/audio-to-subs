@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import select, update
 from sqlalchemy.orm import Session
 
@@ -147,6 +147,26 @@ class SettingsUpdate(BaseModel):
     subtitles_same_directory: bool | None = Field(
         default=None, description="Save subtitles alongside source video files"
     )
+
+    @field_validator("bazarr_url")
+    @classmethod
+    def validate_bazarr_url(cls, v: str | None) -> str | None:
+        """Validate bazarr_url is a valid HTTP(S) URL (SSRF prevention)."""
+        if v is None:
+            return v
+        if not isinstance(v, str):
+            raise ValueError("bazarr_url must be a string")
+        # Ensure it's http or https and has a valid format
+        if not (v.startswith("http://") or v.startswith("https://")):
+            raise ValueError("bazarr_url must start with http:// or https://")
+        try:
+            from urllib.parse import urlparse
+            parsed = urlparse(v)
+            if not parsed.netloc:
+                raise ValueError("bazarr_url must have a valid hostname")
+        except Exception as e:
+            raise ValueError(f"Invalid bazarr_url format: {e}")
+        return v
 
 
 async def _get_all_settings(
