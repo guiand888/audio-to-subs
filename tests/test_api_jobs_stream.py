@@ -34,29 +34,29 @@ class _FakeSSE(Response):
 
 
 class TestGlobalStream:
-    def test_global_stream_returns_200_event_stream(self, api_client):
+    def test_global_stream_returns_200_event_stream(self, authenticated_client):
         """GET /api/jobs/stream must return 200 text/event-stream, not 422.
 
         Patches EventSourceResponse with a lightweight stub so the route can be
         tested without hanging on an infinite SSE body.
         """
         with patch("audio_to_subs.api.routes.stream.EventSourceResponse", _FakeSSE):
-            r = api_client.get("/api/jobs/stream")
+            r = authenticated_client.get("/api/jobs/stream")
 
         assert r.status_code == 200
         assert "text/event-stream" in r.headers["content-type"]
 
-    def test_jobs_list_still_reachable(self, api_client):
+    def test_jobs_list_still_reachable(self, authenticated_client):
         """Regression: GET /api/jobs must still return 200 after route re-ordering."""
-        r = api_client.get("/api/jobs")
+        r = authenticated_client.get("/api/jobs")
         assert r.status_code == 200
 
-    def test_job_by_uuid_still_reachable(self, api_client):
+    def test_job_by_uuid_still_reachable(self, authenticated_client):
         """Regression: GET /api/jobs/{uuid} must still return 404 for unknown job."""
-        r = api_client.get(f"/api/jobs/{uuid.uuid4()}")
+        r = authenticated_client.get(f"/api/jobs/{uuid.uuid4()}")
         assert r.status_code == 404
 
-    def test_job_stream_by_uuid_returns_404_for_missing_job(self, api_client):
+    def test_job_stream_by_uuid_returns_404_for_missing_job(self, authenticated_client):
         """GET /api/jobs/{uuid}/stream for unknown job returns 404."""
-        r = api_client.get(f"/api/jobs/{uuid.uuid4()}/stream")
+        r = authenticated_client.get(f"/api/jobs/{uuid.uuid4()}/stream")
         assert r.status_code == 404
