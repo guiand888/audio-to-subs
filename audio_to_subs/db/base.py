@@ -25,24 +25,27 @@ class Base(DeclarativeBase):
     pass
 
 
-# Async engine for FastAPI
-_async_engine: AsyncEngine | None = None
+# Async engine cache - keyed by DSN to support multiple databases
+_async_engines: dict[str, AsyncEngine] = {}
 
 
 def get_async_engine(dsn: str) -> AsyncEngine:
     """Create and return async SQLAlchemy engine with WAL pragmas.
-    
+
+    Caches engines per DSN to support multiple databases (e.g., admin CLI
+    connecting to different DB than the main app).
+
     Args:
         dsn: Database URL, e.g., 'sqlite+aiosqlite:////data/audio-to-subs.db'
-    
+
     Returns:
         SQLAlchemy async engine with WAL pragmas configured
     """
-    global _async_engine
-    if _async_engine is None:
-        _async_engine = create_async_engine(dsn, echo=False)
-        _configure_wal_pragmas_async(_async_engine)
-    return _async_engine
+    global _async_engines
+    if dsn not in _async_engines:
+        _async_engines[dsn] = create_async_engine(dsn, echo=False)
+        _configure_wal_pragmas_async(_async_engines[dsn])
+    return _async_engines[dsn]
 
 
 def _configure_wal_pragmas_async(engine: AsyncEngine) -> None:
@@ -104,24 +107,27 @@ def _configure_wal_pragmas_sync(engine):
 
 
 # Async session factory
-_async_sessionmaker: async_sessionmaker | None = None
+_async_sessionmakers: dict[int, async_sessionmaker] = {}
 
 
 def get_async_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
     """Create and return async session factory.
-    
+
+    Caches sessionmakers per engine instance to support multiple databases.
+
     Args:
         engine: Async SQLAlchemy engine
-    
+
     Returns:
         Async session maker factory
     """
-    global _async_sessionmaker
-    if _async_sessionmaker is None:
-        _async_sessionmaker = async_sessionmaker(
+    global _async_sessionmakers
+    engine_id = id(engine)
+    if engine_id not in _async_sessionmakers:
+        _async_sessionmakers[engine_id] = async_sessionmaker(
             engine, expire_on_commit=False, class_=AsyncSession
         )
-    return _async_sessionmaker
+    return _async_sessionmakers[engine_id]
 
 
 async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
@@ -132,24 +138,27 @@ async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
         yield session
 
 
-# Sync session factory
-_sync_sessionmaker = None
+# Sync session factory cache - keyed by engine instance
+_sync_sessionmakers: dict[int, sessionmaker] = {}
 
 
 def get_sync_sessionmaker(engine):
     """Create and return sync session factory.
-    
+
+    Caches sessionmakers per engine instance to support multiple databases.
+
     Args:
         engine: Sync SQLAlchemy engine
-    
+
     Returns:
         Sync session maker factory
     """
     from sqlalchemy.orm import Session
 
-    global _sync_sessionmaker
-    if _sync_sessionmaker is None:
-        _sync_sessionmaker = sessionmaker(
+    global _sync_sessionmakers
+    engine_id = id(engine)
+    if engine_id not in _sync_sessionmakers:
+        _sync_sessionmakers[engine_id] = sessionmaker(
             engine, expire_on_commit=False, class_=Session
         )
-    return _sync_sessionmaker
+    return _sync_sessionmakers[engine_id]
