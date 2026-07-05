@@ -5,7 +5,8 @@ underscore) since these are implementation details of the route layer, not
 part of the public API surface.
 """
 
-from typing import TYPE_CHECKING
+import logging
+from typing import TYPE_CHECKING, Awaitable, Callable
 from uuid import UUID
 
 from fastapi import HTTPException, status
@@ -14,7 +15,12 @@ from sqlalchemy import select
 from audio_to_subs.db.models import Job
 
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
+
+    from audio_to_subs.api.settings import Settings
+
+logger = logging.getLogger(__name__)
 
 
 async def get_job_or_404(db: "AsyncSession", job_id: UUID) -> Job:
@@ -33,3 +39,31 @@ async def get_job_or_404(db: "AsyncSession", job_id: UUID) -> Job:
         )
 
     return job
+
+
+async def publish_job_event(
+    settings: "Settings",
+    publish_fn: "Callable[[Redis, str], Awaitable[None]]",
+    job_id: str,
+    event_name: str,
+) -> None:
+    """Connect to Redis (if configured), publish a job event, then close.
+
+    Best-effort: publish is fire-and-forget for the HTTP response — any
+    failure (Redis unreachable, publish error) is logged and swallowed,
+    never raised, so a Redis outage never breaks job creation/cancellation.
+    The connection is always closed via try/finally, even if publish_fn
+    raises.
+    """
+    try:
+        if not settings.REDIS_URL:
+            return
+        import redis.asyncio as redis_lib
+
+        redis = redis_lib.from_url(settings.REDIS_URL)
+        try:
+            await publish_fn(redis, job_id)
+        finally:
+            await redis.close()
+    except Exception as e:
+        logger.error(f"Failed to publish {event_name}: {e}")

@@ -10,7 +10,7 @@ from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.orm import joinedload
 
 from audio_to_subs.api.deps import SettingsDep, get_db
-from audio_to_subs.api.routes._helpers import get_job_or_404
+from audio_to_subs.api.routes._helpers import get_job_or_404, publish_job_event
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
 from audio_to_subs.db.models import (
@@ -387,16 +387,7 @@ async def create_job(
     await db.refresh(job)
 
     # Publish new job notification
-    try:
-        redis = None
-        if settings.REDIS_URL:
-            import redis.asyncio as redis_lib
-
-            redis = redis_lib.from_url(settings.REDIS_URL)
-            await publish_new(redis, str(job.id))
-            await redis.close()
-    except Exception as e:
-        logging.getLogger(__name__).error(f"Failed to publish new job: {e}")
+    await publish_job_event(settings, publish_new, str(job.id), "new job")
 
     return JobResponse.model_validate(job)
 
@@ -439,17 +430,7 @@ async def cancel_job(
         await db.execute(update_stmt, {"job_id": str(job_id)})
         await db.commit()
 
-        # Publish cancel event
-        try:
-            redis = None
-            if settings.REDIS_URL:
-                import redis.asyncio as redis_lib
-
-                redis = redis_lib.from_url(settings.REDIS_URL)
-                await publish_cancel(redis, str(job_id))
-                await redis.close()
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Failed to publish cancel: {e}")
+        await publish_job_event(settings, publish_cancel, str(job_id), "cancel")
 
         # Refresh job
         await db.refresh(job)
@@ -463,17 +444,7 @@ async def cancel_job(
         await db.execute(update_stmt, {"job_id": str(job_id)})
         await db.commit()
 
-        # Publish cancel event
-        try:
-            redis = None
-            if settings.REDIS_URL:
-                import redis.asyncio as redis_lib
-
-                redis = redis_lib.from_url(settings.REDIS_URL)
-                await publish_cancel(redis, str(job_id))
-                await redis.close()
-        except Exception as e:
-            logging.getLogger(__name__).error(f"Failed to publish cancel: {e}")
+        await publish_job_event(settings, publish_cancel, str(job_id), "cancel")
 
         # Refresh job
         await db.refresh(job)
