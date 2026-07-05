@@ -104,7 +104,7 @@ async def create_job_log(
 
     # Create log entry
     log_entry = JobLog(
-        job_id=job_id,
+        job_id=str(job_id),
         ts=datetime.now(timezone.utc),
         level=level,
         message=message,
