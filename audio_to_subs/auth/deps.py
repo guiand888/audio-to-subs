@@ -6,6 +6,7 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, Response, status
 from itsdangerous.exc import BadSignature, SignatureExpired
 
+from audio_to_subs.api.deps import SettingsDep
 from audio_to_subs.auth.sessions import (
     SESSION_COOKIE_NAME,
     SLIDING_RENEWAL_THRESHOLD,
@@ -48,6 +49,7 @@ async def get_current_user(
     response: Response,
     db: Annotated[Any, Depends(get_db)],
     session_manager: Annotated[Any, Depends(get_session_manager_dep)],
+    settings: SettingsDep,
 ) -> User:
     """FastAPI dependency to get current authenticated user.
     
@@ -120,7 +122,7 @@ async def get_current_user(
             httponly=True,
             samesite="lax",
             path="/",
-            secure=False,  # Will be configurable via BEHIND_TLS
+            secure=settings.BEHIND_TLS,  # Match login cookie security setting
             max_age=30 * 24 * 3600,  # 30 days
         )
     
