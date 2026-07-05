@@ -155,17 +155,7 @@ async def list_wanted(
     if item_type != WantedItemType.ALL:
         query = query.where(BazarrCache.kind == item_type.value)
 
-    # Apply language filter (check if language is in missing_subtitles)
-    if language:
-        # This is a bit tricky - we need to check if the language code
-        # is in the missing_subtitles JSON array
-        # For SQLite, we can use json_contains
-        query = query.where(
-            func.json_contains(
-                BazarrCache.missing_subtitles,
-                f'[{{"code2": "{language}"}}]'
-            )
-        )
+    # Note: Language filter applied in Python below (SQLite has no json_contains)
 
     # Apply has_job filter
     if has_job is not None:
@@ -184,6 +174,17 @@ async def list_wanted(
     query = query.limit(page_size).offset(offset)
     result = await db.execute(query)
     items = result.scalars().all()
+
+    # Filter by language if specified (Python-side since SQLite lacks json_contains)
+    if language:
+        filtered_items = []
+        for item in items:
+            if item.missing_subtitles:
+                for sub in item.missing_subtitles:
+                    if isinstance(sub, dict) and sub.get("code2") == language:
+                        filtered_items.append(item)
+                        break
+        items = filtered_items
 
     # Translate paths
     items = await _translate_paths(db, items)
