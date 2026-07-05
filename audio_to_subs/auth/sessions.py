@@ -3,6 +3,7 @@
 Signed cookies for stateless authentication.
 """
 
+import logging
 import os
 import time
 from pathlib import Path
@@ -10,6 +11,8 @@ from typing import Any
 
 from itsdangerous import URLSafeTimedSerializer
 from itsdangerous.exc import BadSignature, SignatureExpired
+
+logger = logging.getLogger(__name__)
 
 # Default session TTL: 30 days in seconds
 DEFAULT_SESSION_TTL = 30 * 24 * 3600
@@ -180,6 +183,11 @@ def get_session_manager(
     that routes, tests, and the lifespan all obtain a consistent instance
     without needing to pass settings around manually.
 
+    IMPORTANT: All calls should use consistent secret parameters. If the
+    first call uses default env vars and a later call passes explicit
+    parameters, the explicit parameters are IGNORED and the env-based
+    instance is returned.
+
     Args:
         secret: Explicit session secret string.
         secret_file: Path to a file containing the session secret.
@@ -197,4 +205,10 @@ def get_session_manager(
             secret=secret,
             secret_file=secret_file,
         )
+    else:
+        # Log if caller is trying to create with different parameters
+        if secret is not None or secret_file is not None:
+            logger.debug(
+                "SessionManager already initialized; ignoring provided secret parameters"
+            )
     return _session_manager
