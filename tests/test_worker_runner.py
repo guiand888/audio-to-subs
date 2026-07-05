@@ -1,0 +1,294 @@
+"""Tests for worker job runner (claim -> process -> persist)."""
+
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
+
+import pytest
+from sqlalchemy import select
+
+from audio_to_subs.core.cancel import Cancelled
+from audio_to_subs.core.pipeline import PipelineResult
+from audio_to_subs.db.models import Job, JobLog, JobSource, JobStatus, LogLevel, Setting
+from audio_to_subs.queue_.claim import ClaimedJob
+from audio_to_subs.worker.runner import (
+    JobResult,
+    WorkerDeps,
+    _get_db_settings,
+    persist_log,
+    persist_result,
+    run_job,
+)
+
+
+def make_claimed_job(**overrides) -> ClaimedJob:
+    """Build a ClaimedJob with sensible test defaults."""
+    defaults = dict(
+        id=uuid4(),
+        media_path="/test/video.mp4",
+        output_path="/test/output.srt",
+        language_code="en",
+        output_format="srt",
+        source=JobSource.MANUAL.value,
+        source_ref=None,
+    )
+    defaults.update(overrides)
+    return ClaimedJob(**defaults)
+
+
+def make_worker_deps(session, redis=None, settings=None) -> WorkerDeps:
+    """Build WorkerDeps with a mocked redis client and minimal settings."""
+    if redis is None:
+        redis = AsyncMock()
+    if settings is None:
+        settings = MagicMock(
+            SUBTITLES_SAME_DIRECTORY=True,
+            mistral_model="voxtral-mini-2602",
+            mistral_rate_usd_per_minute=0.0,
+            mistral_input_token_rate_usd=None,
+            mistral_output_token_rate_usd=None,
+        )
+    return WorkerDeps(
+        session=session,
+        redis=redis,
+        settings=settings,
+        mistral_api_key="test-key",
+    )
+
+
+class TestPersistResult:
+    """Test persist_result writes job outcome fields to the DB."""
+
+    @pytest.mark.asyncio
+    async def test_persist_result_success_updates_status_and_cost(self, mock_db_session):
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(
+            status=JobStatus.DONE,
+            audio_duration_seconds=42.5,
+            mistral_usage_json='{"prompt_tokens": 10}',
+            estimated_cost_usd=0.01,
+        )
+
+        await persist_result(mock_db_session, job_id, result)
+
+        # persist_result writes via raw SQL, bypassing the session identity
+        # map — expire the cached object so the re-fetch hits the DB.
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.status == JobStatus.DONE.value
+        assert refreshed.audio_duration_seconds == 42.5
+        assert refreshed.estimated_cost_usd == 0.01
+        assert refreshed.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_persist_result_failure_sets_error_message(self, mock_db_session):
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(status=JobStatus.FAILED, error_message="boom")
+
+        await persist_result(mock_db_session, job_id, result)
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.status == JobStatus.FAILED.value
+        assert refreshed.error_message == "boom"
+
+    @pytest.mark.asyncio
+    async def test_persist_result_nonexistent_job_does_not_raise(self, mock_db_session):
+        """Updating a job id that doesn't exist should be a no-op, not an error."""
+        result = JobResult(status=JobStatus.DONE)
+        await persist_result(mock_db_session, uuid4(), result)
+
+
+class TestPersistLog:
+    """Test persist_log writes a JobLog row."""
+
+    @pytest.mark.asyncio
+    async def test_persist_log_writes_entry(self, mock_db_session):
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        await persist_log(mock_db_session, job.id, LogLevel.ERROR, "something failed")
+
+        rows = (
+            await mock_db_session.execute(
+                select(JobLog).where(JobLog.job_id == job.id)
+            )
+        ).scalars().all()
+        assert len(rows) == 1
+        assert rows[0].level == LogLevel.ERROR
+        assert rows[0].message == "something failed"
+
+
+class TestGetDbSettings:
+    """Test _get_db_settings reads worker-relevant settings from the DB."""
+
+    @pytest.mark.asyncio
+    async def test_returns_empty_dict_when_no_settings(self, mock_db_session):
+        settings = await _get_db_settings(mock_db_session)
+        assert settings == {}
+
+    @pytest.mark.asyncio
+    async def test_reads_known_settings_keys(self, mock_db_session):
+        mock_db_session.add(Setting(key="mistral_model", value_json='"voxtral-large"'))
+        mock_db_session.add(
+            Setting(key="ignored_unknown_key", value_json='"should-not-appear"')
+        )
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        settings = await _get_db_settings(mock_db_session)
+
+        assert settings.get("mistral_model") == "voxtral-large"
+        assert "ignored_unknown_key" not in settings
+
+    @pytest.mark.asyncio
+    async def test_parses_value_json_when_present(self, mock_db_session):
+        mock_db_session.add(
+            Setting(
+                key="mistral_rate_usd_per_minute",
+                value_json="0.02",
+            )
+        )
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        settings = await _get_db_settings(mock_db_session)
+
+        assert settings.get("mistral_rate_usd_per_minute") == 0.02
+
+
+class TestRunJob:
+    """Test run_job's end-to-end orchestration with a mocked Pipeline."""
+
+    @pytest.mark.asyncio
+    async def test_run_job_success_publishes_done_and_returns_result(self, mock_db_session):
+        claimed = make_claimed_job()
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/test/output.srt",
+            audio_duration_seconds=30.0,
+            mistral_usage={"prompt_audio_seconds": 30.0},
+            segments_count=2,
+        )
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.DONE
+        assert result.audio_duration_seconds == 30.0
+        deps.redis.publish.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_run_job_cancelled_returns_cancelled_status(self, mock_db_session):
+        claimed = make_claimed_job()
+        deps = make_worker_deps(mock_db_session)
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.side_effect = Cancelled("cancelled by user")
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.CANCELLED
+        deps.redis.publish.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_run_job_failure_persists_error_and_returns_failed_status(
+        self, mock_db_session
+    ):
+        claimed = make_claimed_job()
+        deps = make_worker_deps(mock_db_session)
+
+        # Persist a job row so persist_log's FK write succeeds.
+        job_row = Job(
+            id=str(claimed.id),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path=claimed.media_path,
+            output_format=claimed.output_format,
+        )
+        mock_db_session.add(job_row)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.side_effect = Exception("pipeline exploded")
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.FAILED
+        assert "pipeline exploded" in result.error_message
+        deps.redis.publish.assert_called()
+
+        logs = (
+            await mock_db_session.execute(
+                select(JobLog).where(JobLog.job_id == str(claimed.id))
+            )
+        ).scalars().all()
+        assert any("pipeline exploded" in log.message for log in logs)
+
+    @pytest.mark.asyncio
+    async def test_run_job_generates_output_path_when_not_provided(self, mock_db_session):
+        claimed = make_claimed_job(output_path="")
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/generated/output.srt",
+            audio_duration_seconds=10.0,
+            mistral_usage=None,
+            segments_count=1,
+        )
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class, patch(
+            "audio_to_subs.worker.runner.generate_output_path"
+        ) as mock_generate_path:
+            mock_generate_path.return_value = "/generated/output.srt"
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        mock_generate_path.assert_called_once()
+        assert result.status == JobStatus.DONE
