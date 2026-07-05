@@ -94,6 +94,14 @@ class SettingsResponse(BaseModel):
         """Convert to dictionary for database storage."""
         return self.model_dump()
 
+    def sanitized(self) -> "SettingsResponse":
+        """Return a copy with sensitive fields masked for API responses."""
+        copy = self.model_copy()
+        # Mask API keys - return only if they were not set
+        if copy.bazarr_api_key:
+            copy.bazarr_api_key = "***MASKED***"
+        return copy
+
 
 class SettingsUpdate(BaseModel):
     """Settings update request (all fields optional)."""
@@ -195,7 +203,8 @@ async def get_settings(
     # Get all settings
     db_settings = await _get_all_settings(db)
 
-    return SettingsResponse.from_db_settings(db_settings)
+    response = SettingsResponse.from_db_settings(db_settings)
+    return response.sanitized()
 
 
 @router.patch("", response_model=SettingsResponse, status_code=status.HTTP_200_OK)
@@ -236,8 +245,9 @@ async def update_settings(
 
     await db.commit()
 
-    # Return full settings
-    return SettingsResponse.from_db_settings(merged_settings)
+    # Return full settings with secrets masked
+    response = SettingsResponse.from_db_settings(merged_settings)
+    return response.sanitized()
 
 
 @router.get("/{key}")
@@ -263,7 +273,11 @@ async def get_setting(
     if row is None:
         # Check if it's a default setting
         if key in DEFAULT_SETTINGS:
-            return {"key": key, "value": DEFAULT_SETTINGS[key]}
+            value = DEFAULT_SETTINGS[key]
+            # Mask sensitive settings
+            if key in ("bazarr_api_key", "SESSION_SECRET"):
+                value = "***MASKED***"
+            return {"key": key, "value": value}
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Setting {key} not found",
@@ -271,6 +285,9 @@ async def get_setting(
 
     try:
         value = json.loads(row.value_json)
+        # Mask sensitive settings
+        if key in ("bazarr_api_key", "SESSION_SECRET"):
+            value = "***MASKED***"
         return {"key": key, "value": value}
     except json.JSONDecodeError:
         raise HTTPException(
