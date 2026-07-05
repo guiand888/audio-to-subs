@@ -1,9 +1,24 @@
 """Application settings using pydantic-settings."""
 
-from pathlib import Path
 
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
+
+
+def _read_file_secret(path: str | None) -> str | None:
+    """Read a stripped secret value from a file path, or None if unset/missing.
+
+    Shared by the four *_FILE fallback validators and their corresponding
+    convenience properties (admin_password, bazarr_api_key, mistral_api_key,
+    session_secret) below.
+    """
+    if path is None:
+        return None
+    try:
+        with open(path) as f:
+            return f.read().strip()
+    except FileNotFoundError:
+        return None
 
 
 class Settings(BaseSettings):
@@ -117,14 +132,7 @@ class Settings(BaseSettings):
     ) -> str | None:
         if v is not None:
             return v
-        password_file = info.data.get("ADMIN_PASSWORD_FILE")
-        if password_file is not None:
-            try:
-                with open(password_file) as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        return None
+        return _read_file_secret(info.data.get("ADMIN_PASSWORD_FILE"))
 
     @field_validator("BAZARR_API_KEY", mode="before")
     @classmethod
@@ -133,14 +141,7 @@ class Settings(BaseSettings):
     ) -> str | None:
         if v is not None:
             return v
-        api_key_file = info.data.get("BAZARR_API_KEY_FILE")
-        if api_key_file is not None:
-            try:
-                with open(api_key_file) as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        return None
+        return _read_file_secret(info.data.get("BAZARR_API_KEY_FILE"))
 
     @field_validator("MISTRAL_API_KEY", mode="before")
     @classmethod
@@ -149,14 +150,7 @@ class Settings(BaseSettings):
     ) -> str | None:
         if v is not None:
             return v
-        api_key_file = info.data.get("MISTRAL_API_KEY_FILE")
-        if api_key_file is not None:
-            try:
-                with open(api_key_file) as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        return None
+        return _read_file_secret(info.data.get("MISTRAL_API_KEY_FILE"))
 
     @field_validator("SESSION_SECRET", mode="before")
     @classmethod
@@ -165,14 +159,7 @@ class Settings(BaseSettings):
     ) -> str | None:
         if v is not None:
             return v
-        secret_file = info.data.get("SESSION_SECRET_FILE")
-        if secret_file is not None:
-            try:
-                with open(secret_file) as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        return None
+        return _read_file_secret(info.data.get("SESSION_SECRET_FILE"))
 
     @model_validator(mode="after")
     def validate_session_secret_exists(self) -> "Settings":
@@ -189,60 +176,28 @@ class Settings(BaseSettings):
         """Get admin password (from env or file)."""
         if self.ADMIN_PASSWORD is not None:
             return self.ADMIN_PASSWORD
-        
-        if self.ADMIN_PASSWORD_FILE is not None:
-            try:
-                with open(self.ADMIN_PASSWORD_FILE, "r") as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        
-        return None
+        return _read_file_secret(self.ADMIN_PASSWORD_FILE)
 
     @property
     def bazarr_api_key(self) -> str | None:
         """Get Bazarr API key (from env or file)."""
         if self.BAZARR_API_KEY is not None:
             return self.BAZARR_API_KEY
-        
-        if self.BAZARR_API_KEY_FILE is not None:
-            try:
-                with open(self.BAZARR_API_KEY_FILE, "r") as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        
-        return None
+        return _read_file_secret(self.BAZARR_API_KEY_FILE)
 
     @property
     def mistral_api_key(self) -> str | None:
         """Get Mistral API key (from env or file)."""
         if self.MISTRAL_API_KEY is not None:
             return self.MISTRAL_API_KEY
-        
-        if self.MISTRAL_API_KEY_FILE is not None:
-            try:
-                with open(self.MISTRAL_API_KEY_FILE, "r") as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        
-        return None
+        return _read_file_secret(self.MISTRAL_API_KEY_FILE)
 
     @property
     def session_secret(self) -> str | None:
         """Get session secret (from env or file)."""
         if self.SESSION_SECRET is not None:
             return self.SESSION_SECRET
-        
-        if self.SESSION_SECRET_FILE is not None:
-            try:
-                with open(self.SESSION_SECRET_FILE, "r") as f:
-                    return f.read().strip()
-            except FileNotFoundError:
-                return None
-        
-        return None
+        return _read_file_secret(self.SESSION_SECRET_FILE)
 
 
 # Global settings instance
