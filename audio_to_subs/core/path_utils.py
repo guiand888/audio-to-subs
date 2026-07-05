@@ -12,6 +12,33 @@ from pathlib import Path
 from typing import Literal
 
 
+def _is_within(path: str, root: str) -> bool:
+    """Check if a path is within a root directory (safely).
+
+    Uses realpath() to resolve symlinks and checks proper path boundaries.
+
+    Args:
+        path: Path to check
+        root: Root directory that should contain path
+
+    Returns:
+        True if path is within root, False otherwise
+    """
+    try:
+        resolved_path = os.path.realpath(path)
+        resolved_root = os.path.realpath(root)
+
+        # Ensure root ends with separator for proper boundary checking
+        if not resolved_root.endswith(os.sep):
+            resolved_root += os.sep
+
+        # Check if path is exactly the root or within it
+        return resolved_path == resolved_root.rstrip(os.sep) or resolved_path.startswith(resolved_root)
+    except (OSError, ValueError):
+        # Path doesn't exist or is invalid
+        return False
+
+
 def validate_media_path(
     media_path: str,
     movies_root: str | None = None,
@@ -33,19 +60,12 @@ def validate_media_path(
         # No roots configured, allow any path
         return True, None
 
-    # Normalize paths for comparison
-    resolved_path = os.path.abspath(media_path)
+    # Check against configured roots using safe path comparison
+    if movies_root and _is_within(media_path, movies_root):
+        return True, None
 
-    # Check against configured roots
-    if movies_root:
-        resolved_movies_root = os.path.abspath(movies_root)
-        if resolved_path.startswith(resolved_movies_root):
-            return True, None
-
-    if tv_root:
-        resolved_tv_root = os.path.abspath(tv_root)
-        if resolved_path.startswith(resolved_tv_root):
-            return True, None
+    if tv_root and _is_within(media_path, tv_root):
+        return True, None
 
     return (
         False,
@@ -74,17 +94,11 @@ def get_media_type(
     if not movies_root and not tv_root:
         return "unknown"
 
-    resolved_path = os.path.abspath(media_path)
+    if movies_root and _is_within(media_path, movies_root):
+        return "movie"
 
-    if movies_root:
-        resolved_movies_root = os.path.abspath(movies_root)
-        if resolved_path.startswith(resolved_movies_root):
-            return "movie"
-
-    if tv_root:
-        resolved_tv_root = os.path.abspath(tv_root)
-        if resolved_path.startswith(resolved_tv_root):
-            return "tv"
+    if tv_root and _is_within(media_path, tv_root):
+        return "tv"
 
     return "unknown"
 
@@ -162,17 +176,21 @@ def paths_overlap(path1: str, path2: str) -> bool:
     Returns:
         True if paths overlap, False otherwise
     """
-    resolved1 = os.path.abspath(path1)
-    resolved2 = os.path.abspath(path2)
+    try:
+        resolved1 = os.path.realpath(path1)
+        resolved2 = os.path.realpath(path2)
 
-    # Ensure both end with separator for proper prefix matching
-    if not resolved1.endswith(os.sep):
-        resolved1 += os.sep
-    if not resolved2.endswith(os.sep):
-        resolved2 += os.sep
+        # Ensure both end with separator for proper prefix matching
+        if not resolved1.endswith(os.sep):
+            resolved1 += os.sep
+        if not resolved2.endswith(os.sep):
+            resolved2 += os.sep
 
-    return (
-        resolved1.startswith(resolved2)
-        or resolved2.startswith(resolved1)
-        or resolved1 == resolved2
-    )
+        return (
+            resolved1.startswith(resolved2)
+            or resolved2.startswith(resolved1)
+            or resolved1.rstrip(os.sep) == resolved2.rstrip(os.sep)
+        )
+    except (OSError, ValueError):
+        # If paths don't exist or are invalid, assume no overlap
+        return False

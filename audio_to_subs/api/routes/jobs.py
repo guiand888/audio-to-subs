@@ -308,15 +308,7 @@ async def create_job(
             detail=f"Failed to resolve source: {e}",
         )
 
-    # Validate media_path for path traversal
-    import os
-
-    if ".." in media_path or media_path.startswith("/"):
-        # Resolve to absolute path and check it's within allowed directories
-        resolved = os.path.abspath(media_path)
-        logger.warning(f"Potential path traversal in media_path: {media_path}")
-
-    # Validate media_path against configured root paths
+    # Validate media_path against configured root paths (handles symlinks and traversal)
     movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
     tv_root = getattr(settings, "TV_ROOT_PATH", None)
     
