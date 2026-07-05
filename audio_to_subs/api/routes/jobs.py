@@ -183,20 +183,7 @@ async def list_jobs(
 
 async def _get_path_map(db: "AsyncSession") -> PathMap:
     """Get PathMap from database settings."""
-    import json
-
-    try:
-        result = await db.execute(select(Setting).where(Setting.key == "path_mappings"))
-        setting = result.scalar_one_or_none()
-        if setting and setting.value_json:
-            path_mappings = json.loads(setting.value_json)
-            return PathMap.from_settings(path_mappings)
-    except Exception as e:
-        logging.getLogger(__name__).warning(
-            "Failed to load path_mappings from settings: %s", e
-        )
-
-    return PathMap()
+    return await PathMap.load_from_db(db)
 
 
 async def _resolve_bazarr_source(

@@ -3,9 +3,13 @@
 Handles translation between Bazarr paths and local worker paths.
 """
 
+import json
 import logging
 import os
-from typing import Any
+from typing import TYPE_CHECKING, Any
+
+if TYPE_CHECKING:
+    from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
 
@@ -62,7 +66,7 @@ class PathMap:
             # Check if path starts with this prefix
             if norm_path.startswith(bazarr_prefix):
                 # Remove prefix and prepend local prefix
-                suffix = norm_path[len(bazarr_prefix):]
+                suffix = norm_path[len(bazarr_prefix) :]
                 if suffix.startswith(os.sep):
                     suffix = suffix[1:]  # Remove leading separator
                 return os.path.normpath(os.path.join(local_prefix, suffix))
@@ -103,7 +107,7 @@ class PathMap:
             # Check if path starts with this local prefix
             if norm_path.startswith(local_prefix):
                 # Remove prefix and prepend bazarr prefix
-                suffix = norm_path[len(local_prefix):]
+                suffix = norm_path[len(local_prefix) :]
                 if suffix.startswith(os.sep):
                     suffix = suffix[1:]  # Remove leading separator
                 return os.path.normpath(os.path.join(bazarr_prefix, suffix))
@@ -157,6 +161,32 @@ class PathMap:
             {"bazarr_prefix": bazarr, "local_prefix": local}
             for bazarr, local in self._pairs
         ]
+
+    @classmethod
+    async def load_from_db(cls, db: "AsyncSession") -> "PathMap":
+        """Load PathMap from the "path_mappings" DB setting.
+
+        Falls back to an empty PathMap (no translation) if the setting is
+        missing, empty, or malformed. Import of the Setting model is local
+        to avoid a circular import between db.models and this module.
+        """
+        from sqlalchemy import select
+
+        from audio_to_subs.db.models import Setting
+
+        try:
+            result = await db.execute(
+                select(Setting.value_json).where(Setting.key == "path_mappings")
+            )
+            # Selecting a single column returns the scalar value directly,
+            # not a Setting row — do not access .value_json on this result.
+            value_json = result.scalar_one_or_none()
+            if value_json:
+                return cls.from_settings(json.loads(value_json))
+        except Exception as e:
+            logger.warning("Failed to load path_mappings from settings: %s", e)
+
+        return cls()
 
 
 def translate_path(

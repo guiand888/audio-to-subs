@@ -66,21 +66,7 @@ class WantedListResponse(BaseModel):
 
 async def _get_path_map(db: "AsyncSession") -> PathMap:
     """Get PathMap from database settings."""
-    import json
-    from audio_to_subs.db.models import Setting
-
-    try:
-        result = await db.execute(
-            select(Setting.value_json).where(Setting.key == "path_mappings")
-        )
-        row = result.scalar_one_or_none()
-        if row and row.value_json:
-            path_mappings = json.loads(row.value_json)
-            return PathMap.from_settings(path_mappings)
-    except Exception as e:
-        logger.warning("Failed to load path_mappings from settings: %s", e)
-
-    return PathMap()
+    return await PathMap.load_from_db(db)
 
 
 async def _translate_paths(
@@ -114,9 +100,7 @@ async def _get_last_refreshed(db: "AsyncSession") -> datetime | None:
     Returns:
         Most recent last_polled timestamp or None
     """
-    result = await db.execute(
-        select(func.max(BazarrCache.last_polled))
-    )
+    result = await db.execute(select(func.max(BazarrCache.last_polled)))
     max_polled = result.scalar_one_or_none()
     return max_polled if max_polled else None
 
@@ -204,7 +188,11 @@ async def list_wanted(
             )
             job = job_result.one_or_none()
             if job:
-                active_job_status = job.status.value if hasattr(job.status, "value") else str(job.status)
+                active_job_status = (
+                    job.status.value
+                    if hasattr(job.status, "value")
+                    else str(job.status)
+                )
                 active_job_progress = job.progress_percent
 
         wanted_item = WantedItem(
@@ -245,9 +233,7 @@ async def get_wanted_item(
     Returns:
         Wanted item details
     """
-    result = await db.execute(
-        select(BazarrCache).where(BazarrCache.id == item_id)
-    )
+    result = await db.execute(select(BazarrCache).where(BazarrCache.id == item_id))
     item = result.scalar_one_or_none()
 
     if item is None:
@@ -304,9 +290,7 @@ class WantedRefreshResponse(BaseModel):
     """Response model for wanted list refresh."""
 
     status: str = Field(description="Refresh status: started, completed, failed")
-    movies_processed: int = Field(
-        default=0, description="Number of movies processed"
-    )
+    movies_processed: int = Field(default=0, description="Number of movies processed")
     episodes_processed: int = Field(
         default=0, description="Number of episodes processed"
     )
@@ -321,7 +305,7 @@ class WantedRefreshResponse(BaseModel):
 async def refresh_wanted_list(
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
-    refresh_request: WantedRefreshRequest = Body(default_factory=WantedRefreshRequest)
+    refresh_request: WantedRefreshRequest = Body(default_factory=WantedRefreshRequest),
 ) -> WantedRefreshResponse:
     """Trigger a manual refresh of the wanted list from Bazarr.
 
@@ -350,8 +334,8 @@ async def refresh_wanted_list(
 
     try:
         # Get Bazarr client using database settings first, then environment fallback
-        client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
-            db, settings
+        client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+            await get_bazarr_client_with_settings(db, settings)
         )
     except Exception as e:
         logger.error("Failed to initialize Bazarr client: %s", type(e).__name__)

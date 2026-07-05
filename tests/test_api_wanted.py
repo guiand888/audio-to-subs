@@ -106,14 +106,32 @@ class TestGetWantedItemEndpoint:
 class TestPathTranslation:
     """Test path translation functionality."""
 
-    def test_get_path_map(self):
-        """Test _get_path_map function."""
+    @pytest.mark.asyncio
+    async def test_get_path_map_applies_configured_mapping(self, mock_db_session):
+        """_get_path_map must actually load and apply the path_mappings
+        setting (regression: B12 — selecting Setting.value_json returns the
+        scalar string, and code that then reads `.value_json` off it raises
+        AttributeError, silently swallowed, so mappings were never applied).
+        """
+        import json
+
         from audio_to_subs.api.routes.wanted import _get_path_map
-        from audio_to_subs.bazarr.pathmap import PathMap
-        
-        # This is an async function that needs a DB session
-        # For unit testing, we can just verify the function exists
-        assert callable(_get_path_map)
+        from audio_to_subs.db.models import Setting
+
+        mock_db_session.add(
+            Setting(
+                key="path_mappings",
+                value_json=json.dumps(
+                    [{"bazarr_prefix": "/data/movies", "local_prefix": "/movies"}]
+                ),
+            )
+        )
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        path_map = await _get_path_map(mock_db_session)
+
+        assert path_map.translate("/data/movies/foo.mp4") == "/movies/foo.mp4"
 
     def test_translate_paths(self):
         """Test _translate_paths function."""

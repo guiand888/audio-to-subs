@@ -101,6 +101,7 @@ async def get_bazarr_client_with_settings(
     # Fall back to environment settings if database settings are not set
     if env_settings is None:
         from audio_to_subs.api.settings import get_settings
+
         env_settings = get_settings()
 
     # A DB value of None (row absent, or seeded default) falls back to env.
@@ -128,24 +129,7 @@ async def get_path_map(
     Returns:
         PathMap configured from settings or empty PathMap
     """
-    # Import here to avoid circular imports
-    from audio_to_subs.db.models import Setting
-
-    try:
-        result = await db.execute(
-            select(Setting.value_json).where(Setting.key == "path_mappings")
-        )
-        # scalar_one_or_none() returns the raw value_json string, not a Setting.
-        value_json = result.scalar_one_or_none()
-        if value_json:
-            import json
-
-            path_mappings = json.loads(value_json)
-            return PathMap.from_settings(path_mappings)
-    except Exception as e:
-        logger.warning("Failed to load path_mappings from settings: %s", e)
-
-    return PathMap()
+    return await PathMap.load_from_db(db)
 
 
 async def get_settings_value(
@@ -166,9 +150,7 @@ async def get_settings_value(
     from audio_to_subs.db.models import Setting
 
     try:
-        result = await db.execute(
-            select(Setting.value_json).where(Setting.key == key)
-        )
+        result = await db.execute(select(Setting.value_json).where(Setting.key == key))
         # scalar_one_or_none() returns the raw value_json string, not a Setting.
         value_json = result.scalar_one_or_none()
         if value_json:
@@ -254,7 +236,9 @@ async def poll_bazarr_manually(
 
         # Determine which types to poll
         poll_movies = item_type is None or item_type == "all" or item_type == "movie"
-        poll_episodes = item_type is None or item_type == "all" or item_type == "episode"
+        poll_episodes = (
+            item_type is None or item_type == "all" or item_type == "episode"
+        )
 
         # Process wanted movies
         if poll_movies:
@@ -322,9 +306,7 @@ async def _process_movie(
 
     # Use merge (upsert) - SQLite doesn't support ON CONFLICT directly in SQLAlchemy 2.x
     # We'll do a select-then-update/insert pattern
-    result = await db.execute(
-        select(BazarrCache).where(BazarrCache.id == cache_id)
-    )
+    result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -395,9 +377,7 @@ async def _process_episode(
     cache_id = BazarrCache.make_id("episode", wanted_episode.sonarrEpisodeId)
 
     # Upsert logic
-    result = await db.execute(
-        select(BazarrCache).where(BazarrCache.id == cache_id)
-    )
+    result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
     existing = result.scalar_one_or_none()
 
     if existing:
@@ -504,7 +484,7 @@ async def _poll_all_episodes(
     """Poll all episodes and add those with no subtitles to cache.
 
     This is expensive and opt-in via bazarr_track_no_subs setting.
-    
+
     Separates HTTP calls from DB operations to avoid holding DB transactions
     during network I/O (follows short-transaction convention).
 
@@ -517,12 +497,12 @@ async def _poll_all_episodes(
     try:
         # Phase 1: HTTP calls only - collect cache entries without DB access
         cache_entries_to_add = []
-        
+
         series_page = await client.list_all_series(length=200)
-        
+
         for series in series_page.data:
             episodes_page = await client.list_episodes(seriesid=series.sonarrSeriesId)
-            
+
             for episode in episodes_page.data:
                 # Check if episode has no subtitles at all
                 if not episode.subtitles:
@@ -531,13 +511,15 @@ async def _poll_all_episodes(
                         media_path = path_map.translate(media_path)
 
                     cache_id = BazarrCache.make_id("episode", episode.sonarrEpisodeId)
-                    cache_entries_to_add.append({
-                        "cache_id": cache_id,
-                        "ext_id": episode.sonarrEpisodeId,
-                        "title": f"{series.title} - {episode.title}",
-                        "media_path": media_path,
-                    })
-        
+                    cache_entries_to_add.append(
+                        {
+                            "cache_id": cache_id,
+                            "ext_id": episode.sonarrEpisodeId,
+                            "title": f"{series.title} - {episode.title}",
+                            "media_path": media_path,
+                        }
+                    )
+
         # Phase 2: DB operations only - upsert all collected entries
         for entry in cache_entries_to_add:
             result = await db.execute(
@@ -640,8 +622,8 @@ async def run_bazarr_poller(app: "FastAPI") -> None:
             async with get_async_session(settings.DATABASE_URL) as db:
                 interval = await _get_poll_interval(db)
 
-                client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
-                    db, settings
+                client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+                    await get_bazarr_client_with_settings(db, settings)
                 )
 
                 if client is None:
