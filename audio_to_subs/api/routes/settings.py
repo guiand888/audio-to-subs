@@ -216,7 +216,7 @@ async def update_settings(
     updates = settings_update.model_dump(exclude_unset=True)
     merged_settings = {**current_settings, **updates}
 
-    # Update or insert each setting
+    # Update or insert each setting (all changes in one transaction for atomicity)
     for key, value in updates.items():
         # Check if setting exists
         result = await db.execute(
@@ -226,6 +226,7 @@ async def update_settings(
 
         if existing:
             existing.value_json = json.dumps(value)
+            await db.flush()  # Ensure update is queued before next check
         else:
             new_setting = Setting(
                 key=key,
