@@ -109,7 +109,7 @@ async def persist_log(
     """Write a log entry to the database."""
     try:
         log_entry = JobLog(
-            job_id=job_id,
+            job_id=str(job_id),
             ts=datetime.now(timezone.utc),
             level=level,
             message=message,
