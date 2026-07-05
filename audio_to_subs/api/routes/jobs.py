@@ -10,6 +10,7 @@ from sqlalchemy import select, and_, or_, desc, func
 from sqlalchemy.orm import joinedload
 
 from audio_to_subs.api.deps import SettingsDep, get_db
+from audio_to_subs.api.routes._helpers import get_job_or_404
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
 from audio_to_subs.db.models import (
@@ -34,7 +35,9 @@ router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 class JobCreateRequest(BaseModel):
     """Request body for creating a new job."""
 
-    source: JobSource = Field(..., description="Job source: manual, bazarr_movie, bazarr_episode")
+    source: JobSource = Field(
+        ..., description="Job source: manual, bazarr_movie, bazarr_episode"
+    )
     source_ref: str | None = Field(
         default=None,
         description="Reference to external source (e.g., Bazarr ID)",
@@ -183,9 +186,7 @@ async def _get_path_map(db: "AsyncSession") -> PathMap:
     import json
 
     try:
-        result = await db.execute(
-            select(Setting).where(Setting.key == "path_mappings")
-        )
+        result = await db.execute(select(Setting).where(Setting.key == "path_mappings"))
         setting = result.scalar_one_or_none()
         if setting and setting.value_json:
             path_mappings = json.loads(setting.value_json)
@@ -235,9 +236,7 @@ async def _resolve_bazarr_source(
             int(source_ref),
         )
 
-        result = await db.execute(
-            select(BazarrCache).where(BazarrCache.id == cache_id)
-        )
+        result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
         cache_entry = result.scalar_one_or_none()
 
         if cache_entry is None:
@@ -312,7 +311,7 @@ async def create_job(
     # Validate media_path against configured root paths (handles symlinks and traversal)
     movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
     tv_root = getattr(settings, "TV_ROOT_PATH", None)
-    
+
     is_valid, error_msg = validate_media_path(media_path, movies_root, tv_root)
     if not is_valid:
         raise HTTPException(
@@ -421,16 +420,7 @@ async def get_job(
     db: Annotated["AsyncSession", Depends(get_db)],
 ) -> JobResponse:
     """Get details for a specific job."""
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    job = await get_job_or_404(db, job_id)
 
     return JobResponse.model_validate(job)
 
@@ -445,22 +435,13 @@ async def cancel_job(
 
     Sets cancel_requested flag and publishes cancellation notification.
     The worker will pick this up and terminate the pipeline.
-    
+
     If the job is still queued, it will be marked as cancelled immediately.
     """
     from sqlalchemy import text
 
     # Get current job state
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    job = await get_job_or_404(db, job_id)
 
     # If job is still queued, cancel it immediately
     if job.status == JobStatus.QUEUED:
@@ -536,16 +517,7 @@ async def delete_job(
     Only allows deletion of queued jobs. Jobs that are running or completed
     cannot be deleted (they have audit value).
     """
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    job = await get_job_or_404(db, job_id)
 
     if job.status != JobStatus.QUEUED:
         raise HTTPException(
@@ -559,6 +531,7 @@ async def delete_job(
 
 # Import logging for use in functions
 import logging
+
 logger = logging.getLogger(__name__)
 
 
@@ -584,16 +557,7 @@ async def notify_bazarr(
     logger = logging.getLogger(__name__)
 
     # Get the job
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    job = await get_job_or_404(db, job_id)
 
     # Skip manual jobs immediately — Bazarr config is irrelevant for them.
     if job.source not in (JobSource.BAZARR_MOVIE, JobSource.BAZARR_EPISODE):
@@ -602,9 +566,9 @@ async def notify_bazarr(
 
     # Get Bazarr client using database settings first, then environment fallback
     from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
-    
-    client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
-        db, settings
+
+    client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+        await get_bazarr_client_with_settings(db, settings)
     )
 
     if client is None:
@@ -624,7 +588,11 @@ async def notify_bazarr(
                 logger.info(f"Triggered Bazarr rescan for movie {radarr_id}")
 
             await client.close()
-            return {"status": "triggered", "source": "bazarr_movie", "source_ref": job.source_ref}
+            return {
+                "status": "triggered",
+                "source": "bazarr_movie",
+                "source_ref": job.source_ref,
+            }
 
         except Exception as e:
             logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
@@ -649,7 +617,9 @@ async def notify_bazarr(
                         )
                         await client.close()
                         return {"status": "failed", "error": "Bazarr rescan failed"}
-                    logger.info(f"Triggered Bazarr rescan for episode {sonarr_episode_id}")
+                    logger.info(
+                        f"Triggered Bazarr rescan for episode {sonarr_episode_id}"
+                    )
                 else:
                     logger.warning(
                         f"Cannot trigger Bazarr rescan for episode {sonarr_episode_id}: "
@@ -659,7 +629,11 @@ async def notify_bazarr(
                     return {"status": "failed", "error": "episode not found in Bazarr"}
 
             await client.close()
-            return {"status": "triggered", "source": "bazarr_episode", "source_ref": job.source_ref}
+            return {
+                "status": "triggered",
+                "source": "bazarr_episode",
+                "source_ref": job.source_ref,
+            }
 
         except Exception as e:
             logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")

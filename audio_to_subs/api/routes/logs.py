@@ -4,13 +4,14 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select, and_, desc, func, or_
 from sqlalchemy.orm import joinedload
 
 from audio_to_subs.api.deps import get_db
-from audio_to_subs.db.models import Job, JobLog, LogLevel
+from audio_to_subs.api.routes._helpers import get_job_or_404
+from audio_to_subs.db.models import JobLog, LogLevel
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -55,16 +56,7 @@ async def get_job_logs(
     Returns a paginated list of log entries for the job, ordered by timestamp.
     """
     # Verify job exists
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    await get_job_or_404(db, job_id)
 
     # Build query
     query = select(JobLog).where(JobLog.job_id == str(job_id))
@@ -108,16 +100,7 @@ async def create_job_log(
     Used internally by the API and worker to record job lifecycle events.
     """
     # Verify job exists
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    await get_job_or_404(db, job_id)
 
     # Create log entry
     log_entry = JobLog(

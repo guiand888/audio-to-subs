@@ -6,13 +6,13 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator
 from uuid import UUID, uuid4
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from fastapi.responses import StreamingResponse
-from sqlalchemy import select
 from sse_starlette.sse import EventSourceResponse
 
 from audio_to_subs.api.deps import SettingsDep, get_db
-from audio_to_subs.db.models import Job, JobStatus
+from audio_to_subs.api.routes._helpers import get_job_or_404
+from audio_to_subs.db.models import JobStatus
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -63,7 +63,9 @@ def _subscribe_global_stream(client_id: str) -> asyncio.Queue:
 def _unsubscribe_global_stream(client_id: str) -> None:
     """Remove a subscriber from the global stream."""
     global _global_subscribers
-    _global_subscribers = [(q, cid) for q, cid in _global_subscribers if cid != client_id]
+    _global_subscribers = [
+        (q, cid) for q, cid in _global_subscribers if cid != client_id
+    ]
 
 
 async def _event_generator(
@@ -139,17 +141,8 @@ async def job_stream(
     Returns a Server-Sent Events stream that receives notifications for
     the specific job's progress and completion events.
     """
-    # Verify job exists (convert UUID to string for String(36) column comparison)
-    result = await db.execute(
-        select(Job).where(Job.id == str(job_id))
-    )
-    job = result.scalar_one_or_none()
-
-    if job is None:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Job {job_id} not found",
-        )
+    # Verify job exists
+    await get_job_or_404(db, job_id)
 
     return EventSourceResponse(
         _event_generator(request, str(job_id)),
@@ -211,10 +204,22 @@ async def patched_publish_progress(
     await _original_publish_progress(redis, job_id, percent, stage, message)
     publish_to_job_stream(
         job_id,
-        {"event": "progress", "job_id": job_id, "percent": percent, "stage": stage, "message": message},
+        {
+            "event": "progress",
+            "job_id": job_id,
+            "percent": percent,
+            "stage": stage,
+            "message": message,
+        },
     )
     publish_to_global_stream(
-        {"event": "progress", "job_id": job_id, "percent": percent, "stage": stage, "message": message}
+        {
+            "event": "progress",
+            "job_id": job_id,
+            "percent": percent,
+            "stage": stage,
+            "message": message,
+        }
     )
 
 
