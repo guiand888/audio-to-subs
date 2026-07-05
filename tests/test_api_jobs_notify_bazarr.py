@@ -16,7 +16,7 @@ def test_notify_bazarr_job_not_found(api_client):
     assert "not found" in response.json()["detail"].lower()
 
 
-def test_notify_bazarr_manual_job(client, sync_session):
+def test_notify_bazarr_manual_job(api_client, sync_session):
     """POST /api/jobs/{id}/notify-bazarr skips manual jobs."""
     job = Job(
         id=str(uuid4()),
@@ -34,7 +34,7 @@ def test_notify_bazarr_manual_job(client, sync_session):
     assert "Manual job" in data["reason"]
 
 
-def test_notify_bazarr_bazarr_movie_no_bazarr_config(client, sync_session):
+def test_notify_bazarr_bazarr_movie_no_bazarr_config(api_client, sync_session):
     """POST /api/jobs/{id}/notify-bazarr skips when Bazarr is not configured."""
     job = Job(
         id=str(uuid4()),

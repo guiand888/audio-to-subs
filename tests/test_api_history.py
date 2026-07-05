@@ -18,7 +18,7 @@ def test_get_history_empty(api_client):
     assert data["stats"]["total_duration_seconds"] == 0
 
 
-def test_get_history_with_done_jobs(client, sync_session):
+def test_get_history_with_done_jobs(api_client, sync_session):
     """GET /api/history returns done jobs with aggregated stats."""
     job1 = Job(
         id=str(uuid4()),
@@ -56,7 +56,7 @@ def test_get_history_with_done_jobs(client, sync_session):
     assert data["stats"]["count_by_language"]["fr"] == 1
 
 
-def test_get_history_filters_by_status(client, sync_session):
+def test_get_history_filters_by_status(api_client, sync_session):
     """GET /api/history can be filtered by status."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.DONE, source=JobSource.MANUAL, media_path="/test/v1.mp4"),
@@ -76,7 +76,7 @@ def test_get_history_filters_by_status(client, sync_session):
     assert len(response.json()["jobs"]) == 2
 
 
-def test_get_history_filters_by_source(client, sync_session):
+def test_get_history_filters_by_source(api_client, sync_session):
     """GET /api/history can be filtered by source."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.DONE, source=JobSource.BAZARR_MOVIE, source_ref="123", media_path="/test/v1.mp4"),
@@ -91,7 +91,7 @@ def test_get_history_filters_by_source(client, sync_session):
     assert data["jobs"][0]["source"] == "bazarr_movie"
 
 
-def test_get_history_pagination(client, sync_session):
+def test_get_history_pagination(api_client, sync_session):
     """GET /api/history supports limit/offset pagination."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.DONE, source=JobSource.MANUAL, media_path=f"/test/v{i}.mp4")
@@ -110,7 +110,7 @@ def test_get_history_pagination(client, sync_session):
     assert len(resp2.json()["jobs"]) == 1
 
 
-def test_get_history_excludes_queued_and_running(client, sync_session):
+def test_get_history_excludes_queued_and_running(api_client, sync_session):
     """GET /api/history excludes QUEUED and RUNNING jobs."""
     sync_session.add_all([
         Job(id=str(uuid4()), status=JobStatus.QUEUED, source=JobSource.MANUAL, media_path="/test/v1.mp4"),

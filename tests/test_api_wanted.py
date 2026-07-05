@@ -74,7 +74,7 @@ class TestWantedItemType:
 class TestListWantedEndpoint:
     """Test GET /api/wanted endpoint."""
 
-    def test_list_wanted_empty(self, test_client):
+    def test_list_wanted_empty(self, api_client):
         """Test list_wanted with empty cache."""
         response = test_client.get("/api/wanted")
         
@@ -85,7 +85,7 @@ class TestListWantedEndpoint:
         assert "total" in data
         assert isinstance(data["items"], list)
 
-    def test_list_wanted_with_type_filter(self, test_client):
+    def test_list_wanted_with_type_filter(self, api_client):
         """Test list_wanted with type filter."""
         response = test_client.get("/api/wanted?item_type=movie")
         
@@ -95,7 +95,7 @@ class TestListWantedEndpoint:
         assert "items" in data
         assert "total" in data
 
-    def test_list_wanted_with_pagination(self, test_client):
+    def test_list_wanted_with_pagination(self, api_client):
         """Test list_wanted with pagination."""
         response = test_client.get("/api/wanted?page=1&page_size=50")
         
@@ -110,7 +110,7 @@ class TestListWantedEndpoint:
 class TestGetWantedItemEndpoint:
     """Test GET /api/wanted/{item_id} endpoint."""
 
-    def test_get_wanted_item_not_found(self, test_client):
+    def test_get_wanted_item_not_found(self, api_client):
         """Test get_wanted_item with nonexistent ID."""
         response = test_client.get("/api/wanted/movie:999999")
         
@@ -151,7 +151,7 @@ class TestLastRefreshed:
 class TestWantedRefreshEndpoint:
     """Test POST /api/wanted/refresh endpoint."""
 
-    def test_refresh_endpoint_exists(self, test_client):
+    def test_refresh_endpoint_exists(self, api_client):
         """Test that the refresh endpoint exists and returns success."""
         response = test_client.post("/api/wanted/refresh")
         
@@ -164,7 +164,7 @@ class TestWantedRefreshEndpoint:
         assert isinstance(data["movies_processed"], int)
         assert isinstance(data["episodes_processed"], int)
 
-    def test_refresh_all(self, test_client):
+    def test_refresh_all(self, api_client):
         """Test refresh with all items (default)."""
         response = test_client.post("/api/wanted/refresh", json={"item_type": "all"})
         
@@ -176,7 +176,7 @@ class TestWantedRefreshEndpoint:
         assert isinstance(data["movies_processed"], int)
         assert isinstance(data["episodes_processed"], int)
 
-    def test_refresh_movies_only(self, test_client):
+    def test_refresh_movies_only(self, api_client):
         """Test refresh with movies only filter."""
         response = test_client.post("/api/wanted/refresh", json={"item_type": "movie"})
         
@@ -188,7 +188,7 @@ class TestWantedRefreshEndpoint:
         assert isinstance(data["movies_processed"], int)
         assert isinstance(data["episodes_processed"], int)
 
-    def test_refresh_episodes_only(self, test_client):
+    def test_refresh_episodes_only(self, api_client):
         """Test refresh with episodes only filter."""
         response = test_client.post("/api/wanted/refresh", json={"item_type": "episode"})
         
@@ -200,7 +200,7 @@ class TestWantedRefreshEndpoint:
         assert isinstance(data["movies_processed"], int)
         assert isinstance(data["episodes_processed"], int)
 
-    def test_refresh_without_item_type(self, test_client):
+    def test_refresh_without_item_type(self, api_client):
         """Test refresh without item_type parameter (should default to all)."""
         response = test_client.post("/api/wanted/refresh")
         

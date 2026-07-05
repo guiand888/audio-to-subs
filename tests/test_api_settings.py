@@ -252,7 +252,7 @@ class TestBazarrApiKeyFile:
 class TestBazarrConnectionTestEndpoint:
     """Test the Bazarr connection test endpoint."""
 
-    def test_connection_test_endpoint_exists(self, client):
+    def test_connection_test_endpoint_exists(self, api_client):
         """Test that the connection test endpoint exists and returns appropriate response."""
         # Without configuring Bazarr, the endpoint should still exist
         # and return an appropriate response
@@ -267,7 +267,7 @@ class TestBazarrConnectionTestEndpoint:
         assert data["success"] is False
         assert data["error"] == "bazarr_not_configured"
 
-    def test_connection_test_with_configured_settings(self, client):
+    def test_connection_test_with_configured_settings(self, api_client):
         """Test connection test with Bazarr settings configured."""
         # Configure Bazarr settings
         update_data = {
@@ -290,7 +290,7 @@ class TestBazarrConnectionTestEndpoint:
         assert isinstance(data["success"], bool)
         assert isinstance(data["error"], str) or data["error"] is None
 
-    def test_connection_test_uses_request_overrides_not_saved_settings(self, client):
+    def test_connection_test_uses_request_overrides_not_saved_settings(self, api_client):
         """Passing bazarr_url in the body should test those values, not saved settings."""
         # Save one (empty/unconfigured) set of settings.
         api_client.patch(

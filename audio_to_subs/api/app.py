@@ -207,4 +207,26 @@ def get_app() -> FastAPI:
 
 
 # For running with uvicorn: uvicorn audio_to_subs.api.app:app
-app = create_app()
+# Defer app creation if running under pytest (autouse fixture will set up env)
+import sys
+
+if "pytest" not in sys.modules:
+    app = create_app()
+else:
+    # During pytest collection, create_app() may fail due to missing test env.
+    # Use lazy initialization that gets called after fixtures set up the environment.
+    app = None
+
+    def _get_lazy_app():
+        global app
+        if app is None:
+            app = get_app()
+        return app
+
+    class _AppProxy:
+        """Proxy to lazily create the FastAPI app during pytest."""
+
+        def __getattr__(self, name):
+            return getattr(_get_lazy_app(), name)
+
+    app = _AppProxy()

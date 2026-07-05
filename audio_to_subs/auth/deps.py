@@ -6,7 +6,6 @@ from typing import Annotated, Any
 from fastapi import Depends, HTTPException, Request, Response, status
 from itsdangerous.exc import BadSignature, SignatureExpired
 
-from audio_to_subs.api.deps import SettingsDep
 from audio_to_subs.auth.sessions import (
     SESSION_COOKIE_NAME,
     SLIDING_RENEWAL_THRESHOLD,
@@ -42,6 +41,16 @@ async def get_session_manager_dep() -> Any:
         secret=settings.SESSION_SECRET,
         secret_file=settings.SESSION_SECRET_FILE,
     )
+
+
+async def get_settings_dep() -> Any:
+    """FastAPI dependency for settings (local version to avoid circular import)."""
+    from audio_to_subs.api.settings import get_settings
+
+    return get_settings()
+
+
+SettingsDep = Annotated[Any, Depends(get_settings_dep)]
 
 
 async def get_current_user(
