@@ -1,28 +1,14 @@
 """Tests for pipeline module."""
 
 import pytest
-from unittest.mock import patch, MagicMock
-from pathlib import Path
+from unittest.mock import MagicMock
 from audio_to_subs.core.pipeline import Pipeline, PipelineError
 
 
 class TestPipeline:
     """Test video to subtitles pipeline."""
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_success(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_process_video_success(self, mocked_pipeline_deps, tmp_path):
         """Test successful end-to-end video processing."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -31,19 +17,14 @@ class TestPipeline:
         audio_file.touch()
         output_file = tmp_path / "output.srt"
 
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.return_value = [
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = [
             {"start": 0.0, "end": 2.5, "text": "Hello"},
             {"start": 2.5, "end": 5.0, "text": "World"},
         ]
-
-        mock_generator = MagicMock()
-        mock_generator_class.return_value = mock_generator
-        mock_generator.generate.return_value = str(output_file)
+        mocked_pipeline_deps["generate"].return_value = str(output_file)
 
         pipeline = Pipeline(api_key="test_key")
 
@@ -52,53 +33,32 @@ class TestPipeline:
 
         # Assert — process_video returns PipelineResult; compare via str()/__fspath__
         assert str(result) == str(output_file)
-        mock_extract.assert_called_once()
-        mock_transcription.transcribe_audio_with_timestamps.assert_called_once()
-        mock_generator.generate.assert_called_once()
+        mocked_pipeline_deps["extract_audio"].assert_called_once()
 
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_video_not_found(self, mock_extract, tmp_path):
+    def test_process_video_video_not_found(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline fails when video file not found."""
         # Arrange
-        mock_extract.side_effect = FileNotFoundError("Video not found")
+        mocked_pipeline_deps["extract_audio"].side_effect = FileNotFoundError("Video not found")
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
         with pytest.raises(PipelineError, match="Video file not found"):
             pipeline.process_video("nonexistent.mp4", "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_extraction_fails(
-        self, mock_extract, mock_transcription_class, mock_generator_class, tmp_path
-    ):
+    def test_process_video_extraction_fails(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline fails when audio extraction fails."""
         # Arrange
         video_file = tmp_path / "test.mp4"
         video_file.touch()
 
-        mock_extract.side_effect = Exception("FFmpeg error")
+        mocked_pipeline_deps["extract_audio"].side_effect = Exception("FFmpeg error")
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
         with pytest.raises(PipelineError, match="Audio extraction failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_transcription_fails(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_process_video_transcription_fails(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline fails when transcription fails."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -106,12 +66,10 @@ class TestPipeline:
         audio_file = tmp_path / "audio.wav"
         audio_file.touch()
 
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.side_effect = Exception(
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = Exception(
             "API error"
         )
 
@@ -121,20 +79,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_subtitle_generation_fails(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_process_video_subtitle_generation_fails(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline fails when subtitle generation fails."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -142,18 +87,13 @@ class TestPipeline:
         audio_file = tmp_path / "audio.wav"
         audio_file.touch()
 
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.return_value = [
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = [
             {"start": 0.0, "end": 2.5, "text": "Test"}
         ]
-
-        mock_generator = MagicMock()
-        mock_generator_class.return_value = mock_generator
-        mock_generator.generate.side_effect = Exception("Write failed")
+        mocked_pipeline_deps["generate"].side_effect = Exception("Write failed")
 
         pipeline = Pipeline(api_key="test_key")
 
@@ -161,31 +101,13 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Subtitle generation failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_no_api_key(
-        self, mock_extract, mock_transcription_class, mock_generator_class
-    ):
+    def test_process_video_no_api_key(self, mocked_pipeline_deps):
         """Test pipeline raises error when no API key provided."""
         # Act & Assert
         with pytest.raises(ValueError, match="API key is required"):
             Pipeline(api_key=None)
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_with_progress_callback(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_process_video_with_progress_callback(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline calls progress callback at each stage."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -194,18 +116,13 @@ class TestPipeline:
         audio_file.touch()
         output_file = tmp_path / "output.srt"
 
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.return_value = [
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = [
             {"start": 0.0, "end": 2.5, "text": "Test"}
         ]
-
-        mock_generator = MagicMock()
-        mock_generator_class.return_value = mock_generator
-        mock_generator.generate.return_value = str(output_file)
+        mocked_pipeline_deps["generate"].return_value = str(output_file)
 
         progress_callback = MagicMock()
         pipeline = Pipeline(api_key="test_key", progress_callback=progress_callback)
@@ -221,20 +138,7 @@ class TestPipeline:
         assert any("extraction" in c.lower() or "audio" in c.lower() for c in calls)
         assert any("transcrib" in c.lower() for c in calls)
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_pipeline_with_empty_segments(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_pipeline_with_empty_segments(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline fails when transcription returns empty segments."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -242,13 +146,10 @@ class TestPipeline:
         audio_file = tmp_path / "audio.wav"
         audio_file.touch()
 
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        # Return empty segments
-        mock_transcription.transcribe_audio_with_timestamps.return_value = []
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = []
 
         pipeline = Pipeline(api_key="test_key")
 
@@ -256,22 +157,7 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="AI service did not return timestamp data"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.split_audio")
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_pipeline_with_multiple_segments(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_split_audio,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_pipeline_with_multiple_segments(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline with multiple audio segments."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -281,23 +167,15 @@ class TestPipeline:
         audio_file2 = tmp_path / "audio2.wav"
         audio_file2.touch()
 
-        mock_needs_split.return_value = True
-        mock_extract.return_value = str(audio_file1)
-        # Return pre-split audio segments
-        mock_split_audio.return_value = [str(audio_file1), str(audio_file2)]
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        # Segment 1: 0-5 seconds
-        # Segment 2: 4-10 seconds (with overlap)
-        mock_transcription.transcribe_audio_with_timestamps.side_effect = [
+        mocked_pipeline_deps["needs_splitting"].return_value = True
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file1)
+        mocked_pipeline_deps["split_audio"].return_value = [str(audio_file1), str(audio_file2)]
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = [
             [{"start": 0.0, "end": 5.0, "text": "Hello"}],
             [{"start": 0.0, "end": 6.0, "text": "World"}],
         ]
-
-        mock_generator = MagicMock()
-        mock_generator_class.return_value = mock_generator
-        mock_generator.generate.return_value = "output.srt"
+        mocked_pipeline_deps["generate"].return_value = "output.srt"
 
         pipeline = Pipeline(api_key="test_key")
 
@@ -307,24 +185,11 @@ class TestPipeline:
         # Assert
         assert str(result) == "output.srt"
         # Verify transcription was called twice (once per segment)
-        assert mock_transcription.transcribe_audio_with_timestamps.call_count == 2
+        assert mocked_pipeline_deps["transcribe_audio_with_timestamps"].call_count == 2
         # Verify split_audio was called
-        mock_split_audio.assert_called_once()
+        mocked_pipeline_deps["split_audio"].assert_called_once()
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_pipeline_cleanup_on_error(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_pipeline_cleanup_on_error(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline cleans up temp files on error."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -332,124 +197,78 @@ class TestPipeline:
         audio_file = tmp_path / "audio.wav"
         audio_file.touch()
 
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.side_effect = Exception("API error")
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = Exception("API error")
 
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
         with pytest.raises(PipelineError, match="Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
-        
+
         # Note: We can't easily verify the cleanup happened due to container isolation,
         # but the cleanup code path is tested
 
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_extract_audio_ffmpeg_error(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        tmp_path,
-    ):
+    def test_process_video_extract_audio_ffmpeg_error(self, mocked_pipeline_deps, tmp_path):
         """Test FFmpegNotFoundError in _extract_audio (lines 213-214)."""
         from audio_to_subs.core.audio_extractor import FFmpegNotFoundError
-        
+
         # Arrange
         video_file = tmp_path / "test.mp4"
         video_file.touch()
-        
-        mock_needs_split.return_value = False
-        mock_extract.side_effect = FFmpegNotFoundError("ffmpeg not found")
-        
+
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].side_effect = FFmpegNotFoundError("ffmpeg not found")
+
         pipeline = Pipeline(api_key="test_key")
-        
+
         # Act & Assert
         with pytest.raises(PipelineError, match="Audio extraction failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_process_video_transcription_error(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_process_video_transcription_error(self, mocked_pipeline_deps, tmp_path):
         """Test TranscriptionError in _transcribe_audio_segments (line 273)."""
         from audio_to_subs.core.transcription_client import TranscriptionError
-        
+
         # Arrange
         video_file = tmp_path / "test.mp4"
         video_file.touch()
         audio_file = tmp_path / "audio.wav"
         audio_file.touch()
-        
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-        
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.side_effect = TranscriptionError("Transcription failed")
-        
+
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = TranscriptionError("Transcription failed")
+
         pipeline = Pipeline(api_key="test_key")
-        
+
         # Act & Assert
         with pytest.raises(PipelineError, match="Transcription failed: Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    @patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0)
-    @patch("audio_to_subs.core.pipeline.needs_splitting")
-    @patch("audio_to_subs.core.pipeline.SubtitleGenerator")
-    @patch("audio_to_subs.core.pipeline.TranscriptionClient")
-    @patch("audio_to_subs.core.pipeline.extract_audio")
-    def test_generate_subtitles_format_error(
-        self,
-        mock_extract,
-        mock_transcription_class,
-        mock_generator_class,
-        mock_needs_split,
-        mock_duration,
-        tmp_path,
-    ):
+    def test_generate_subtitles_format_error(self, mocked_pipeline_deps, tmp_path):
         """Test SubtitleFormatError in _generate_subtitles (line 302)."""
         from audio_to_subs.core.subtitle_generator import SubtitleFormatError
-        
+
         # Arrange
         video_file = tmp_path / "test.mp4"
         video_file.touch()
         audio_file = tmp_path / "audio.wav"
         audio_file.touch()
-        
-        mock_needs_split.return_value = False
-        mock_extract.return_value = str(audio_file)
-        
-        mock_transcription = MagicMock()
-        mock_transcription_class.return_value = mock_transcription
-        mock_transcription.transcribe_audio_with_timestamps.return_value = [
+
+        mocked_pipeline_deps["needs_splitting"].return_value = False
+        mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
+        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = [
             {"start": 0.0, "end": 2.5, "text": "Hello"},
         ]
-        
-        mock_generator = MagicMock()
-        mock_generator_class.return_value = mock_generator
-        mock_generator.generate.side_effect = SubtitleFormatError("Invalid format")
-        
+        mocked_pipeline_deps["generate"].side_effect = SubtitleFormatError("Invalid format")
+
         pipeline = Pipeline(api_key="test_key")
-        
+
         # Act & Assert
         with pytest.raises(PipelineError, match="Subtitle generation failed: Invalid format"):
             pipeline.process_video(str(video_file), "output.srt")
