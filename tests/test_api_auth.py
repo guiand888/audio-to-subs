@@ -20,7 +20,7 @@ class TestLogin:
         """Login with correct credentials returns 200 and a session cookie."""
         response = api_client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": "admin123"},
+            json={"username": "admin", "password": "test-secure-password-12345"},
         )
 
         assert response.status_code == 200
@@ -61,7 +61,7 @@ class TestMe:
         """GET /api/auth/me after login returns the current user."""
         login_response = api_client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": "admin123"},
+            json={"username": "admin", "password": "test-secure-password-12345"},
         )
 
         session_cookie = login_response.cookies.get("ats_session")
@@ -82,7 +82,7 @@ class TestLogout:
         """POST /api/auth/logout clears the session cookie."""
         login_response = api_client.post(
             "/api/auth/login",
-            json={"username": "admin", "password": "admin123"},
+            json={"username": "admin", "password": "test-secure-password-12345"},
         )
 
         session_cookie = login_response.cookies.get("ats_session")
