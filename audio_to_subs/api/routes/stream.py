@@ -4,7 +4,7 @@ import asyncio
 import json
 import logging
 from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from fastapi.responses import StreamingResponse
@@ -21,45 +21,73 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["stream"])
 
-# Global event queue for fan-out
-# This maps job_id -> asyncio.Queue for per-job events
-_job_event_queues: dict[str, asyncio.Queue] = {}
-_global_event_queue: asyncio.Queue | None = None
+# Per-subscriber queues for fair event distribution
+# Maps job_id -> list of (queue, client_id) tuples
+# Each client gets its own queue so events aren't lost to other clients
+_job_subscribers: dict[str, list[tuple[asyncio.Queue, str]]] = {}
+_global_subscribers: list[tuple[asyncio.Queue, str]] = []
 
 
-def _get_job_queue(job_id: str) -> asyncio.Queue:
-    """Get or create an event queue for a job."""
-    global _job_event_queues
-    if job_id not in _job_event_queues:
-        _job_event_queues[job_id] = asyncio.Queue()
-    return _job_event_queues[job_id]
+def _subscribe_job_stream(job_id: str, client_id: str) -> asyncio.Queue:
+    """Create a subscriber queue for a job stream.
+
+    Returns a queue that will receive all events for this job.
+    """
+    global _job_subscribers
+    queue = asyncio.Queue()
+    if job_id not in _job_subscribers:
+        _job_subscribers[job_id] = []
+    _job_subscribers[job_id].append((queue, client_id))
+    return queue
 
 
-def _get_global_queue() -> asyncio.Queue:
-    """Get or create the global event queue."""
-    global _global_event_queue
-    if _global_event_queue is None:
-        _global_event_queue = asyncio.Queue()
-    return _global_event_queue
+def _unsubscribe_job_stream(job_id: str, client_id: str) -> None:
+    """Remove a subscriber from a job stream."""
+    global _job_subscribers
+    if job_id in _job_subscribers:
+        _job_subscribers[job_id] = [
+            (q, cid) for q, cid in _job_subscribers[job_id] if cid != client_id
+        ]
+        if not _job_subscribers[job_id]:
+            del _job_subscribers[job_id]
+
+
+def _subscribe_global_stream(client_id: str) -> asyncio.Queue:
+    """Create a subscriber queue for the global stream."""
+    global _global_subscribers
+    queue = asyncio.Queue()
+    _global_subscribers.append((queue, client_id))
+    return queue
+
+
+def _unsubscribe_global_stream(client_id: str) -> None:
+    """Remove a subscriber from the global stream."""
+    global _global_subscribers
+    _global_subscribers = [(q, cid) for q, cid in _global_subscribers if cid != client_id]
 
 
 async def _event_generator(
     request: Request,
     job_id: str | None = None,
+    client_id: str | None = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events for a job or globally.
 
-    Polls the queue with a 1-second timeout so that client disconnect is
-    detected promptly rather than blocking forever on an empty queue.
+    Each client gets its own subscription queue so events aren't lost
+    to other clients. Polls with a 1-second timeout to detect disconnect.
 
     Args:
         request: FastAPI/Starlette request used to detect client disconnect.
         job_id: Specific job ID to stream, or None for global stream.
+        client_id: Unique ID for this client subscription.
     """
+    if client_id is None:
+        client_id = str(uuid4())
+
     if job_id:
-        queue = _get_job_queue(job_id)
+        queue = _subscribe_job_stream(job_id, client_id)
     else:
-        queue = _get_global_queue()
+        queue = _subscribe_global_stream(client_id)
 
     try:
         while True:
@@ -76,8 +104,11 @@ async def _event_generator(
     except Exception as e:
         logger.error("SSE error for job %s: %s", job_id, e)
     finally:
-        if job_id and job_id in _job_event_queues:
-            del _job_event_queues[job_id]
+        # Clean up subscription
+        if job_id:
+            _unsubscribe_job_stream(job_id, client_id)
+        else:
+            _unsubscribe_global_stream(client_id)
 
 
 @router.get("/stream")
@@ -128,24 +159,33 @@ async def job_stream(
 
 # Functions to publish events to SSE streams
 def publish_to_job_stream(job_id: str, event_data: dict[str, Any]) -> None:
-    """Publish an event to a job-specific SSE stream.
+    """Publish an event to all subscribers of a job-specific SSE stream.
 
     Args:
         job_id: Job ID to publish to
         event_data: Event data as dict
     """
-    queue = _get_job_queue(job_id)
-    queue.put_nowait(event_data)
+    global _job_subscribers
+    if job_id in _job_subscribers:
+        for queue, _ in _job_subscribers[job_id]:
+            try:
+                queue.put_nowait(event_data)
+            except asyncio.QueueFull:
+                logger.warning("SSE queue full for job %s, dropping event", job_id)
 
 
 def publish_to_global_stream(event_data: dict[str, Any]) -> None:
-    """Publish an event to the global SSE stream.
+    """Publish an event to all subscribers of the global SSE stream.
 
     Args:
         event_data: Event data as dict
     """
-    queue = _get_global_queue()
-    queue.put_nowait(event_data)
+    global _global_subscribers
+    for queue, _ in _global_subscribers:
+        try:
+            queue.put_nowait(event_data)
+        except asyncio.QueueFull:
+            logger.warning("SSE global queue full, dropping event")
 
 
 # Monkey-patch the queue events module to also publish to SSE
