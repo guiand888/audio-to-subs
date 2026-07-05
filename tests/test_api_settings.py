@@ -2,37 +2,10 @@
 
 import pytest
 
-from fastapi.testclient import TestClient
 
-from audio_to_subs.api.app import create_app
-
-
-# ---------------------------------------------------------------------------
-# API client fixture (scoped to each test via autouse _test_environment)
-# ---------------------------------------------------------------------------
-
-@pytest.fixture
-def client():
-    """TestClient backed by the per-test file DB (from _test_environment)."""
-    import audio_to_subs.db.base as db_base
-    import audio_to_subs.api.settings as api_settings
-    import audio_to_subs.auth.sessions as auth_sessions
-
-    db_base._async_engine = None
-    api_settings._settings = None
-    auth_sessions._session_manager = None
-
-    app = create_app()
-    return TestClient(app, raise_server_exceptions=False)
-
-
-# ---------------------------------------------------------------------------
-# Settings endpoint tests
-# ---------------------------------------------------------------------------
-
-def test_get_settings_empty_db(client):
+def test_get_settings_empty_db(api_client):
     """GET /api/settings returns default settings on a fresh database."""
-    response = client.get("/api/settings")
+    response = api_client.get("/api/settings")
 
     assert response.status_code == 200
     data = response.json()
@@ -43,9 +16,9 @@ def test_get_settings_empty_db(client):
     assert "default_output_format" in data
 
 
-def test_get_settings_with_data(client):
+def test_get_settings_with_data(api_client):
     """GET /api/settings returns a valid dict."""
-    response = client.get("/api/settings")
+    response = api_client.get("/api/settings")
 
     assert response.status_code == 200
     data = response.json()
@@ -57,9 +30,9 @@ def test_get_settings_with_data(client):
     assert "bazarr_timeout" in data
 
 
-def test_get_single_setting(client):
+def test_get_single_setting(api_client):
     """GET /api/settings/{key} returns the setting with its default value."""
-    response = client.get("/api/settings/mistral_model")
+    response = api_client.get("/api/settings/mistral_model")
 
     assert response.status_code == 200
     data = response.json()
@@ -69,17 +42,17 @@ def test_get_single_setting(client):
     assert data["key"] == "mistral_model"
 
 
-def test_get_nonexistent_setting(client):
+def test_get_nonexistent_setting(api_client):
     """GET /api/settings/{key} returns 404 for unknown keys."""
-    response = client.get("/api/settings/nonexistent_key_12345")
+    response = api_client.get("/api/settings/nonexistent_key_12345")
 
     assert response.status_code == 404
 
 
-def test_update_bazarr_settings(client):
+def test_update_bazarr_settings(api_client):
     """PATCH /api/settings can update Bazarr connection settings."""
     # First get current settings
-    response = client.get("/api/settings")
+    response = api_client.get("/api/settings")
     assert response.status_code == 200
     original_data = response.json()
 
@@ -90,7 +63,7 @@ def test_update_bazarr_settings(client):
         "bazarr_timeout": 45.0
     }
 
-    response = client.patch("/api/settings", json=update_data)
+    response = api_client.patch("/api/settings", json=update_data)
     assert response.status_code == 200
 
     updated_data = response.json()
@@ -99,7 +72,7 @@ def test_update_bazarr_settings(client):
     assert updated_data["bazarr_timeout"] == 45.0
     
     # Verify the update persisted
-    response = client.get("/api/settings")
+    response = api_client.get("/api/settings")
     assert response.status_code == 200
     data = response.json()
     assert data["bazarr_url"] == "http://test-bazarr:6767"
@@ -283,7 +256,7 @@ class TestBazarrConnectionTestEndpoint:
         """Test that the connection test endpoint exists and returns appropriate response."""
         # Without configuring Bazarr, the endpoint should still exist
         # and return an appropriate response
-        response = client.post("/api/settings/test-bazarr-connection")
+        response = api_client.post("/api/settings/test-bazarr-connection")
         
         # The endpoint should exist and return 200
         assert response.status_code == 200
@@ -301,11 +274,11 @@ class TestBazarrConnectionTestEndpoint:
             "bazarr_url": "http://localhost:6767",
             "bazarr_api_key": "test-api-key-123",
         }
-        client.patch("/api/settings", json=update_data)
+        api_client.patch("/api/settings", json=update_data)
         
         # Test the connection - will likely fail without real Bazarr,
         # but endpoint should exist and return structured response
-        response = client.post("/api/settings/test-bazarr-connection")
+        response = api_client.post("/api/settings/test-bazarr-connection")
         
         # Should return 200 with structured response
         assert response.status_code == 200
@@ -320,18 +293,18 @@ class TestBazarrConnectionTestEndpoint:
     def test_connection_test_uses_request_overrides_not_saved_settings(self, client):
         """Passing bazarr_url in the body should test those values, not saved settings."""
         # Save one (empty/unconfigured) set of settings.
-        client.patch(
+        api_client.patch(
             "/api/settings",
             json={"bazarr_url": "", "bazarr_api_key": ""},
         )
 
         # Without an override, the saved (empty) settings mean Bazarr isn't configured.
-        response = client.post("/api/settings/test-bazarr-connection")
+        response = api_client.post("/api/settings/test-bazarr-connection")
         assert response.json()["error"] == "bazarr_not_configured"
 
         # With an override in the body, the endpoint should attempt to use it
         # instead of reporting "not configured" from the saved settings.
-        response = client.post(
+        response = api_client.post(
             "/api/settings/test-bazarr-connection",
             json={
                 "bazarr_url": "http://localhost:6767",

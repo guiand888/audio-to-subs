@@ -4,13 +4,10 @@ import pytest
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from fastapi.testclient import TestClient
 
-from audio_to_subs.api.app import create_app
 from audio_to_subs.db.models import BazarrCache, Job, JobStatus, JobSource
 
 
-@pytest.fixture
 def test_client():
     """TestClient backed by the per-test file DB."""
     import audio_to_subs.db.base as db_base
