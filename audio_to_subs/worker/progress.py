@@ -93,21 +93,24 @@ class ProgressBridge:
                 message,
             )
 
+            # Capture the previous stage before any updates below can change it,
+            # so the stage-transition check isn't comparing stage against itself.
+            previous_stage = self._last_stage
+
             # Update DB with progress (debounced)
             current_time = time.monotonic()
             if (
                 percent != self._last_percent
-                or stage != self._last_stage
+                or stage != previous_stage
                 or current_time - self._last_db_update >= DB_UPDATE_DEBOUNCE
             ):
                 await self._update_job_progress(percent, stage, message)
                 self._last_percent = percent
                 self._last_db_update = current_time
-                # Assign _last_stage at the end to preserve old value for log check
                 self._last_stage = stage
 
-            # Write to job_logs on stage transitions (check before updating _last_stage)
-            if stage != self._last_stage:
+            # Write to job_logs on stage transitions
+            if stage != previous_stage:
                 await self._write_job_log(stage, message)
                 self._last_stage = stage
 
@@ -153,7 +156,7 @@ class ProgressBridge:
         """Write a log entry for stage transition."""
         try:
             log_entry = JobLog(
-                job_id=self.job_id,
+                job_id=str(self.job_id),
                 ts=datetime.now(timezone.utc),
                 level=LogLevel.INFO,
                 message=f"[{stage}] {message}",
