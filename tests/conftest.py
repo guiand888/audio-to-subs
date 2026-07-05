@@ -42,7 +42,7 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     monkeypatch.setenv("DATABASE_URL", db_url)
     monkeypatch.setenv("SESSION_SECRET", TEST_SESSION_SECRET)
     monkeypatch.setenv("ADMIN_USERNAME", "admin")
-    monkeypatch.setenv("ADMIN_PASSWORD", "admin123")
+    monkeypatch.setenv("ADMIN_PASSWORD", "test-secure-password-12345")
     monkeypatch.setenv("BEHIND_TLS", "false")
 
     # Reset module-level singletons so they re-read env on next access.
@@ -63,7 +63,7 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     sync_engine = create_engine(sync_url, connect_args={"check_same_thread": False})
     Base.metadata.create_all(sync_engine)
     with Session(sync_engine) as session:
-        session.add(User(username="admin", password_hash=hash_password("admin123")))
+        session.add(User(username="admin", password_hash=hash_password("test-secure-password-12345")))
         session.commit()
     sync_engine.dispose()
 

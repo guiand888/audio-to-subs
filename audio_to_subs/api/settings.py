@@ -2,7 +2,7 @@
 
 from pathlib import Path
 
-from pydantic import Field, ValidationInfo, field_validator
+from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 
@@ -173,6 +173,16 @@ class Settings(BaseSettings):
             except FileNotFoundError:
                 return None
         return None
+
+    @model_validator(mode="after")
+    def validate_session_secret_exists(self) -> "Settings":
+        """Ensure SESSION_SECRET is set or can be loaded from file."""
+        if not self.SESSION_SECRET:
+            raise ValueError(
+                "SESSION_SECRET must be set via environment variable or "
+                "SESSION_SECRET_FILE must point to a valid file containing the secret"
+            )
+        return self
 
     @property
     def admin_password(self) -> str | None:
