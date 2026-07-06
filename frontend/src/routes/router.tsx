@@ -22,11 +22,27 @@ const rootRoute = createRootRoute({
 
 // ── Public ───────────────────────────────────────────────────────────────────
 
+// Only same-origin relative paths are safe redirect targets; anything else
+// (missing, "/login" itself, or a "//host" style protocol-relative URL) falls
+// back to "/wanted". This is the single choke point for `next`, so LoginPage
+// and AppLayout never have to re-validate it themselves.
+function safeNext(value: unknown): string {
+  if (
+    typeof value === "string" &&
+    value.startsWith("/") &&
+    !value.startsWith("//") &&
+    value !== "/login"
+  ) {
+    return value
+  }
+  return "/wanted"
+}
+
 export const loginRoute = createRoute({
   getParentRoute: () => rootRoute,
   path: "/login",
   validateSearch: (search: Record<string, unknown>): { next: string } => ({
-    next: typeof search.next === "string" ? search.next : "/wanted",
+    next: safeNext(search.next),
   }),
   component: LoginPage,
 })

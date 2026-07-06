@@ -7,10 +7,20 @@ from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel
 
 from audio_to_subs.api.deps import SettingsDep
-from audio_to_subs.auth.deps import get_current_user, get_db
-from audio_to_subs.auth.passwords import verify_password
-from audio_to_subs.auth.sessions import SESSION_COOKIE_NAME, get_session_manager
+from audio_to_subs.auth.deps import get_current_user, get_db, get_session_manager_dep
+from audio_to_subs.auth.passwords import hash_password, verify_password
+from audio_to_subs.auth.sessions import (
+    SESSION_COOKIE_NAME,
+    SessionManager,
+    set_session_cookie,
+)
 from audio_to_subs.db.models import User
+
+# Precomputed hash for a password that will never match, used to keep the
+# login endpoint's timing constant when the username doesn't exist — otherwise
+# an unknown username short-circuits before the argon2id verify and its
+# response time leaks which usernames are registered.
+_DUMMY_PASSWORD_HASH = hash_password(SessionManager.generate_secret())
 
 router = APIRouter(prefix="/api/auth", tags=["auth"])
 
@@ -42,6 +52,7 @@ async def login(
     login_request: LoginRequest,
     db: Annotated[Any, Depends(get_db)],
     settings: SettingsDep,
+    session_manager: Annotated[SessionManager, Depends(get_session_manager_dep)],
 ) -> LoginResponse:
     """Login endpoint.
 
@@ -56,14 +67,12 @@ async def login(
     )
     user = result.scalar_one_or_none()
 
-    if user is None:
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail="Invalid username or password",
-        )
+    # Always verify against a hash, even for an unknown username, so the
+    # response time doesn't reveal whether the username exists.
+    password_hash = user.password_hash if user is not None else _DUMMY_PASSWORD_HASH
+    password_ok = verify_password(login_request.password, password_hash)
 
-    # Verify password
-    if not verify_password(login_request.password, user.password_hash):
+    if user is None or not password_ok:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -72,26 +81,10 @@ async def login(
     # Update last login time
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
-    await db.refresh(user)
 
     # Create session
-    session_manager = get_session_manager(
-        secret=settings.SESSION_SECRET,
-        secret_file=settings.SESSION_SECRET_FILE,
-    )
     token = session_manager.create_session(user.id)
-
-    # Set cookie
-    secure = settings.BEHIND_TLS
-    response.set_cookie(
-        key=SESSION_COOKIE_NAME,
-        value=token,
-        httponly=True,
-        samesite="lax",
-        path="/",
-        secure=secure,
-        max_age=30 * 24 * 3600,  # 30 days
-    )
+    set_session_cookie(response, token, secure=settings.BEHIND_TLS)
 
     return LoginResponse(user=UserOut(id=user.id, username=user.username))
 

@@ -9,6 +9,7 @@ import time
 from pathlib import Path
 from typing import Any
 
+from fastapi import Response
 from itsdangerous import URLSafeTimedSerializer
 
 logger = logging.getLogger(__name__)
@@ -167,6 +168,28 @@ class SessionManager:
         payload = self._serializer.loads(token, max_age=self._ttl)
         payload["iat"] = int(time.time())
         return self._serializer.dumps(payload)
+
+
+def set_session_cookie(response: Response, token: str, *, secure: bool) -> None:
+    """Set the session cookie with the standard attributes.
+
+    Shared by the login endpoint and the sliding-renewal path so both
+    always set the same cookie attributes.
+
+    Args:
+        response: FastAPI response to attach the cookie to
+        token: Signed session token
+        secure: Whether to mark the cookie secure (HTTPS-only)
+    """
+    response.set_cookie(
+        key=SESSION_COOKIE_NAME,
+        value=token,
+        httponly=True,
+        samesite="lax",
+        path="/",
+        secure=secure,
+        max_age=DEFAULT_SESSION_TTL,
+    )
 
 
 # Global session manager instance (lazy initialization)

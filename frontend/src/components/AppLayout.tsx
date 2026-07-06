@@ -37,9 +37,13 @@ export function AppLayout() {
   // Mount the global SSE stream exactly once
   useJobsStream()
 
-  // Redirect to /login if not authenticated
+  // Redirect to /login if not authenticated. The pathname !== "/login" guard
+  // prevents a self-referential redirect: navigate() updates the router's
+  // reactive location before this route's component tree fully unmounts, so
+  // without the guard this effect can re-fire mid-transition with pathname
+  // already "/login" and produce /login?next=%2Flogin.
   useEffect(() => {
-    if (!isLoading && !user) {
+    if (!isLoading && !user && pathname !== "/login") {
       void navigate({
         to: "/login",
         search: { next: pathname },

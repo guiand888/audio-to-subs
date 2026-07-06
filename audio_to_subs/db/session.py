@@ -5,16 +5,11 @@ Async and sync session factories for SQLAlchemy 2.x.
 
 from collections.abc import AsyncGenerator, Generator
 from contextlib import asynccontextmanager, contextmanager
-from typing import TYPE_CHECKING
 
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import Session
 
 from audio_to_subs.db.base import Base, get_async_engine, get_sync_engine
-
-if TYPE_CHECKING:
-    pass
-
 
 # Default DSN
 DEFAULT_ASYNC_DSN = "sqlite+aiosqlite:////data/audio-to-subs.db"

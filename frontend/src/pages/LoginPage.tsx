@@ -23,7 +23,7 @@ export function LoginPage() {
       { username, password },
       {
         onSuccess: () => {
-          void navigate({ to: next ?? "/wanted" })
+          void navigate({ to: next })
         },
         onError: (err) => {
           if (err instanceof ApiError && err.status === 401) {

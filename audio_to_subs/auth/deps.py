@@ -12,6 +12,7 @@ from audio_to_subs.auth.sessions import (
     SLIDING_RENEWAL_THRESHOLD,
     SessionManager,
     get_session_manager,
+    set_session_cookie,
 )
 from audio_to_subs.db.models import User
 from audio_to_subs.db.session import get_async_session
@@ -159,15 +160,7 @@ async def get_current_user(
     iat = payload.get("iat", 0)
     if (time.time() - iat) > SLIDING_RENEWAL_THRESHOLD:
         new_token = session_manager.renew_session(token)
-        response.set_cookie(
-            key=SESSION_COOKIE_NAME,
-            value=new_token,
-            httponly=True,
-            samesite="lax",
-            path="/",
-            secure=settings.BEHIND_TLS,  # Match login cookie security setting
-            max_age=30 * 24 * 3600,  # 30 days
-        )
+        set_session_cookie(response, new_token, secure=settings.BEHIND_TLS)
 
     return user
 
