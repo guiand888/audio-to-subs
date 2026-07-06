@@ -1,12 +1,12 @@
 // History page: table of completed jobs with aggregate statistics.
 // Fetches from GET /api/history with pagination and filters.
 
-import { useState, useEffect, useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useState, useEffect } from "react"
 import { ChevronLeft, ChevronRight, Filter } from "lucide-react"
 
-import { api } from "@/lib/api"
-import type { HistoryResponse, HistoryFilters, JobStatus, JobSource } from "@/lib/types"
+import { useHistory } from "@/hooks/useHistory"
+import { formatCost, formatDuration } from "@/lib/utils"
+import type { HistoryFilters, HistoryResponse, JobStatus, JobSource } from "@/lib/types"
 
 // Import from shadcn/ui
 import { Button } from "@/components/ui/button"
@@ -42,27 +42,6 @@ const SOURCE_OPTIONS: { value: JobSource; label: string }[] = [
   { value: "bazarr_episode", label: "Bazarr Episode" },
   { value: "manual", label: "Manual" },
 ]
-
-// Format cost as USD
-function formatCost(cost: number | null | undefined): string {
-  if (cost === null || cost === undefined) return "—"
-  if (cost === 0) return "$0.00"
-  if (cost < 0.01) return `$${cost.toFixed(4)}`
-  if (cost < 1) return `$${cost.toFixed(2)}`
-  return `$${cost.toFixed(2)}`
-}
-
-// Format duration as human-readable string
-function formatDuration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined) return "—"
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const minutes = Math.floor(seconds / 60)
-  const secs = Math.round(seconds % 60)
-  if (minutes < 60) return `${minutes}m ${secs}s`
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  return `${hours}h ${mins}m`
-}
 
 // Truncate a path for display
 function truncatePath(path: string, maxLength: number = 50): string {
@@ -233,26 +212,7 @@ export function HistoryPage() {
   const [filters, setFilters] = useState<HistoryFilters>({ offset: 0, limit: 20 })
   const [page, setPage] = useState(0)
 
-  // Build query string from filters
-  const params = useMemo(() => {
-    const p = new URLSearchParams()
-    if (filters.status_filter?.length) {
-      filters.status_filter.forEach((s) => p.append("status_filter", s))
-    }
-    if (filters.source_filter) p.set("source_filter", filters.source_filter)
-    if (filters.language_filter) p.set("language_filter", filters.language_filter)
-    if (filters.since) p.set("since", filters.since)
-    if (filters.until) p.set("until", filters.until)
-    p.set("limit", String(filters.limit || 20))
-    p.set("offset", String(filters.offset || 0))
-    return p.toString()
-  }, [filters])
-
-  const { data, isLoading, isError } = useQuery({
-    queryKey: ["history", filters],
-    queryFn: () => api.get<HistoryResponse>(`/api/history?${params}`),
-    staleTime: 30_000,
-  })
+  const { data, isLoading, isError } = useHistory(filters)
 
   // Sync page state with filters
   useEffect(() => {

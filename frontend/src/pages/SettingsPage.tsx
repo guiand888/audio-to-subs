@@ -8,7 +8,7 @@ import { Check, Plus, Trash2, Loader2 } from "lucide-react"
 import { toast } from "sonner"
 
 import { api } from "@/lib/api"
-import type { SettingsOut, SettingsPatch } from "@/lib/types"
+import type { SettingsOut, SettingsPatch, BazarrConnectionTestResponse } from "@/lib/types"
 
 // Import from shadcn/ui
 import { Button } from "@/components/ui/button"
@@ -269,7 +269,7 @@ export function SettingsPage() {
     try {
       // Send the current (possibly unsaved) form values so the test reflects
       // what the user is looking at, not just what was last saved.
-      const data = await api.post("/api/settings/test-bazarr-connection", {
+      const data = await api.post<BazarrConnectionTestResponse>("/api/settings/test-bazarr-connection", {
         bazarr_url: formData.bazarr_url,
         bazarr_api_key: formData.bazarr_api_key,
         bazarr_timeout: formData.bazarr_timeout,

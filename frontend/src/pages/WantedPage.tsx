@@ -35,8 +35,9 @@ import {
 } from "@/components/ui/select"
 import { useWanted } from "@/hooks/useWanted"
 import { useCreateJob } from "@/hooks/useJobs"
+import { useRefreshWanted } from "@/hooks/useRefreshWanted"
 import { useJobsStore } from "@/lib/jobsStore"
-import { ApiError, api } from "@/lib/api"
+import { ApiError } from "@/lib/api"
 import type { MissingSubtitle, OutputFormat, WantedItem } from "@/lib/types"
 
 type ItemType = "all" | "movie" | "episode"
@@ -184,7 +185,7 @@ export function WantedPage() {
   const [langFilter, setLangFilter] = useState<string>("")
   const [page, setPage] = useState(1)
   const [transcribeItem, setTranscribeItem] = useState<WantedItem | null>(null)
-  
+
   // Refresh state
   const [refreshScope, setRefreshScope] = useState<ItemType>("all")
   const [refreshStatus, setRefreshStatus] = useState<
@@ -199,32 +200,43 @@ export function WantedPage() {
     }
   }, [lastTerminalJobId, queryClient])
 
+  // Refresh mutation
+  const refreshMutation = useRefreshWanted()
+
   // Refresh wanted list handler
-  const handleRefresh = async () => {
+  const handleRefresh = () => {
     setRefreshStatus("refreshing")
-    try {
-      const data = await api.post("/api/wanted/refresh", {
-        item_type: refreshScope,
-      })
-      if (data.status === "completed") {
-        setRefreshStatus("success")
-        toast.success(
-          `Refreshed ${data.movies_processed} movies and ${data.episodes_processed} episodes`
-        )
-        // Invalidate the wanted query to refresh the UI
-        void queryClient.invalidateQueries({ queryKey: ["wanted"] })
-      } else {
-        setRefreshStatus("error")
-        toast.error(data.error || "Failed to refresh wanted list")
-      }
-    } catch (error) {
-      setRefreshStatus("error")
-      const errorMessage = error instanceof Error ? error.message : "Unknown error"
-      toast.error("Failed to refresh wanted list: " + errorMessage)
-    } finally {
-      // Reset status after a delay
-      setTimeout(() => setRefreshStatus("idle"), 3000)
-    }
+    refreshMutation.mutate(
+      { item_type: refreshScope },
+      {
+        onSuccess: (data) => {
+          if (data.status === "completed") {
+            setRefreshStatus("success")
+            toast.success(
+              `Refreshed ${data.movies_processed} movies and ${data.episodes_processed} episodes`
+            )
+            // Invalidate the wanted query to refresh the UI
+            void queryClient.invalidateQueries({ queryKey: ["wanted"] })
+          } else {
+            setRefreshStatus("error")
+            toast.error(data.error || "Failed to refresh wanted list")
+          }
+        },
+        onError: (error) => {
+          setRefreshStatus("error")
+          if (error instanceof ApiError) {
+            toast.error(`Failed to refresh wanted list: ${error.detail}`)
+          } else {
+            const errorMessage = error instanceof Error ? error.message : "Unknown error"
+            toast.error("Failed to refresh wanted list: " + errorMessage)
+          }
+        },
+        onSettled: () => {
+          // Reset status after a delay
+          setTimeout(() => setRefreshStatus("idle"), 3000)
+        },
+      },
+    )
   }
 
   const { data, isLoading } = useWanted({
