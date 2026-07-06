@@ -113,15 +113,15 @@ def mock_audio_extractor_minimal():
 def setup_bdd_environment():
     """Auto-setup for all BDD tests.
 
-    Provides mocking of get_audio_duration and needs_splitting so tests
-    don't need to probe real audio files. This keeps the boundary of
-    mocking at the Mistral API level while letting extract_audio run for real
-    (which allows us to test error handling on invalid files).
+    Provides mocking of get_audio_duration so tests don't need to probe real
+    audio files. This keeps the boundary of mocking at the Mistral API level
+    while letting extract_audio run for real (which allows us to test error
+    handling on invalid files). The mocked duration (10.0s) stays well under
+    MAX_AUDIO_LENGTH (900s), so pipeline.py's splitting branch is naturally
+    not taken without needing a separate needs_splitting patch (that helper
+    no longer exists post-D6; pipeline.py now compares duration directly).
     """
     # Mock get_audio_duration to return a reasonable value
     # This is OK because we're not testing audio duration logic here
     with patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=10.0):
-        # Mock needs_splitting to return False (don't split audio)
-        # This is OK because we're not testing splitting logic here
-        with patch('audio_to_subs.core.pipeline.needs_splitting', return_value=False):
-            yield
+        yield

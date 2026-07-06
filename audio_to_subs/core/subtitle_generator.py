@@ -69,25 +69,14 @@ def segment_text(text: str, max_chars: int = 42) -> list[str]:
         return [text]
 
     lines = []
-    current_paragraph_words = []
 
-    # Split by existing newlines first
-    paragraphs = text.split("\n")
-
-    for paragraph in paragraphs:
+    # Each newline-delimited paragraph is fitted independently so an
+    # existing newline always forces a line break, even when the
+    # surrounding words would otherwise fit together under max_chars.
+    for paragraph in text.split("\n"):
         if not paragraph.strip():
-            # Empty paragraph: flush current words and add separator
-            if current_paragraph_words:
-                lines.extend(_fit_words_to_lines(current_paragraph_words, max_chars))
-                current_paragraph_words = []
             continue
-
-        # Add words from this paragraph
-        current_paragraph_words.extend(paragraph.split(" "))
-
-    # Flush any remaining words
-    if current_paragraph_words:
-        lines.extend(_fit_words_to_lines(current_paragraph_words, max_chars))
+        lines.extend(_fit_words_to_lines(paragraph.split(" "), max_chars))
 
     return lines
 

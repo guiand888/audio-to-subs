@@ -281,9 +281,9 @@ class TestTranscriptionClient:
 
         # Assert
         assert result == "Test transcription"
-        # Verify timeout was passed to the API call
+        # Verify timeout was passed to the API call (SDK expects timeout_ms)
         call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
-        assert call_kwargs.get("timeout") == 120.0
+        assert call_kwargs.get("timeout_ms") == 120_000
 
     @patch("audio_to_subs.core.transcription_client.os.path.getsize")
     @patch("audio_to_subs.core.transcription_client.Path.exists")
@@ -406,6 +406,6 @@ class TestTranscriptionClient:
 
         # Assert
         assert result == []
-        # Verify timeout was passed to the API call
+        # Verify timeout was passed to the API call (SDK expects timeout_ms)
         call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
-        assert call_kwargs.get("timeout") == 90.0
+        assert call_kwargs.get("timeout_ms") == 90_000

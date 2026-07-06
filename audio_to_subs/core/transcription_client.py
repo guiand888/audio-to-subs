@@ -138,7 +138,7 @@ class TranscriptionClient:
         Raises:
             Exception: On API error after all retries exhausted
         """
-        kwargs = {"model": model, "file": file_obj, "timeout": timeout}
+        kwargs = {"model": model, "file": file_obj, "timeout_ms": int(timeout * 1000)}
         if language:
             kwargs["language"] = language
         return self.client.audio.transcriptions.complete(**kwargs)
@@ -169,7 +169,7 @@ class TranscriptionClient:
             "model": model,
             "file": file_obj,
             "timestamp_granularities": ["segment"],
-            "timeout": timeout,
+            "timeout_ms": int(timeout * 1000),
         }
         return self.client.audio.transcriptions.complete(**kwargs)
 
