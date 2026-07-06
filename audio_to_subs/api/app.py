@@ -2,31 +2,30 @@
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Any
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from audio_to_subs.api.routes import auth, healthz
+from audio_to_subs.api.routes.history import router as history_router
 from audio_to_subs.api.routes.jobs import router as jobs_router
-from audio_to_subs.api.routes.stream import router as stream_router
 from audio_to_subs.api.routes.logs import (
-    router as jobs_logs_router,
     global_logs_router,
 )
+from audio_to_subs.api.routes.logs import (
+    router as jobs_logs_router,
+)
 from audio_to_subs.api.routes.settings import router as settings_router
+from audio_to_subs.api.routes.stream import router as stream_router
 from audio_to_subs.api.routes.wanted import router as wanted_router
-from audio_to_subs.api.routes.history import router as history_router
 from audio_to_subs.api.settings import get_settings
 from audio_to_subs.auth.bootstrap import bootstrap_admin
 from audio_to_subs.bazarr.poller import start_poller, stop_poller
 from audio_to_subs.queue_.reaper import reap_stale_running
 
 logger = logging.getLogger(__name__)
-
-# Global reaper task
-_reaper_task: asyncio.Task | None = None
 
 
 @asynccontextmanager
@@ -87,9 +86,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             logger.error("Admin bootstrap failed: %s", str(e))
             raise RuntimeError(str(e)) from e
 
-    # Start reaper task
-    global _reaper_task
-    _reaper_task = asyncio.create_task(
+    # Start reaper task, scoped to this app instance via app.state (not a
+    # module-level global) so multiple create_app() instances (e.g. in tests)
+    # don't leak reaper tasks across each other.
+    app.state.reaper_task = asyncio.create_task(
         _run_reaper_periodically(settings.DATABASE_URL)
     )
     logger.info("Reaper task started")
@@ -112,10 +112,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     await stop_poller(app)
 
     # Cancel reaper task
-    if _reaper_task:
-        _reaper_task.cancel()
+    reaper_task = getattr(app.state, "reaper_task", None)
+    if reaper_task:
+        reaper_task.cancel()
         try:
-            await _reaper_task
+            await reaper_task
         except asyncio.CancelledError:
             pass
 
@@ -177,6 +178,7 @@ def create_app() -> FastAPI:
 
     # All other routers require authentication
     from audio_to_subs.auth.deps import get_current_user
+
     auth_dependency = Depends(get_current_user)
 
     app.include_router(settings_router, dependencies=[auth_dependency])
