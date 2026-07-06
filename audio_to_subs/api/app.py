@@ -42,6 +42,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     # Startup
     logger.info("Starting up...")
 
+    # Register SSE observers with events module
+    from audio_to_subs.api.routes.stream import register_observers
+
+    register_observers()
+
     # Run migrations (Alembic is the single source of truth for the schema)
     # Run in thread pool to avoid blocking the event loop
     logger.info("Running database migrations...")
@@ -210,7 +215,7 @@ def get_app() -> FastAPI:
 
 # For running with uvicorn: uvicorn audio_to_subs.api.app:app
 # Defer app creation if running under pytest (autouse fixture will set up env)
-import sys
+import sys  # noqa: E402
 
 if "pytest" not in sys.modules:
     app = create_app()

@@ -3,18 +3,18 @@
 import asyncio
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated, Any, AsyncGenerator
+from collections.abc import AsyncGenerator
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID, uuid4
 
 from fastapi import APIRouter, Depends, Request
-from fastapi.responses import StreamingResponse
 from sse_starlette.sse import EventSourceResponse
 
-from audio_to_subs.api.deps import SettingsDep, get_db
+from audio_to_subs.api.deps import SettingsDep, get_db, get_redis
 from audio_to_subs.api.routes._helpers import get_job_or_404
-from audio_to_subs.db.models import JobStatus
 
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -68,20 +68,66 @@ def _unsubscribe_global_stream(client_id: str) -> None:
     ]
 
 
-async def _event_generator(
+async def _redis_listener_coro(
+    redis: "Redis",
+    queue: asyncio.Queue,
+    channels: list[str],
+    client_id: str,
+) -> None:
+    """Listen to Redis channels and forward events to queue.
+
+    Args:
+        redis: Redis async client
+        queue: Queue to put events into
+        channels: List of Redis channels to subscribe to
+        client_id: Client ID for logging purposes
+    """
+    try:
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(*channels)
+        logger.debug(f"SSE client {client_id} subscribed to Redis channels: {channels}")
+
+        while True:
+            try:
+                message = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=2.0)
+                if message and message.get("type") == "message":
+                    try:
+                        data = json.loads(message["data"])
+                        await queue.put(data)
+                    except (json.JSONDecodeError, ValueError) as e:
+                        logger.error(f"Failed to parse Redis message: {e}")
+            except asyncio.TimeoutError:
+                continue
+    except asyncio.CancelledError:
+        logger.debug(f"Redis listener cancelled for SSE client {client_id}")
+        raise
+    except Exception as e:
+        logger.error(f"Error in Redis listener for SSE client {client_id}: {e}")
+    finally:
+        try:
+            await pubsub.unsubscribe()
+            await pubsub.close()
+        except Exception as e:
+            logger.debug(f"Error closing Redis pubsub: {e}")
+
+
+async def _event_generator(  # noqa: C901
     request: Request,
     job_id: str | None = None,
     client_id: str | None = None,
+    redis: "Redis | None" = None,
 ) -> AsyncGenerator[str, None]:
     """Generate SSE events for a job or globally.
 
     Each client gets its own subscription queue so events aren't lost
     to other clients. Polls with a 1-second timeout to detect disconnect.
+    Also subscribes to Redis channels for multi-worker event distribution.
 
     Args:
         request: FastAPI/Starlette request used to detect client disconnect.
         job_id: Specific job ID to stream, or None for global stream.
         client_id: Unique ID for this client subscription.
+        redis: Redis async client for subscribing to events from other workers.
     """
     if client_id is None:
         client_id = str(uuid4())
@@ -90,6 +136,22 @@ async def _event_generator(
         queue = _subscribe_job_stream(job_id, client_id)
     else:
         queue = _subscribe_global_stream(client_id)
+
+    # Background task to listen to Redis events
+    redis_listener_task = None
+    if redis:
+        if job_id:
+            channels = [
+                f"jobs:progress:{job_id}",
+                f"jobs:done:{job_id}",
+                f"jobs:cancel:{job_id}",
+            ]
+        else:
+            channels = ["jobs:global"]
+
+        redis_listener_task = asyncio.create_task(
+            _redis_listener_coro(redis, queue, channels, client_id)
+        )
 
     try:
         while True:
@@ -112,11 +174,20 @@ async def _event_generator(
         else:
             _unsubscribe_global_stream(client_id)
 
+        # Cancel Redis listener
+        if redis_listener_task:
+            redis_listener_task.cancel()
+            try:
+                await redis_listener_task
+            except asyncio.CancelledError:
+                pass
+
 
 @router.get("/stream")
 async def global_stream(
     request: Request,
     settings: SettingsDep,
+    redis: Annotated["Redis", Depends(get_redis)],
 ) -> EventSourceResponse:
     """Global SSE stream for all job events.
 
@@ -124,7 +195,7 @@ async def global_stream(
     job lifecycle events (new, progress, cancel, done).
     """
     return EventSourceResponse(
-        _event_generator(request, None),
+        _event_generator(request, None, redis=redis),
         media_type="text/event-stream",
     )
 
@@ -135,6 +206,7 @@ async def job_stream(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
+    redis: Annotated["Redis", Depends(get_redis)],
 ) -> EventSourceResponse:
     """Per-job SSE stream for progress updates.
 
@@ -145,14 +217,16 @@ async def job_stream(
     await get_job_or_404(db, job_id)
 
     return EventSourceResponse(
-        _event_generator(request, str(job_id)),
+        _event_generator(request, str(job_id), redis=redis),
         media_type="text/event-stream",
     )
 
 
-# Functions to publish events to SSE streams
-def publish_to_job_stream(job_id: str, event_data: dict[str, Any]) -> None:
+# Functions to publish events to SSE streams (used as observer callbacks)
+async def publish_to_job_stream(job_id: str, event_data: dict[str, Any]) -> None:
     """Publish an event to all subscribers of a job-specific SSE stream.
+
+    This is registered as an observer callback with events.py.
 
     Args:
         job_id: Job ID to publish to
@@ -167,8 +241,10 @@ def publish_to_job_stream(job_id: str, event_data: dict[str, Any]) -> None:
                 logger.warning("SSE queue full for job %s, dropping event", job_id)
 
 
-def publish_to_global_stream(event_data: dict[str, Any]) -> None:
+async def publish_to_global_stream(event_data: dict[str, Any]) -> None:
     """Publish an event to all subscribers of the global SSE stream.
+
+    This is registered as an observer callback with events.py.
 
     Args:
         event_data: Event data as dict
@@ -181,69 +257,14 @@ def publish_to_global_stream(event_data: dict[str, Any]) -> None:
             logger.warning("SSE global queue full, dropping event")
 
 
-# Monkey-patch the queue events module to also publish to SSE
-import audio_to_subs.queue_.events as events_module
+def register_observers() -> None:
+    """Register SSE callbacks with the events module.
 
-_original_publish_new = events_module.publish_new
-_original_publish_progress = events_module.publish_progress
-_original_publish_cancel = events_module.publish_cancel
-_original_publish_done = events_module.publish_done
+    Called during app startup to establish the observer callbacks
+    for SSE event publishing.
+    """
+    from audio_to_subs.queue_ import events
 
-
-async def patched_publish_new(redis, job_id: str) -> None:
-    """Publish new job and also to SSE streams."""
-    await _original_publish_new(redis, job_id)
-    publish_to_job_stream(job_id, {"event": "new", "job_id": job_id})
-    publish_to_global_stream({"event": "new", "job_id": job_id})
-
-
-async def patched_publish_progress(
-    redis, job_id: str, percent: int, stage: str, message: str
-) -> None:
-    """Publish progress and also to SSE streams."""
-    await _original_publish_progress(redis, job_id, percent, stage, message)
-    publish_to_job_stream(
-        job_id,
-        {
-            "event": "progress",
-            "job_id": job_id,
-            "percent": percent,
-            "stage": stage,
-            "message": message,
-        },
-    )
-    publish_to_global_stream(
-        {
-            "event": "progress",
-            "job_id": job_id,
-            "percent": percent,
-            "stage": stage,
-            "message": message,
-        }
-    )
-
-
-async def patched_publish_cancel(redis, job_id: str) -> None:
-    """Publish cancel and also to SSE streams."""
-    await _original_publish_cancel(redis, job_id)
-    publish_to_job_stream(job_id, {"event": "cancel", "job_id": job_id})
-    publish_to_global_stream({"event": "cancel", "job_id": job_id})
-
-
-async def patched_publish_done(
-    redis, job_id: str, status: str, error: str | None = None
-) -> None:
-    """Publish done and also to SSE streams."""
-    await _original_publish_done(redis, job_id, status, error)
-    payload = {"event": "done", "job_id": job_id, "status": status}
-    if error:
-        payload["error"] = error
-    publish_to_job_stream(job_id, payload)
-    publish_to_global_stream(payload)
-
-
-# Apply patches
-events_module.publish_new = patched_publish_new
-events_module.publish_progress = patched_publish_progress
-events_module.publish_cancel = patched_publish_cancel
-events_module.publish_done = patched_publish_done
+    events.register_job_stream_observer(publish_to_job_stream)
+    events.register_global_stream_observer(publish_to_global_stream)
+    logger.info("Registered SSE observers with events module")
