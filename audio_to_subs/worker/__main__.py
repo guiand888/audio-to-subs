@@ -26,9 +26,9 @@ from redis.asyncio import Redis
 
 from audio_to_subs.api.settings import Settings, get_settings
 from audio_to_subs.db.session import get_async_session
-from audio_to_subs.queue_.claim import claim_one
+from audio_to_subs.queue_.claim import ClaimedJob, claim_one
 from audio_to_subs.queue_.reaper import reap_stale_running
-from audio_to_subs.worker.runner import run_job, persist_result, WorkerDeps
+from audio_to_subs.worker.runner import WorkerDeps, persist_result, run_job
 
 logger = logging.getLogger(__name__)
 
@@ -79,7 +79,7 @@ class Worker:
 
         This is the main worker loop:
         1. Try to claim a job
-        2. If claimed, run it
+        2. If claimed, run it (or mark failed if setup/execution raises)
         3. If no job available, wait for notification
         """
         if self._settings is None or self._redis is None:
@@ -88,6 +88,7 @@ class Worker:
         dsn = self._settings.DATABASE_URL
 
         while not self._shutdown:
+            claimed: ClaimedJob | None = None
             try:
                 # Claim in a short-lived session so the SQLite write lock is
                 # released immediately whether or not a job was available.
@@ -109,9 +110,7 @@ class Worker:
                 # result) commit per-event, keeping every transaction short.
                 async with get_async_session(dsn) as session:
                     if mistral_api_key is None:
-                        logger.error(
-                            "MISTRAL_API_KEY not configured. Cannot run job."
-                        )
+                        logger.error("MISTRAL_API_KEY not configured. Cannot run job.")
                         await self._mark_job_failed(
                             session, claimed.id, "Missing Mistral API key"
                         )
@@ -122,6 +121,7 @@ class Worker:
                         redis=self._redis,
                         settings=self._settings,
                         mistral_api_key=mistral_api_key,
+                        database_url=dsn,
                     )
 
                     result = await run_job(claimed, deps)
@@ -134,6 +134,18 @@ class Worker:
 
             except Exception as e:
                 logger.error(f"Worker {self._worker_id} error: {e}")
+                # If we claimed a job but it failed during setup or execution,
+                # mark it as failed (D15 fix: don't let the outer loop die).
+                if claimed is not None:
+                    try:
+                        async with get_async_session(dsn) as session:
+                            await self._mark_job_failed(
+                                session, claimed.id, f"Worker error: {str(e)}"
+                            )
+                    except Exception as mark_failed_error:
+                        logger.error(
+                            f"Failed to mark job {claimed.id} as failed: {mark_failed_error}"
+                        )
                 await asyncio.sleep(1)
 
     async def _mark_job_failed(
@@ -161,6 +173,7 @@ class Worker:
 
 def handle_shutdown(worker: Worker) -> None:
     """Handle shutdown signals."""
+
     def shutdown(signame: str) -> None:
         logger.info(f"Received signal {signame}, shutting down...")
         worker._shutdown = True

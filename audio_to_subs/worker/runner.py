@@ -7,28 +7,27 @@ progress tracking, and cost computation.
 import asyncio
 import json
 import logging
-import os
-import time
-from dataclasses import dataclass, field
+from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import text, select
+from sqlalchemy import select, text
 from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.core.cancel import Cancelled, CancelToken
-from audio_to_subs.core.cost import compute_cost, extract_usage, CostBreakdown
+from audio_to_subs.core.cost import compute_cost
 from audio_to_subs.core.path_utils import generate_output_path
 from audio_to_subs.core.pipeline import Pipeline, PipelineResult
-from audio_to_subs.db.models import Job, JobStatus, JobLog, LogLevel, Setting
+from audio_to_subs.db.models import JobLog, JobStatus, LogLevel, Setting
 from audio_to_subs.queue_.claim import ClaimedJob
 from audio_to_subs.queue_.events import publish_done
 from audio_to_subs.worker.progress import ProgressBridge
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
     from redis.asyncio import Redis
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from audio_to_subs.api.settings import Settings
 
 logger = logging.getLogger(__name__)
@@ -43,12 +42,14 @@ class WorkerDeps:
         redis: Redis async client
         settings: Application settings
         mistral_api_key: Mistral API key for transcription
+        database_url: Database connection URL for creating per-write sessions
     """
 
     session: "AsyncSession"
     redis: "Redis"
     settings: "Settings"
     mistral_api_key: str
+    database_url: str
 
 
 @dataclass
@@ -144,6 +145,7 @@ async def _get_db_settings(session: "AsyncSession") -> dict[str, Any]:
                 if setting.value_json:
                     try:
                         import json
+
                         value = json.loads(value)
                     except (json.JSONDecodeError, TypeError):
                         value = setting.value
@@ -179,9 +181,9 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
 
     # Create progress bridge. The pipeline runs in a thread and calls
     # bridge.on_event synchronously; the bridge marshals DB/Redis writes back
-    # onto this loop.
+    # onto this loop using per-write sessions to avoid concurrent access issues.
     bridge = ProgressBridge(
-        session=deps.session,
+        database_url=deps.database_url,
         redis=deps.redis,
         job_id=job_id,
         token=token,
@@ -195,23 +197,22 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
     # Use DB settings with env defaults as fallback
     subtitles_same_dir = db_settings.get(
         "SUBTITLES_SAME_DIRECTORY",
-        getattr(deps.settings, "SUBTITLES_SAME_DIRECTORY", True)
+        getattr(deps.settings, "SUBTITLES_SAME_DIRECTORY", True),
     )
     mistral_model = db_settings.get(
-        "mistral_model",
-        getattr(deps.settings, "mistral_model", "voxtral-mini-2602")
+        "mistral_model", getattr(deps.settings, "mistral_model", "voxtral-mini-2602")
     )
     mistral_rate = db_settings.get(
         "mistral_rate_usd_per_minute",
-        getattr(deps.settings, "mistral_rate_usd_per_minute", 0.0)
+        getattr(deps.settings, "mistral_rate_usd_per_minute", 0.0),
     )
     input_token_rate = db_settings.get(
         "mistral_input_token_rate_usd",
-        getattr(deps.settings, "mistral_input_token_rate_usd", None)
+        getattr(deps.settings, "mistral_input_token_rate_usd", None),
     )
     output_token_rate = db_settings.get(
         "mistral_output_token_rate_usd",
-        getattr(deps.settings, "mistral_output_token_rate_usd", None)
+        getattr(deps.settings, "mistral_output_token_rate_usd", None),
     )
 
     # Build output path if not provided
@@ -271,9 +272,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
             elif claimed.source == JobSource.BAZARR_EPISODE:
                 await _rescan_bazarr_episode(deps, claimed.source_ref, job_id)
         except Exception as e:
-            logger.warning(
-                f"Failed to trigger Bazarr rescan for job {job_id}: {e}"
-            )
+            logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
             # Log but don't fail the job - this is best-effort
             await persist_log(
                 deps.session,
@@ -288,9 +287,9 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         return JobResult(
             status=JobStatus.DONE,
             audio_duration_seconds=result.audio_duration_seconds,
-            mistral_usage_json=json.dumps(result.mistral_usage)
-            if result.mistral_usage
-            else None,
+            mistral_usage_json=(
+                json.dumps(result.mistral_usage) if result.mistral_usage else None
+            ),
             estimated_cost_usd=cost_breakdown.estimated_cost_usd,
         )
 
@@ -351,8 +350,8 @@ async def _rescan_bazarr_movie(
         from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
 
         # Get Bazarr client using database settings first, then environment fallback
-        client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
-            deps.session, deps.settings
+        client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+            await get_bazarr_client_with_settings(deps.session, deps.settings)
         )
 
         if client is None:
@@ -374,9 +373,7 @@ async def _rescan_bazarr_movie(
             f"Invalid source_ref for Bazarr movie job {job_id}: {source_ref}"
         )
     except Exception as e:
-        logger.warning(
-            f"Bazarr movie rescan failed for job {job_id}: {e}"
-        )
+        logger.warning(f"Bazarr movie rescan failed for job {job_id}: {e}")
         raise
 
 
@@ -403,8 +400,8 @@ async def _rescan_bazarr_episode(
         from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
 
         # Get Bazarr client using database settings first, then environment fallback
-        client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
-            deps.session, deps.settings
+        client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+            await get_bazarr_client_with_settings(deps.session, deps.settings)
         )
 
         if client is None:
@@ -447,7 +444,5 @@ async def _rescan_bazarr_episode(
             f"Invalid source_ref for Bazarr episode job {job_id}: {source_ref}"
         )
     except Exception as e:
-        logger.warning(
-            f"Bazarr episode rescan failed for job {job_id}: {e}"
-        )
+        logger.warning(f"Bazarr episode rescan failed for job {job_id}: {e}")
         raise
