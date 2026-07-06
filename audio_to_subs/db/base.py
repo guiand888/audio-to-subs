@@ -4,17 +4,13 @@ SQLite with WAL mode for concurrent read/write access.
 SQLAlchemy 2.x ORM.
 """
 
-from typing import AsyncGenerator
-
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (
     AsyncEngine,
-    AsyncSession,
-    async_sessionmaker,
     create_async_engine,
 )
-from sqlalchemy.orm import DeclarativeBase, sessionmaker
+from sqlalchemy.orm import DeclarativeBase
 
 # WAL pragmas to apply on every new connection
 WAL_PRAGMAS = {
@@ -99,64 +95,8 @@ def get_sync_engine(dsn: str) -> Engine:
 
     global _sync_engine
     if _sync_engine is None:
-        _sync_engine = create_engine(dsn.replace("sqlite+aiosqlite", "sqlite"), echo=False)
+        _sync_engine = create_engine(
+            dsn.replace("sqlite+aiosqlite", "sqlite"), echo=False
+        )
         _install_sqlite_listeners(_sync_engine)
     return _sync_engine
-
-
-# Async session factory
-_async_sessionmakers: dict[int, async_sessionmaker] = {}
-
-
-def get_async_sessionmaker(engine: AsyncEngine) -> async_sessionmaker:
-    """Create and return async session factory.
-
-    Caches sessionmakers per engine instance to support multiple databases.
-
-    Args:
-        engine: Async SQLAlchemy engine
-
-    Returns:
-        Async session maker factory
-    """
-    global _async_sessionmakers
-    engine_id = id(engine)
-    if engine_id not in _async_sessionmakers:
-        _async_sessionmakers[engine_id] = async_sessionmaker(
-            engine, expire_on_commit=False, class_=AsyncSession
-        )
-    return _async_sessionmakers[engine_id]
-
-
-async def get_async_session() -> AsyncGenerator[AsyncSession, None]:
-    """FastAPI dependency for async database session."""
-    engine = get_async_engine("sqlite+aiosqlite:////data/audio-to-subs.db")
-    sessionmaker = get_async_sessionmaker(engine)
-    async with sessionmaker() as session:
-        yield session
-
-
-# Sync session factory cache - keyed by engine instance
-_sync_sessionmakers: dict[int, sessionmaker] = {}
-
-
-def get_sync_sessionmaker(engine):
-    """Create and return sync session factory.
-
-    Caches sessionmakers per engine instance to support multiple databases.
-
-    Args:
-        engine: Sync SQLAlchemy engine
-
-    Returns:
-        Sync session maker factory
-    """
-    from sqlalchemy.orm import Session
-
-    global _sync_sessionmakers
-    engine_id = id(engine)
-    if engine_id not in _sync_sessionmakers:
-        _sync_sessionmakers[engine_id] = sessionmaker(
-            engine, expire_on_commit=False, class_=Session
-        )
-    return _sync_sessionmakers[engine_id]
