@@ -2,22 +2,24 @@
 
 import asyncio
 import logging
+from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
-from typing import AsyncGenerator, Any
 
 from fastapi import Depends, FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
 from audio_to_subs.api.routes import auth, healthz
+from audio_to_subs.api.routes.history import router as history_router
 from audio_to_subs.api.routes.jobs import router as jobs_router
-from audio_to_subs.api.routes.stream import router as stream_router
 from audio_to_subs.api.routes.logs import (
-    router as jobs_logs_router,
     global_logs_router,
 )
+from audio_to_subs.api.routes.logs import (
+    router as jobs_logs_router,
+)
 from audio_to_subs.api.routes.settings import router as settings_router
+from audio_to_subs.api.routes.stream import router as stream_router
 from audio_to_subs.api.routes.wanted import router as wanted_router
-from audio_to_subs.api.routes.history import router as history_router
 from audio_to_subs.api.settings import get_settings
 from audio_to_subs.auth.bootstrap import bootstrap_admin
 from audio_to_subs.bazarr.poller import start_poller, stop_poller
@@ -42,6 +44,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Startup
     logger.info("Starting up...")
+
+    # Register SSE observers with events module
+    from audio_to_subs.api.routes.stream import register_observers
+
+    register_observers()
 
     # Run migrations (Alembic is the single source of truth for the schema)
     # Run in thread pool to avoid blocking the event loop
@@ -89,9 +96,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Start reaper task
     global _reaper_task
-    _reaper_task = asyncio.create_task(
-        _run_reaper_periodically(settings.DATABASE_URL)
-    )
+    _reaper_task = asyncio.create_task(_run_reaper_periodically(settings.DATABASE_URL))
     logger.info("Reaper task started")
 
     # Create the shutdown event that run_bazarr_poller watches, then start the
@@ -177,6 +182,7 @@ def create_app() -> FastAPI:
 
     # All other routers require authentication
     from audio_to_subs.auth.deps import get_current_user
+
     auth_dependency = Depends(get_current_user)
 
     app.include_router(settings_router, dependencies=[auth_dependency])
@@ -208,7 +214,7 @@ def get_app() -> FastAPI:
 
 # For running with uvicorn: uvicorn audio_to_subs.api.app:app
 # Defer app creation if running under pytest (autouse fixture will set up env)
-import sys
+import sys  # noqa: E402
 
 if "pytest" not in sys.modules:
     app = create_app()
