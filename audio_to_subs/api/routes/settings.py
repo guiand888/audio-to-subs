@@ -6,7 +6,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import select, update
+from sqlalchemy import func, select, update
 from sqlalchemy.orm import Session
 
 from audio_to_subs.api.deps import SettingsDep, get_db
@@ -48,23 +48,19 @@ class SettingsResponse(BaseModel):
         description="Primary audio duration billing rate (USD per minute)"
     )
     mistral_input_token_rate_usd: float | None = Field(
-        default=None, description="Optional token-based input billing rate (USD per token)"
+        default=None,
+        description="Optional token-based input billing rate (USD per token)",
     )
     mistral_output_token_rate_usd: float | None = Field(
-        default=None, description="Optional token-based output billing rate (USD per token)"
+        default=None,
+        description="Optional token-based output billing rate (USD per token)",
     )
-    bazarr_poll_interval: int = Field(
-        description="Bazarr poll interval in seconds"
-    )
+    bazarr_poll_interval: int = Field(description="Bazarr poll interval in seconds")
     bazarr_track_no_subs: bool = Field(
         description="Track items with no subtitles in any language"
     )
-    bazarr_url: str | None = Field(
-        default=None, description="Bazarr API base URL"
-    )
-    bazarr_api_key: str | None = Field(
-        default=None, description="Bazarr API key"
-    )
+    bazarr_url: str | None = Field(default=None, description="Bazarr API base URL")
+    bazarr_api_key: str | None = Field(default=None, description="Bazarr API key")
     bazarr_timeout: float = Field(
         default=30.0, description="Bazarr API timeout in seconds"
     )
@@ -122,19 +118,17 @@ class SettingsUpdate(BaseModel):
     bazarr_track_no_subs: bool | None = Field(
         default=None, description="Track items with no subtitles in any language"
     )
-    bazarr_url: str | None = Field(
-        default=None, description="Bazarr API base URL"
-    )
-    bazarr_api_key: str | None = Field(
-        default=None, description="Bazarr API key"
-    )
+    bazarr_url: str | None = Field(default=None, description="Bazarr API base URL")
+    bazarr_api_key: str | None = Field(default=None, description="Bazarr API key")
     bazarr_timeout: float | None = Field(
         default=None, description="Bazarr API timeout in seconds"
     )
     path_mappings: list[dict[str, str]] | None = Field(
         default=None, description="List of path mapping dicts"
     )
-    default_language: str | None = Field(default=None, description="Default language code")
+    default_language: str | None = Field(
+        default=None, description="Default language code"
+    )
     default_output_format: str | None = Field(
         default=None, description="Default output format"
     )
@@ -161,6 +155,7 @@ class SettingsUpdate(BaseModel):
             raise ValueError("bazarr_url must start with http:// or https://")
         try:
             from urllib.parse import urlparse
+
             parsed = urlparse(v)
             if not parsed.netloc:
                 raise ValueError("bazarr_url must have a valid hostname")
@@ -191,12 +186,17 @@ async def _get_all_settings(
 
 async def _seed_default_settings(
     db: Annotated["AsyncSession", Depends(get_db)],
-) -> None:
-    """Seed default settings if not present."""
+) -> bool:
+    """Seed default settings if not present.
+
+    Returns:
+        True if settings were seeded, False if they already existed.
+    """
     from audio_to_subs.db.models import Setting
 
-    result = await db.execute(select(Setting))
-    existing_count = len(result.scalars().all())
+    # Use a count query instead of fetching all rows
+    result = await db.execute(select(func.count(Setting.key)))
+    existing_count = result.scalar() or 0
 
     if existing_count == 0:
         for key, value in DEFAULT_SETTINGS.items():
@@ -207,6 +207,9 @@ async def _seed_default_settings(
             db.add(setting)
         await db.commit()
         logger.info("Seeded %d default settings", len(DEFAULT_SETTINGS))
+        return True
+
+    return False
 
 
 @router.get("", response_model=SettingsResponse)
@@ -217,8 +220,12 @@ async def get_settings(
 
     Returns current settings from the database, merged with defaults.
     """
-    # Seed defaults if needed
-    await _seed_default_settings(db)
+    from audio_to_subs.db.models import Setting
+
+    # Only seed defaults if the table is empty (first boot)
+    result = await db.execute(select(func.count(Setting.key)))
+    if (result.scalar() or 0) == 0:
+        await _seed_default_settings(db)
 
     # Get all settings
     db_settings = await _get_all_settings(db)
@@ -245,17 +252,22 @@ async def update_settings(
     updates = settings_update.model_dump(exclude_unset=True)
     merged_settings = {**current_settings, **updates}
 
+    # Fetch all existing settings for the keys being updated (single query)
+    keys_to_update = list(updates.keys())
+    if keys_to_update:
+        result = await db.execute(
+            select(Setting).where(Setting.key.in_(keys_to_update))
+        )
+        existing_settings = {s.key: s for s in result.scalars().all()}
+    else:
+        existing_settings = {}
+
     # Update or insert each setting (all changes in one transaction for atomicity)
     for key, value in updates.items():
-        # Check if setting exists
-        result = await db.execute(
-            select(Setting).where(Setting.key == key)
-        )
-        existing = result.scalar_one_or_none()
+        existing = existing_settings.get(key)
 
         if existing:
             existing.value_json = json.dumps(value)
-            await db.flush()  # Ensure update is queued before next check
         else:
             new_setting = Setting(
                 key=key,
@@ -285,9 +297,7 @@ async def get_setting(
     """
     from audio_to_subs.db.models import Setting
 
-    result = await db.execute(
-        select(Setting.value_json).where(Setting.key == key)
-    )
+    result = await db.execute(select(Setting.value_json).where(Setting.key == key))
     row = result.scalar_one_or_none()
 
     if row is None:
@@ -374,7 +384,10 @@ async def test_bazarr_connection(
     Returns:
         Connection test result with success status and message
     """
-    from audio_to_subs.bazarr.poller import get_bazarr_client, get_bazarr_client_with_settings
+    from audio_to_subs.bazarr.poller import (
+        get_bazarr_client,
+        get_bazarr_client_with_settings,
+    )
 
     try:
         if test_request.bazarr_url is not None:
@@ -382,14 +395,16 @@ async def test_bazarr_connection(
             client = await get_bazarr_client(
                 test_request.bazarr_url,
                 test_request.bazarr_api_key,
-                test_request.bazarr_timeout
-                if test_request.bazarr_timeout is not None
-                else 30.0,
+                (
+                    test_request.bazarr_timeout
+                    if test_request.bazarr_timeout is not None
+                    else 30.0
+                ),
             )
         else:
             # Get Bazarr client using database settings first, then environment fallback
-            client, bazarr_url, bazarr_api_key, bazarr_timeout = await get_bazarr_client_with_settings(
-                db, settings
+            client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+                await get_bazarr_client_with_settings(db, settings)
             )
 
         if client is None:
@@ -413,29 +428,35 @@ async def test_bazarr_connection(
 
         except Exception as e:
             # Handle various error types - never expose sensitive data
-            await client.close()
-            error_type = type(e).__name__
+            from audio_to_subs.bazarr.client import (
+                BazarrAuthError,
+                BazarrNotFoundError,
+                BazarrRateLimited,
+                BazarrServerError,
+            )
 
-            # Map error types to user-friendly messages
-            if error_type == "BazarrAuthError":
+            await client.close()
+
+            # Map error types to user-friendly messages using isinstance
+            if isinstance(e, BazarrAuthError):
                 return BazarrConnectionTestResponse(
                     success=False,
                     message=None,
                     error="authentication_failed",
                 )
-            elif error_type == "BazarrNotFoundError":
+            elif isinstance(e, BazarrNotFoundError):
                 return BazarrConnectionTestResponse(
                     success=False,
                     message=None,
                     error="resource_not_found",
                 )
-            elif error_type == "BazarrRateLimited":
+            elif isinstance(e, BazarrRateLimited):
                 return BazarrConnectionTestResponse(
                     success=False,
                     message=None,
                     error="rate_limited",
                 )
-            elif error_type == "BazarrServerError":
+            elif isinstance(e, BazarrServerError):
                 return BazarrConnectionTestResponse(
                     success=False,
                     message=None,
@@ -443,7 +464,7 @@ async def test_bazarr_connection(
                 )
             else:
                 # Generic error - log it but don't expose details to user
-                logger.warning("Bazarr connection test failed: %s", error_type)
+                logger.warning("Bazarr connection test failed: %s", type(e).__name__)
                 return BazarrConnectionTestResponse(
                     success=False,
                     message=None,
@@ -452,7 +473,9 @@ async def test_bazarr_connection(
 
     except Exception as e:
         # Catch any unexpected errors during client creation
-        logger.error("Unexpected error during Bazarr connection test: %s", type(e).__name__)
+        logger.error(
+            "Unexpected error during Bazarr connection test: %s", type(e).__name__
+        )
         return BazarrConnectionTestResponse(
             success=False,
             message=None,

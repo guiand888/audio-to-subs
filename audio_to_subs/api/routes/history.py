@@ -23,7 +23,9 @@ class HistoryStats(BaseModel):
 
     total_jobs: int = Field(description="Total number of completed jobs")
     total_cost_usd: float = Field(description="Total cost across all jobs")
-    total_duration_seconds: float = Field(description="Total audio duration across all jobs")
+    total_duration_seconds: float = Field(
+        description="Total audio duration across all jobs"
+    )
     average_cost_usd: float = Field(description="Average cost per job")
     average_duration_seconds: float = Field(description="Average duration per job")
     count_by_status: dict[str, int] = Field(
@@ -109,9 +111,7 @@ async def get_history(
         query = query.where(and_(*conditions))
 
     # Get total count before pagination
-    count_query = select(func.count(Job.id)).where(
-        Job.status.in_(statuses_to_query)
-    )
+    count_query = select(func.count(Job.id)).where(Job.status.in_(statuses_to_query))
     if conditions:
         count_query = count_query.where(and_(*conditions))
 
@@ -150,18 +150,25 @@ async def _calculate_stats(
     Returns:
         HistoryStats with all aggregate calculations
     """
-    from sqlalchemy import case, cast, Float, Integer
-
-    # Base query for completed jobs
-    query = select(Job).where(Job.status.in_(statuses))
+    # Base query filters
+    base_where = Job.status.in_(statuses)
     if conditions:
-        query = query.where(and_(*conditions))
+        base_where = and_(base_where, and_(*conditions))
 
-    # Get all matching jobs for stats
-    result = await db.execute(query)
-    all_jobs = result.scalars().all()
+    # Get total count, sum of costs, and sum of durations in one query
+    totals_query = select(
+        func.count(Job.id).label("total_jobs"),
+        func.sum(Job.estimated_cost_usd).label("total_cost_usd"),
+        func.sum(Job.audio_duration_seconds).label("total_duration_seconds"),
+    ).where(base_where)
 
-    if not all_jobs:
+    totals_result = await db.execute(totals_query)
+    totals_row = totals_result.one()
+    total_jobs = totals_row.total_jobs or 0
+    total_cost = float(totals_row.total_cost_usd or 0.0)
+    total_duration = float(totals_row.total_duration_seconds or 0.0)
+
+    if total_jobs == 0:
         return HistoryStats(
             total_jobs=0,
             total_cost_usd=0.0,
@@ -170,47 +177,60 @@ async def _calculate_stats(
             average_duration_seconds=0.0,
         )
 
-    # Calculate totals
-    total_cost = 0.0
-    total_duration = 0.0
-    count_by_status: dict[str, int] = {}
-    count_by_language: dict[str, int] = {}
-    count_by_source: dict[str, int] = {}
+    # Get counts by status using GROUP BY
+    status_query = (
+        select(
+            Job.status,
+            func.count(Job.id).label("count"),
+        )
+        .where(base_where)
+        .group_by(Job.status)
+    )
 
-    for job in all_jobs:
-        # Cost
-        if job.estimated_cost_usd is not None:
-            total_cost += job.estimated_cost_usd
+    status_result = await db.execute(status_query)
+    count_by_status = {
+        row.status.value if hasattr(row.status, "value") else str(row.status): row.count
+        for row in status_result.all()
+    }
 
-        # Duration
-        if job.audio_duration_seconds is not None:
-            total_duration += job.audio_duration_seconds
+    # Get counts by language using GROUP BY
+    language_query = (
+        select(
+            Job.language_code,
+            func.count(Job.id).label("count"),
+        )
+        .where(base_where)
+        .where(Job.language_code.isnot(None))
+        .group_by(Job.language_code)
+    )
 
-        # Count by status — SQLAlchemy returns raw strings for String(20) columns;
-        # use .value when the attribute holds an enum, fall back to str() otherwise.
-        status_str = job.status.value if hasattr(job.status, "value") else str(job.status)
-        count_by_status[status_str] = count_by_status.get(status_str, 0) + 1
+    language_result = await db.execute(language_query)
+    count_by_language = {row.language_code: row.count for row in language_result.all()}
 
-        # Count by language
-        if job.language_code:
-            count_by_language[job.language_code] = (
-                count_by_language.get(job.language_code, 0) + 1
-            )
+    # Get counts by source using GROUP BY
+    source_query = (
+        select(
+            Job.source,
+            func.count(Job.id).label("count"),
+        )
+        .where(base_where)
+        .group_by(Job.source)
+    )
 
-        # Count by source
-        source_str = job.source.value if hasattr(job.source, "value") else str(job.source)
-        count_by_source[source_str] = count_by_source.get(source_str, 0) + 1
-
-    num_jobs = len(all_jobs)
+    source_result = await db.execute(source_query)
+    count_by_source = {
+        row.source.value if hasattr(row.source, "value") else str(row.source): row.count
+        for row in source_result.all()
+    }
 
     return HistoryStats(
-        total_jobs=num_jobs,
+        total_jobs=total_jobs,
         total_cost_usd=round(total_cost, 4),
         total_duration_seconds=round(total_duration, 2),
-        average_cost_usd=round(total_cost / num_jobs, 4) if num_jobs > 0 else 0.0,
-        average_duration_seconds=round(total_duration / num_jobs, 2)
-        if num_jobs > 0
-        else 0.0,
+        average_cost_usd=round(total_cost / total_jobs, 4) if total_jobs > 0 else 0.0,
+        average_duration_seconds=(
+            round(total_duration / total_jobs, 2) if total_jobs > 0 else 0.0
+        ),
         count_by_status=count_by_status,
         count_by_language=count_by_language,
         count_by_source=count_by_source,
