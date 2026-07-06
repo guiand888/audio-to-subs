@@ -184,14 +184,15 @@ def make_job(**kwargs):
 def mocked_pipeline_deps():
     """Shared fixture for mocking all Pipeline dependencies.
 
-    Patches 7 dependencies used in pipeline tests:
+    Patches 6 dependencies used in pipeline tests:
       - extract_audio
       - get_audio_duration
-      - needs_splitting
       - split_audio
       - TranscriptionClient.transcribe_audio_with_timestamps
       - SubtitleGenerator.generate
       - Path (to avoid file existence checks)
+
+    Note: needs_splitting is no longer imported/used in pipeline.py (D6 optimization).
 
     Returns a dict with all mocks under their function names.
     Yields to allow cleanup.
@@ -200,7 +201,6 @@ def mocked_pipeline_deps():
 
     with patch("audio_to_subs.core.pipeline.extract_audio") as mock_extract, \
          patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0) as mock_duration, \
-         patch("audio_to_subs.core.pipeline.needs_splitting") as mock_needs_splitting, \
          patch("audio_to_subs.core.pipeline.split_audio") as mock_split, \
          patch.object(TranscriptionClient, "transcribe_audio_with_timestamps") as mock_transcribe, \
          patch("audio_to_subs.core.pipeline.SubtitleGenerator.generate") as mock_generate, \
@@ -215,7 +215,7 @@ def mocked_pipeline_deps():
         yield {
             "extract_audio": mock_extract,
             "get_audio_duration": mock_duration,
-            "needs_splitting": mock_needs_splitting,
+            "needs_splitting": MagicMock(return_value=False),  # Kept for test compatibility
             "split_audio": mock_split,
             "transcribe_audio_with_timestamps": mock_transcribe,
             "generate": mock_generate,

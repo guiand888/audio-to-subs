@@ -170,7 +170,8 @@ class TestPipeline:
         mocked_pipeline_deps["needs_splitting"].return_value = True
         mocked_pipeline_deps["extract_audio"].return_value = str(audio_file1)
         mocked_pipeline_deps["split_audio"].return_value = [str(audio_file1), str(audio_file2)]
-        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        # Duration > 900 seconds (15 minutes) to trigger splitting
+        mocked_pipeline_deps["get_audio_duration"].return_value = 1200.0
         mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = [
             [{"start": 0.0, "end": 5.0, "text": "Hello"}],
             [{"start": 0.0, "end": 6.0, "text": "World"}],

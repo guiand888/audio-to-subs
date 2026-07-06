@@ -329,7 +329,8 @@ class TestProgressReporting:
             str(tmp_path / "segment1.wav"),
             str(tmp_path / "segment2.wav"),
         ]
-        mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
+        # Duration > 900 seconds (15 minutes) to trigger splitting
+        mocked_pipeline_deps["get_audio_duration"].return_value = 1200.0
         mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = [
             {"start": 0, "end": 1, "text": "test"}
         ]

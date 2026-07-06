@@ -7,31 +7,29 @@ Adds structured progress callbacks and cancellation support for v2.
 import logging
 import os
 import tempfile
-import time
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Any, Callable, Dict, List, Literal, Optional, TypedDict
+from typing import Any, Callable, Literal, Optional, TypedDict
 from uuid import uuid4
 
 from audio_to_subs.core.audio_extractor import (
-    extract_audio,
-    FFmpegNotFoundError,
     AudioExtractionError,
+    FFmpegNotFoundError,
+    extract_audio,
+)
+from audio_to_subs.core.audio_splitter import (
+    get_audio_duration,
+    split_audio,
+)
+from audio_to_subs.core.cancel import Cancelled, CancelToken
+from audio_to_subs.core.subtitle_generator import (
+    SubtitleFormatError,
+    SubtitleGenerator,
 )
 from audio_to_subs.core.transcription_client import (
     TranscriptionClient,
     TranscriptionError,
 )
-from audio_to_subs.core.audio_splitter import (
-    split_audio,
-    needs_splitting,
-    get_audio_duration,
-)
-from audio_to_subs.core.subtitle_generator import (
-    SubtitleGenerator,
-    SubtitleFormatError,
-)
-from audio_to_subs.core.cancel import Cancelled, CancelToken
 
 logger = logging.getLogger(__name__)
 
@@ -205,9 +203,7 @@ class Pipeline:
             )
 
             try:
-                result = self.process_video(
-                    input_path, output_path, output_format
-                )
+                result = self.process_video(input_path, output_path, output_format)
                 results[input_path] = result
             except PipelineError as e:
                 self._emit_progress(
@@ -259,66 +255,20 @@ class Pipeline:
         self._emit_progress("init", "Starting pipeline", percent=0)
 
         try:
-            # Stage 1: Extract audio (0-25%)
-            self._emit_progress("extract", "Extracting audio from video...", percent=10)
-            self._check_cancel()
-
-            audio_path = self._extract_audio(video_path)
-            logger.debug(f"Audio extracted: {audio_path}")
-
-            # Get audio duration
-            audio_duration_seconds = get_audio_duration(audio_path)
-            logger.debug(f"Audio duration: {audio_duration_seconds} seconds")
-
-            self._emit_progress(
-                "extract",
-                "Audio extraction complete",
-                percent=25,
-                audio_duration_seconds=audio_duration_seconds,
+            # Stage 1: Extract audio and get duration (0-25%)
+            audio_path, audio_duration_seconds = self._extract_and_prepare_audio(
+                video_path
             )
             self._check_cancel()
 
-            # Stage 2: Check if audio needs splitting (>15 minutes)
-            if needs_splitting(audio_path):
-                self._emit_progress(
-                    "split",
-                    "Audio exceeds 15 minutes, splitting into segments...",
-                    percent=25,
-                )
-                self._check_cancel()
-
-                audio_segments = split_audio(
-                    audio_path,
-                    self.temp_dir,
-                    progress_callback=self.progress_callback
-                    if self.verbose_progress
-                    else None,
-                    cancel_token=self._cancel_token,
-                )
-                logger.debug(f"Audio split into {len(audio_segments)} segments")
-                self._emit_progress(
-                    "split",
-                    f"Split audio into {len(audio_segments)} segments",
-                    percent=30,
-                )
-            else:
-                audio_segments = [audio_path]
-                logger.debug("Audio does not need splitting")
-                self._emit_progress(
-                    "split",
-                    "Audio ready for transcription",
-                    percent=30,
-                )
-
-            self._check_cancel()
-
-            # Stage 3: Transcribe audio (handling multiple segments if needed) (30-75%)
-            self._emit_progress("transcribe", "Transcribing audio with Mistral AI...", percent=30)
-            self._check_cancel()
-
-            all_segments, mistral_usage = self._transcribe_audio_segments(
-                audio_segments
+            # Stage 2: Handle audio splitting if needed (>15 minutes) (25-30%)
+            audio_segments = self._handle_audio_splitting(
+                audio_path, audio_duration_seconds
             )
+            self._check_cancel()
+
+            # Stage 3: Transcribe audio segments (30-75%)
+            all_segments, mistral_usage = self._perform_transcription(audio_segments)
             segments_count = len(all_segments)
             logger.debug(f"Transcription complete: {segments_count} segments")
             self._emit_progress(
@@ -329,36 +279,13 @@ class Pipeline:
             )
             self._check_cancel()
 
-            # Stage 4: Generate subtitles (75-100%)
-            self._emit_progress(
-                "generate",
-                f"Generating {output_format.upper()} subtitles...",
-                percent=75,
-            )
-            self._check_cancel()
-
-            result_path = self._generate_subtitles(
+            # Stage 4: Generate subtitles and finalize (75-100%)
+            result_path = self._finalize_subtitles(
                 all_segments,
                 output_path,
                 output_format,
-                self.transcription_client.language,
-            )
-            logger.debug(f"Subtitles generated: {result_path}")
-
-            self._emit_progress(
-                "generate",
-                "Subtitle generation complete",
-                percent=100,
-            )
-            self._check_cancel()
-
-            # Final done event
-            self._emit_progress(
-                "done",
-                "Complete! Subtitles generated successfully.",
-                percent=100,
-                audio_duration_seconds=audio_duration_seconds,
-                mistral_usage=mistral_usage,
+                audio_duration_seconds,
+                mistral_usage,
             )
 
             return PipelineResult(
@@ -415,7 +342,9 @@ class Pipeline:
             logger.debug(f"Video file size: {video_file.stat().st_size} bytes")
 
             # Generate temp audio file path (include uuid to avoid collision in concurrent batch jobs)
-            audio_path = Path(self.temp_dir) / f"audio_{video_file.stem}_{uuid4().hex[:8]}.wav"
+            audio_path = (
+                Path(self.temp_dir) / f"audio_{video_file.stem}_{uuid4().hex[:8]}.wav"
+            )
 
             # Only pass progress callback if verbose_progress is True
             progress_callback = (
@@ -448,6 +377,173 @@ class Pipeline:
             logger.error(f"Audio extraction error: {str(e)}")
             raise PipelineError(f"Audio extraction failed: {str(e)}") from e
 
+    def _extract_and_prepare_audio(self, video_path: str) -> tuple[str, float]:
+        """Extract audio from video and get its duration.
+
+        Args:
+            video_path: Path to video file
+
+        Returns:
+            Tuple of (audio_path, audio_duration_seconds)
+
+        Raises:
+            PipelineError: If extraction or duration detection fails
+        """
+        # Stage 1: Extract audio (0-25%)
+        self._emit_progress("extract", "Extracting audio from video...", percent=10)
+        self._check_cancel()
+
+        audio_path = self._extract_audio(video_path)
+        logger.debug(f"Audio extracted: {audio_path}")
+
+        # Get audio duration (D6: single call cached here)
+        audio_duration_seconds = get_audio_duration(audio_path)
+        logger.debug(f"Audio duration: {audio_duration_seconds} seconds")
+
+        self._emit_progress(
+            "extract",
+            "Audio extraction complete",
+            percent=25,
+            audio_duration_seconds=audio_duration_seconds,
+        )
+
+        return audio_path, audio_duration_seconds
+
+    def _handle_audio_splitting(
+        self, audio_path: str, audio_duration_seconds: float
+    ) -> list[str]:
+        """Check if audio needs splitting and split if necessary.
+
+        Args:
+            audio_path: Path to audio file
+            audio_duration_seconds: Duration of audio in seconds
+
+        Returns:
+            List of audio segment paths (single item if no splitting needed)
+
+        Raises:
+            PipelineError: If splitting fails
+            Cancelled: If cancellation was requested
+        """
+        # Stage 2: Check if audio needs splitting (>15 minutes)
+        # D6: Dedup get_audio_duration by using cached duration instead of calling needs_splitting
+        from audio_to_subs.core.audio_splitter import MAX_AUDIO_LENGTH
+
+        if audio_duration_seconds > MAX_AUDIO_LENGTH:
+            self._emit_progress(
+                "split",
+                "Audio exceeds 15 minutes, splitting into segments...",
+                percent=25,
+            )
+            self._check_cancel()
+
+            audio_segments = split_audio(
+                audio_path,
+                self.temp_dir,
+                progress_callback=(
+                    self.progress_callback if self.verbose_progress else None
+                ),
+                cancel_token=self._cancel_token,
+            )
+            logger.debug(f"Audio split into {len(audio_segments)} segments")
+            self._emit_progress(
+                "split",
+                f"Split audio into {len(audio_segments)} segments",
+                percent=30,
+            )
+        else:
+            audio_segments = [audio_path]
+            logger.debug("Audio does not need splitting")
+            self._emit_progress(
+                "split",
+                "Audio ready for transcription",
+                percent=30,
+            )
+
+        self._check_cancel()
+        return audio_segments
+
+    def _perform_transcription(
+        self, audio_segments: list[str]
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Transcribe audio segments.
+
+        Args:
+            audio_segments: List of audio segment paths to transcribe
+
+        Returns:
+            Tuple of (all_segments, mistral_usage)
+
+        Raises:
+            PipelineError: If transcription fails
+            Cancelled: If cancellation was requested
+        """
+        # Stage 3: Transcribe audio (30-75%)
+        self._emit_progress(
+            "transcribe", "Transcribing audio with Mistral AI...", percent=30
+        )
+        self._check_cancel()
+
+        return self._transcribe_audio_segments(audio_segments)
+
+    def _finalize_subtitles(
+        self,
+        all_segments: list[dict[str, Any]],
+        output_path: str,
+        output_format: str,
+        audio_duration_seconds: float,
+        mistral_usage: dict[str, Any] | None,
+    ) -> str:
+        """Generate subtitles and emit final progress event.
+
+        Args:
+            all_segments: Transcribed segments
+            output_path: Path to write subtitle file
+            output_format: Output subtitle format
+            audio_duration_seconds: Total audio duration
+            mistral_usage: Usage metrics from transcription
+
+        Returns:
+            Path to generated subtitle file
+
+        Raises:
+            PipelineError: If generation fails
+            Cancelled: If cancellation was requested
+        """
+        # Stage 4: Generate subtitles (75-100%)
+        self._emit_progress(
+            "generate",
+            f"Generating {output_format.upper()} subtitles...",
+            percent=75,
+        )
+        self._check_cancel()
+
+        result_path = self._generate_subtitles(
+            all_segments,
+            output_path,
+            output_format,
+            self.transcription_client.language,
+        )
+        logger.debug(f"Subtitles generated: {result_path}")
+
+        self._emit_progress(
+            "generate",
+            "Subtitle generation complete",
+            percent=100,
+        )
+        self._check_cancel()
+
+        # Final done event
+        self._emit_progress(
+            "done",
+            "Complete! Subtitles generated successfully.",
+            percent=100,
+            audio_duration_seconds=audio_duration_seconds,
+            mistral_usage=mistral_usage,
+        )
+
+        return result_path
+
     def _transcribe_audio_segments(
         self, audio_segments: list[str]
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
@@ -472,32 +568,14 @@ class Pipeline:
             for idx, segment_path in enumerate(audio_segments, 1):
                 self._check_cancel()
 
-                # Calculate progress percentage for this segment
-                segment_start_percent = 30 + int(45 * ((idx - 1) / total_segments))
-                segment_end_percent = 30 + int(45 * (idx / total_segments))
-
-                self._emit_progress(
-                    "transcribe",
-                    f"Transcribing segment {idx}/{total_segments}...",
-                    percent=segment_start_percent,
-                    segment_index=idx,
-                    segment_count=total_segments,
-                )
-
-                # Pass segment info to transcription client for detailed progress
-                segments = self.transcription_client.transcribe_audio_with_timestamps(
-                    segment_path,
-                    segment_number=idx if self.verbose_progress else None,
-                    total_segments=total_segments if self.verbose_progress else None,
+                # Transcribe this segment
+                segments, usage = self._transcribe_single_segment(
+                    segment_path, idx, total_segments
                 )
 
                 # Extract usage from the last segment's response
-                # The Mistral response is on the transcription client
-                if idx == len(audio_segments):
-                    # Extract usage from the last transcription response
-                    last_usage = getattr(self.transcription_client, "_last_usage", None)
-                    if last_usage:
-                        mistral_usage = last_usage
+                if idx == len(audio_segments) and usage:
+                    mistral_usage = usage
 
                 # Reject if no timestamped segments
                 if not segments:
@@ -507,20 +585,15 @@ class Pipeline:
                         f"Cannot generate accurate subtitles without timestamps."
                     )
 
-                # Adjust timestamps based on position in overall audio
-                for segment in segments:
-                    segment["start"] += time_offset
-                    segment["end"] += time_offset
-                    all_segments.append(segment)
-
-                # Update time offset for next segment
-                if segments:
-                    time_offset = segments[-1]["end"]
+                # Adjust timestamps and add to all_segments
+                all_segments, time_offset = self._adjust_segment_timestamps(
+                    segments, all_segments, time_offset
+                )
 
                 self._emit_progress(
                     "transcribe",
                     f"Completed segment {idx}/{total_segments}",
-                    percent=segment_end_percent,
+                    percent=30 + int(45 * (idx / total_segments)),
                     segment_index=idx,
                     segment_count=total_segments,
                 )
@@ -535,9 +608,76 @@ class Pipeline:
         except Exception as e:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
 
+    def _transcribe_single_segment(
+        self, segment_path: str, segment_index: int, total_segments: int
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+        """Transcribe a single audio segment.
+
+        Args:
+            segment_path: Path to audio segment file
+            segment_index: 1-based index of this segment
+            total_segments: Total number of segments
+
+        Returns:
+            Tuple of (transcribed_segments, mistral_usage or None)
+
+        Raises:
+            TranscriptionError: If transcription fails
+        """
+        # Calculate progress percentage for this segment
+        segment_start_percent = 30 + int(45 * ((segment_index - 1) / total_segments))
+
+        self._emit_progress(
+            "transcribe",
+            f"Transcribing segment {segment_index}/{total_segments}...",
+            percent=segment_start_percent,
+            segment_index=segment_index,
+            segment_count=total_segments,
+        )
+
+        # Pass segment info to transcription client for detailed progress
+        segments = self.transcription_client.transcribe_audio_with_timestamps(
+            segment_path,
+            segment_number=segment_index if self.verbose_progress else None,
+            total_segments=total_segments if self.verbose_progress else None,
+        )
+
+        # Extract usage from the transcription response
+        # The Mistral response is on the transcription client
+        usage = getattr(self.transcription_client, "_last_usage", None)
+
+        return segments, usage
+
+    def _adjust_segment_timestamps(
+        self,
+        segments: list[dict[str, Any]],
+        all_segments: list[dict[str, Any]],
+        time_offset: float,
+    ) -> tuple[list[dict[str, Any]], float]:
+        """Adjust timestamps for audio segments based on concatenation position.
+
+        Args:
+            segments: Segments from current transcription
+            all_segments: Accumulated segments from previous transcriptions
+            time_offset: Time offset to apply (end time of previous segment)
+
+        Returns:
+            Tuple of (updated_all_segments, new_time_offset)
+        """
+        # Adjust timestamps based on position in overall audio
+        for segment in segments:
+            segment["start"] += time_offset
+            segment["end"] += time_offset
+            all_segments.append(segment)
+
+        # Update time offset for next segment
+        new_offset = segments[-1]["end"] if segments else time_offset
+
+        return all_segments, new_offset
+
     def _generate_subtitles(
         self,
-        segments: List[Dict],
+        segments: list[dict],
         output_path: str,
         output_format: str = "srt",
         language_code: Optional[str] = None,
