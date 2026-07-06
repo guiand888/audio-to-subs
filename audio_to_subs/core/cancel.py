@@ -21,13 +21,13 @@ class CancelToken:
 
     Usage:
         token = CancelToken()
-        
+
         # In the operation being cancelled:
         def long_operation(token: CancelToken):
             for chunk in chunks:
                 token.check()  # Raises Cancelled if set
                 process(chunk)
-        
+
         # In the cancelling code:
         token.set()  # Signals cancellation
     """

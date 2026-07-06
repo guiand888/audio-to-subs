@@ -2,6 +2,7 @@
 
 Supports .audio-to-subs.yaml configuration files for defining batch jobs.
 """
+
 from pathlib import Path
 from typing import Any
 
@@ -10,6 +11,7 @@ import yaml
 
 class ConfigError(Exception):
     """Raised when configuration is invalid."""
+
     pass
 
 
@@ -32,7 +34,7 @@ class ConfigParser:
             raise ConfigError(f"Config file not found: {config_path}")
 
         try:
-            with open(self.config_path) as f:
+            with open(self.config_path, encoding="utf-8") as f:
                 self.config = yaml.safe_load(f) or {}
         except yaml.YAMLError as e:
             raise ConfigError(f"Invalid YAML in {config_path}: {str(e)}") from e
