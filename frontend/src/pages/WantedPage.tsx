@@ -203,13 +203,16 @@ export function WantedPage() {
   const handleRefresh = async () => {
     setRefreshStatus("refreshing")
     try {
-      const data = await api.post("/api/wanted/refresh", {
-        item_type: refreshScope,
-      })
+      const data = await api.post<{ status: string; movies_processed?: number; episodes_processed?: number; error?: string }>(
+        "/api/wanted/refresh",
+        {
+          item_type: refreshScope,
+        }
+      )
       if (data.status === "completed") {
         setRefreshStatus("success")
         toast.success(
-          `Refreshed ${data.movies_processed} movies and ${data.episodes_processed} episodes`
+          `Refreshed ${data.movies_processed || 0} movies and ${data.episodes_processed || 0} episodes`
         )
         // Invalidate the wanted query to refresh the UI
         void queryClient.invalidateQueries({ queryKey: ["wanted"] })
