@@ -1,5 +1,7 @@
 """Tests for Bazarr API client."""
 
+from unittest.mock import AsyncMock, patch
+
 import httpx
 import pytest
 
@@ -221,19 +223,52 @@ class TestBazarrClientRequests:
 
     @pytest.mark.asyncio
     async def test_rate_limited_error(self, respx_mock):
-        """Test 429 rate limited error."""
-        respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
+        """Test 429 rate limited error raises after retries are exhausted."""
+        route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
             return_value=httpx.Response(429, json={"error": "Rate limited"}, headers={"Retry-After": "30"}),
         )
-        
+
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="test-key",
         ) as client:
-            with pytest.raises(BazarrRateLimited) as exc_info:
-                await client.list_wanted_movies()
-            
-            assert exc_info.value.retry_after == 30
+            with patch(
+                "audio_to_subs.bazarr.client.asyncio.sleep", new=AsyncMock()
+            ) as mock_sleep:
+                with pytest.raises(BazarrRateLimited) as exc_info:
+                    await client.list_wanted_movies()
+
+                assert exc_info.value.retry_after == 30
+                # Retries exhausted: 1 initial attempt + max_retries retries.
+                assert route.call_count == client.max_retries + 1
+                # Retry-After was honored for every backoff wait.
+                assert mock_sleep.await_count == client.max_retries
+                for call in mock_sleep.await_args_list:
+                    assert call.args[0] == 30
+
+    @pytest.mark.asyncio
+    async def test_rate_limited_then_success(self, respx_mock):
+        """Test that a 429 followed by a 200 succeeds via retry."""
+        route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted")
+        route.side_effect = [
+            httpx.Response(
+                429, json={"error": "Rate limited"}, headers={"Retry-After": "5"}
+            ),
+            httpx.Response(200, json={"data": [], "total": 0}),
+        ]
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            with patch(
+                "audio_to_subs.bazarr.client.asyncio.sleep", new=AsyncMock()
+            ) as mock_sleep:
+                result = await client.list_wanted_movies()
+
+                assert result.total == 0
+                assert route.call_count == 2
+                mock_sleep.assert_awaited_once_with(5)
 
     @pytest.mark.asyncio
     async def test_server_error_with_retry(self, respx_mock):
@@ -243,13 +278,87 @@ class TestBazarrClientRequests:
             httpx.Response(500, json={"error": "Server error"}),
             httpx.Response(200, json={"data": [], "total": 0}),
         ]
-        
+
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="test-key",
         ) as client:
-            result = await client.list_wanted_movies()
-            assert result.total == 0
+            with patch("audio_to_subs.bazarr.client.asyncio.sleep", new=AsyncMock()):
+                result = await client.list_wanted_movies()
+                assert result.total == 0
+
+    @pytest.mark.asyncio
+    async def test_server_error_exponential_backoff(self, respx_mock):
+        """Test that repeated 5xx errors (no Retry-After) back off exponentially."""
+        route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted")
+        route.side_effect = [
+            httpx.Response(503, json={"error": "Server error"}),
+            httpx.Response(503, json={"error": "Server error"}),
+            httpx.Response(200, json={"data": [], "total": 0}),
+        ]
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+            backoff_base=1.0,
+            backoff_max=30.0,
+        ) as client:
+            with patch(
+                "audio_to_subs.bazarr.client.asyncio.sleep", new=AsyncMock()
+            ) as mock_sleep:
+                result = await client.list_wanted_movies()
+
+                assert result.total == 0
+                assert route.call_count == 3
+                # Exponential backoff: 1s then 2s (backoff_base * 2**attempt).
+                assert [call.args[0] for call in mock_sleep.await_args_list] == [
+                    1.0,
+                    2.0,
+                ]
+
+    @pytest.mark.asyncio
+    async def test_server_error_exhausts_retries(self, respx_mock):
+        """Test that persistent 5xx errors raise BazarrServerError once retries are exhausted."""
+        route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
+            return_value=httpx.Response(500, json={"error": "Server error"}),
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+            max_retries=2,
+        ) as client:
+            with patch("audio_to_subs.bazarr.client.asyncio.sleep", new=AsyncMock()):
+                with pytest.raises(BazarrServerError):
+                    await client.list_wanted_movies()
+
+                assert route.call_count == 3  # 1 initial + 2 retries
+
+    @pytest.mark.asyncio
+    async def test_backoff_capped_at_backoff_max(self, respx_mock):
+        """Test that a large Retry-After value is capped at backoff_max."""
+        route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted")
+        route.side_effect = [
+            httpx.Response(
+                429,
+                json={"error": "Rate limited"},
+                headers={"Retry-After": "9999"},
+            ),
+            httpx.Response(200, json={"data": [], "total": 0}),
+        ]
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+            backoff_max=15.0,
+        ) as client:
+            with patch(
+                "audio_to_subs.bazarr.client.asyncio.sleep", new=AsyncMock()
+            ) as mock_sleep:
+                result = await client.list_wanted_movies()
+
+                assert result.total == 0
+                mock_sleep.assert_awaited_once_with(15.0)
 
 
 class TestRescan:

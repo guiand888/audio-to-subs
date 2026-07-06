@@ -16,13 +16,12 @@ from audio_to_subs.bazarr.schemas import (
     Movie,
     MoviesPage,
     SeriesPage,
-    WantedEpisode,
     WantedEpisodesPage,
-    WantedMovie,
     WantedMoviesPage,
 )
 
 logger = logging.getLogger(__name__)
+
 
 # Custom exceptions
 class BazarrError(Exception):
@@ -49,6 +48,20 @@ class BazarrServerError(BazarrError):
     """Server error from Bazarr API."""
 
 
+class _RetryableStatus(Exception):
+    """Internal signal that a response is retryable.
+
+    Carries the number of seconds to wait before retrying and the
+    `BazarrError` to raise if retries are exhausted. Never escapes the
+    client's request loop.
+    """
+
+    def __init__(self, wait_seconds: float, error: BazarrError) -> None:
+        self.wait_seconds = wait_seconds
+        self.error = error
+        super().__init__(str(error))
+
+
 class BazarrClient:
     """Async HTTP client for Bazarr API.
 
@@ -65,6 +78,9 @@ class BazarrClient:
         timeout: float = 30.0,
         connect_timeout: float = 10.0,
         read_timeout: float = 30.0,
+        max_retries: int = 3,
+        backoff_base: float = 1.0,
+        backoff_max: float = 30.0,
     ) -> None:
         """Initialize BazarrClient.
 
@@ -74,6 +90,13 @@ class BazarrClient:
             timeout: Total timeout for requests
             connect_timeout: Connection timeout
             read_timeout: Read timeout
+            max_retries: Maximum number of retries for retryable errors
+                (429, 5xx) before giving up and raising.
+            backoff_base: Base delay (seconds) for exponential backoff
+                between retries. Attempt N waits ``backoff_base * 2**N``
+                seconds, capped at ``backoff_max``.
+            backoff_max: Upper bound (seconds) on any single backoff wait,
+                including when honoring a server-provided Retry-After.
         """
         self.base_url = base_url.rstrip("/")
         self.api_key = api_key
@@ -86,6 +109,9 @@ class BazarrClient:
         )
         self._client: httpx.AsyncClient | None = None
         self._headers = {"X-API-Key": api_key}
+        self.max_retries = max_retries
+        self._backoff_base = backoff_base
+        self._backoff_max = backoff_max
 
     async def __aenter__(self) -> "BazarrClient":
         """Async context manager entry."""
@@ -112,19 +138,154 @@ class BazarrClient:
             await self._client.aclose()
             self._client = None
 
+    def _compute_backoff(self, attempt: int, retry_after_seconds: int | None) -> float:
+        """Compute the wait time before the next retry attempt.
+
+        Honors a server-provided Retry-After value when present; otherwise
+        falls back to an exponential backoff schedule. Either way, the
+        result is capped at ``self._backoff_max`` seconds.
+
+        Args:
+            attempt: Zero-based attempt number that just failed.
+            retry_after_seconds: Value of the Retry-After header, if any.
+
+        Returns:
+            Number of seconds to wait before retrying.
+        """
+        if retry_after_seconds is not None:
+            return min(float(retry_after_seconds), self._backoff_max)
+        delay = self._backoff_base * (2**attempt)
+        return min(delay, self._backoff_max)
+
+    def _handle_status(self, response: httpx.Response, path: str, attempt: int) -> None:
+        """Inspect a response's status code and raise on error conditions.
+
+        Shared by ``_get`` and ``_patch``. For non-retryable errors, raises
+        the corresponding ``BazarrError`` immediately. For retryable errors
+        (429, 5xx), raises the internal ``_RetryableStatus`` signal so the
+        caller's request loop can back off and retry. Returns normally
+        (does nothing) for any other status, leaving further handling
+        (e.g. ``raise_for_status()``) to the caller.
+
+        Args:
+            response: The HTTP response to inspect.
+            path: API endpoint path, used for error messages/logging.
+            attempt: Zero-based attempt number for this request, used to
+                compute exponential backoff.
+
+        Raises:
+            BazarrAuthError: If authentication fails (401)
+            BazarrNotFoundError: If resource not found (404)
+            _RetryableStatus: If the error is retryable (429, 5xx)
+        """
+        if response.status_code == 401:
+            raise BazarrAuthError("Authentication failed: Invalid API key")
+
+        elif response.status_code == 404:
+            raise BazarrNotFoundError(f"Resource not found: {path}")
+
+        elif response.status_code == 429:
+            retry_after = response.headers.get("Retry-After")
+            retry_after_seconds = None
+            if retry_after:
+                try:
+                    retry_after_seconds = int(retry_after)
+                except ValueError:
+                    pass
+            wait_seconds = self._compute_backoff(attempt, retry_after_seconds)
+            raise _RetryableStatus(
+                wait_seconds,
+                BazarrRateLimited(retry_after=retry_after_seconds),
+            )
+
+        elif response.status_code >= 500:
+            retry_after = response.headers.get("Retry-After")
+            retry_after_seconds = None
+            if retry_after:
+                try:
+                    retry_after_seconds = int(retry_after)
+                except ValueError:
+                    pass
+            wait_seconds = self._compute_backoff(attempt, retry_after_seconds)
+            raise _RetryableStatus(
+                wait_seconds,
+                BazarrServerError(
+                    f"Server error {response.status_code}: {response.text}"
+                ),
+            )
+
+    async def _request(
+        self,
+        method: str,
+        path: str,
+        params: dict[str, Any] | None = None,
+    ) -> httpx.Response:
+        """Make an HTTP request to the Bazarr API with retry/backoff.
+
+        Retryable errors (429, 5xx) are retried with exponential backoff,
+        honoring a server-provided Retry-After header when present, up to
+        ``self.max_retries`` attempts. Non-retryable errors (401, 404) and
+        network-level failures raise immediately.
+
+        Args:
+            method: HTTP method (e.g. "GET", "PATCH")
+            path: API endpoint path (e.g., /api/movies/wanted)
+            params: Query parameters
+
+        Returns:
+            httpx.Response object. Callers are responsible for any further
+            status handling not covered by ``_handle_status`` (e.g. calling
+            ``raise_for_status()`` for GET requests).
+
+        Raises:
+            BazarrAuthError: If authentication fails (401)
+            BazarrNotFoundError: If resource not found (404)
+            BazarrRateLimited: If rate limited (429) and retries exhausted
+            BazarrServerError: If server error (5xx) and retries exhausted,
+                or the request failed at the transport level
+        """
+        client = await self._ensure_client()
+        attempt = 0
+
+        while True:
+            try:
+                response = await client.request(method, path, params=params)
+            except httpx.TimeoutException as e:
+                raise BazarrServerError(f"Request timeout: {e}") from e
+            except httpx.RequestError as e:
+                raise BazarrServerError(f"Request failed: {e}") from e
+
+            try:
+                self._handle_status(response, path, attempt)
+            except _RetryableStatus as retryable:
+                if attempt >= self.max_retries:
+                    raise retryable.error from None
+                logger.warning(
+                    "Retryable error on %s %s (attempt %d/%d): %s. "
+                    "Waiting %.1fs before retrying.",
+                    method,
+                    path,
+                    attempt + 1,
+                    self.max_retries,
+                    retryable.error,
+                    retryable.wait_seconds,
+                )
+                await asyncio.sleep(retryable.wait_seconds)
+                attempt += 1
+                continue
+
+            return response
+
     async def _get(
         self,
         path: str,
         params: dict[str, Any] | None = None,
-        *,
-        retry: bool = True,
     ) -> dict[str, Any]:
         """Make a GET request to Bazarr API.
 
         Args:
             path: API endpoint path (e.g., /api/movies/wanted)
             params: Query parameters
-            retry: Whether to retry on server errors
 
         Returns:
             JSON response as dict
@@ -132,65 +293,23 @@ class BazarrClient:
         Raises:
             BazarrAuthError: If authentication fails (401)
             BazarrNotFoundError: If resource not found (404)
-            BazarrRateLimited: If rate limited (429)
-            BazarrServerError: If server error (5xx) and retry fails
+            BazarrRateLimited: If rate limited (429) and retries exhausted
+            BazarrServerError: If server error (5xx) and retries exhausted
         """
-        client = await self._ensure_client()
-
-        try:
-            response = await client.get(path, params=params)
-
-            if response.status_code == 401:
-                raise BazarrAuthError("Authentication failed: Invalid API key")
-
-            elif response.status_code == 404:
-                raise BazarrNotFoundError(f"Resource not found: {path}")
-
-            elif response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                retry_after_seconds = None
-                if retry_after:
-                    try:
-                        retry_after_seconds = int(retry_after)
-                    except ValueError:
-                        pass
-                raise BazarrRateLimited(retry_after=retry_after_seconds)
-
-            elif response.status_code >= 500:
-                if retry:
-                    logger.warning(
-                        "Server error %s on %s, retrying once...",
-                        response.status_code,
-                        path,
-                    )
-                    await asyncio.sleep(2)
-                    return await self._get(path, params, retry=False)
-                else:
-                    raise BazarrServerError(
-                        f"Server error {response.status_code}: {response.text}"
-                    )
-
-            response.raise_for_status()
-            return response.json()
-
-        except httpx.TimeoutException as e:
-            raise BazarrServerError(f"Request timeout: {e}") from e
-        except httpx.RequestError as e:
-            raise BazarrServerError(f"Request failed: {e}") from e
+        response = await self._request("GET", path, params)
+        response.raise_for_status()
+        return response.json()
 
     async def _patch(
         self,
         path: str,
         params: dict[str, Any] | None = None,
-        *,
-        retry: bool = True,
     ) -> httpx.Response:
         """Make a PATCH request to Bazarr API.
 
         Args:
             path: API endpoint path (e.g., /api/movies)
             params: Query parameters
-            retry: Whether to retry on server errors
 
         Returns:
             httpx.Response object (caller checks status code)
@@ -198,50 +317,10 @@ class BazarrClient:
         Raises:
             BazarrAuthError: If authentication fails (401)
             BazarrNotFoundError: If resource not found (404)
-            BazarrRateLimited: If rate limited (429)
-            BazarrServerError: If server error (5xx) and retry fails
+            BazarrRateLimited: If rate limited (429) and retries exhausted
+            BazarrServerError: If server error (5xx) and retries exhausted
         """
-        client = await self._ensure_client()
-
-        try:
-            response = await client.patch(path, params=params)
-
-            if response.status_code == 401:
-                raise BazarrAuthError("Authentication failed: Invalid API key")
-
-            elif response.status_code == 404:
-                raise BazarrNotFoundError(f"Resource not found: {path}")
-
-            elif response.status_code == 429:
-                retry_after = response.headers.get("Retry-After")
-                retry_after_seconds = None
-                if retry_after:
-                    try:
-                        retry_after_seconds = int(retry_after)
-                    except ValueError:
-                        pass
-                raise BazarrRateLimited(retry_after=retry_after_seconds)
-
-            elif response.status_code >= 500:
-                if retry:
-                    logger.warning(
-                        "Server error %s on %s, retrying once...",
-                        response.status_code,
-                        path,
-                    )
-                    await asyncio.sleep(2)
-                    return await self._patch(path, params, retry=False)
-                else:
-                    raise BazarrServerError(
-                        f"Server error {response.status_code}: {response.text}"
-                    )
-
-            return response
-
-        except httpx.TimeoutException as e:
-            raise BazarrServerError(f"Request timeout: {e}") from e
-        except httpx.RequestError as e:
-            raise BazarrServerError(f"Request failed: {e}") from e
+        return await self._request("PATCH", path, params)
 
     # --- Wanted lists (the main listing endpoints) ---
 
@@ -454,7 +533,7 @@ class BazarrClient:
 
         Triggers Bazarr to rescan the series directory for new subtitle files.
         Uses PATCH /api/series?seriesid={seriesId}&action=scan-disk endpoint.
-        
+
         Note: Bazarr does NOT support per-episode rescan. Must scan the entire
         series. series_id is required and will be fetched from Bazarr if not provided.
         _patch handles retry internally on server errors (5xx).
