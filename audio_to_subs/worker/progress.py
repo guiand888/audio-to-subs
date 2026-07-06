@@ -7,24 +7,23 @@ Bridges pipeline structured progress events to:
 """
 
 import asyncio
-import json
 import logging
 import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
-from audio_to_subs.core.cancel import Cancelled, CancelToken
+from audio_to_subs.core.cancel import CancelToken
 from audio_to_subs.core.pipeline import ProgressEvent
 from audio_to_subs.db.models import JobLog, LogLevel
+from audio_to_subs.db.session import get_async_session
 from audio_to_subs.queue_.events import publish_progress
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
     from redis.asyncio import Redis
 
 logger = logging.getLogger(__name__)
@@ -37,14 +36,18 @@ DB_UPDATE_DEBOUNCE = 1.0
 class ProgressBridge:
     """Bridges pipeline progress events to external systems.
 
+    Uses per-write sessions to avoid concurrent coroutine access to a shared
+    AsyncSession, which is not thread-safe. A lock serializes writes to SQLite.
+
     Attributes:
-        session: Async database session
+        database_url: Database connection URL for per-write sessions
         redis: Redis async client
         job_id: UUID of the job being processed
         token: Cancellation token for the job
+        loop: Event loop for scheduling async operations
     """
 
-    session: "AsyncSession"
+    database_url: str
     redis: "Redis"
     job_id: UUID
     token: CancelToken
@@ -53,7 +56,7 @@ class ProgressBridge:
     _last_percent: int = field(default=0, init=False)
     _last_db_update: float = field(default=0.0, init=False)
     _last_stage: Optional[str] = field(default=None, init=False)
-    _lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    _write_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
 
     def on_event(self, event: ProgressEvent) -> None:
         """Synchronous progress callback for the pipeline.
@@ -121,51 +124,51 @@ class ProgressBridge:
     async def _update_job_progress(
         self, percent: int, stage: str, message: str
     ) -> None:
-        """Update job progress in database."""
-        async with self._lock:
+        """Update job progress in database using a per-write session."""
+        async with self._write_lock:
             try:
-                update_stmt = text("""
-                    UPDATE jobs
-                    SET
-                        progress_percent = :percent,
-                        progress_message = :message,
-                        updated_at = CURRENT_TIMESTAMP
-                    WHERE id = :job_id
-                """)
-                await self.session.execute(
-                    update_stmt,
-                    {
-                        "percent": percent,
-                        "message": message,
-                        "job_id": str(self.job_id),
-                    },
-                )
-                await self.session.commit()
+                async with get_async_session(self.database_url) as session:
+                    update_stmt = text(
+                        """
+                        UPDATE jobs
+                        SET
+                            progress_percent = :percent,
+                            progress_message = :message,
+                            updated_at = CURRENT_TIMESTAMP
+                        WHERE id = :job_id
+                    """
+                    )
+                    await session.execute(
+                        update_stmt,
+                        {
+                            "percent": percent,
+                            "message": message,
+                            "job_id": str(self.job_id),
+                        },
+                    )
+                    await session.commit()
             except IntegrityError:
-                await self.session.rollback()
                 logger.warning(
                     f"Integrity error updating progress for job {self.job_id}"
                 )
             except Exception as e:
-                await self.session.rollback()
-                logger.error(
-                    f"Failed to update progress for job {self.job_id}: {e}"
-                )
+                logger.error(f"Failed to update progress for job {self.job_id}: {e}")
 
     async def _write_job_log(self, stage: str, message: str) -> None:
-        """Write a log entry for stage transition."""
-        try:
-            log_entry = JobLog(
-                job_id=str(self.job_id),
-                ts=datetime.now(timezone.utc),
-                level=LogLevel.INFO,
-                message=f"[{stage}] {message}",
-            )
-            self.session.add(log_entry)
-            await self.session.commit()
-        except Exception as e:
-            await self.session.rollback()
-            logger.error(f"Failed to write job log for job {self.job_id}: {e}")
+        """Write a log entry for stage transition using a per-write session."""
+        async with self._write_lock:
+            try:
+                async with get_async_session(self.database_url) as session:
+                    log_entry = JobLog(
+                        job_id=str(self.job_id),
+                        ts=datetime.now(timezone.utc),
+                        level=LogLevel.INFO,
+                        message=f"[{stage}] {message}",
+                    )
+                    session.add(log_entry)
+                    await session.commit()
+            except Exception as e:
+                logger.error(f"Failed to write job log for job {self.job_id}: {e}")
 
     async def close(self) -> None:
         """Clean up resources."""

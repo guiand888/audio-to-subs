@@ -35,7 +35,7 @@ def make_claimed_job(**overrides) -> ClaimedJob:
     return ClaimedJob(**defaults)
 
 
-def make_worker_deps(session, redis=None, settings=None) -> WorkerDeps:
+def make_worker_deps(session, redis=None, settings=None, database_url=None) -> WorkerDeps:
     """Build WorkerDeps with a mocked redis client and minimal settings."""
     if redis is None:
         redis = AsyncMock()
@@ -47,11 +47,16 @@ def make_worker_deps(session, redis=None, settings=None) -> WorkerDeps:
             mistral_input_token_rate_usd=None,
             mistral_output_token_rate_usd=None,
         )
+    if database_url is None:
+        from audio_to_subs.api.settings import get_settings
+        settings_obj = get_settings()
+        database_url = settings_obj.DATABASE_URL
     return WorkerDeps(
         session=session,
         redis=redis,
         settings=settings,
         mistral_api_key="test-key",
+        database_url=database_url,
     )
 
 
