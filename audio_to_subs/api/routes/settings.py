@@ -18,6 +18,19 @@ logger = logging.getLogger(__name__)
 router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 
+# Sentinel returned in place of secrets (bazarr_api_key) in API responses.
+# Never valid as a real credential - any endpoint receiving this value back
+# must treat it as "unchanged", not forward it to Bazarr or persist it.
+MASKED_VALUE = "***MASKED***"
+
+# Fixed timeout for the "Test Connection" probe (test_bazarr_connection),
+# deliberately independent of the user-configurable bazarr_timeout setting
+# (which governs real sync/poll requests and defaults to 30s). A connection
+# test should fail fast and give the user quick feedback, not hang for as
+# long as production requests are allowed to.
+CONNECTION_TEST_TIMEOUT_SECONDS = 5.0
+
+
 # Default settings values
 DEFAULT_SETTINGS = {
     "mistral_model": "voxtral-mini-2602",
@@ -98,7 +111,7 @@ class SettingsResponse(BaseModel):
         copy = self.model_copy()
         # Mask API keys - return only if they were not set
         if copy.bazarr_api_key:
-            copy.bazarr_api_key = "***MASKED***"
+            copy.bazarr_api_key = MASKED_VALUE
         return copy
 
 
@@ -206,29 +219,25 @@ async def _get_all_settings(
 async def _seed_default_settings(
     db: Annotated["AsyncSession", Depends(get_db)],
 ) -> bool:
-    """Seed default settings if not present.
+    """Seed default settings unconditionally.
+
+    Caller is responsible for checking whether the table is already
+    populated (see ``get_settings``) - this avoids a redundant COUNT query.
 
     Returns:
-        True if settings were seeded, False if they already existed.
+        True once settings have been seeded.
     """
     from audio_to_subs.db.models import Setting
 
-    # Use a count query instead of fetching all rows
-    result = await db.execute(select(func.count(Setting.key)))
-    existing_count = result.scalar() or 0
-
-    if existing_count == 0:
-        for key, value in DEFAULT_SETTINGS.items():
-            setting = Setting(
-                key=key,
-                value_json=json.dumps(value),
-            )
-            db.add(setting)
-        await db.commit()
-        logger.info("Seeded %d default settings", len(DEFAULT_SETTINGS))
-        return True
-
-    return False
+    for key, value in DEFAULT_SETTINGS.items():
+        setting = Setting(
+            key=key,
+            value_json=json.dumps(value),
+        )
+        db.add(setting)
+    await db.commit()
+    logger.info("Seeded %d default settings", len(DEFAULT_SETTINGS))
+    return True
 
 
 @router.get("", response_model=SettingsResponse)
@@ -269,6 +278,14 @@ async def update_settings(
 
     # Merge updates
     updates = settings_update.model_dump(exclude_unset=True)
+
+    # The sentinel is only ever a display placeholder for an already-saved
+    # key (see SettingsResponse.sanitized()) - never a real credential. A
+    # client that echoes a GET response back unedited must not clobber the
+    # saved key with it.
+    if updates.get("bazarr_api_key") == MASKED_VALUE:
+        del updates["bazarr_api_key"]
+
     merged_settings = {**current_settings, **updates}
 
     # Fetch all existing settings for the keys being updated (single query)
@@ -323,9 +340,9 @@ async def get_setting(
         # Check if it's a default setting
         if key in DEFAULT_SETTINGS:
             value = DEFAULT_SETTINGS[key]
-            # Mask sensitive settings
-            if key in ("bazarr_api_key", "SESSION_SECRET"):
-                value = "***MASKED***"
+            # Mask sensitive settings (only if actually set - don't mask a null/empty value)
+            if value and key in ("bazarr_api_key", "SESSION_SECRET"):
+                value = MASKED_VALUE
             return {"key": key, "value": value}
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
@@ -333,10 +350,10 @@ async def get_setting(
         )
 
     try:
-        value = json.loads(row.value_json)
-        # Mask sensitive settings
-        if key in ("bazarr_api_key", "SESSION_SECRET"):
-            value = "***MASKED***"
+        value = json.loads(row)
+        # Mask sensitive settings (only if actually set - don't mask a null/empty value)
+        if value and key in ("bazarr_api_key", "SESSION_SECRET"):
+            value = MASKED_VALUE
         return {"key": key, "value": value}
     except json.JSONDecodeError as e:
         raise HTTPException(
@@ -352,6 +369,10 @@ class BazarrConnectionTestRequest(BaseModel):
     When bazarr_url is provided, the test targets these values directly
     instead of the saved DB/env settings - this lets the Settings page test
     unsaved, currently-edited form values before the user clicks Save.
+
+    Deliberately has no bazarr_timeout field: the test always uses
+    CONNECTION_TEST_TIMEOUT_SECONDS, not the user-configured production
+    timeout (see that constant's docstring for why).
     """
 
     bazarr_url: str | None = Field(
@@ -359,9 +380,6 @@ class BazarrConnectionTestRequest(BaseModel):
     )
     bazarr_api_key: str | None = Field(
         default=None, description="Bazarr API key to test (overrides saved settings)"
-    )
-    bazarr_timeout: float | None = Field(
-        default=None, description="Bazarr timeout to test (overrides saved settings)"
     )
 
 
@@ -397,6 +415,8 @@ async def test_bazarr_connection(
     This endpoint:
     - Tests request-body overrides if provided, else DB settings, else env vars
     - Makes a lightweight API call to test connectivity
+    - Always uses CONNECTION_TEST_TIMEOUT_SECONDS, regardless of the
+      configured/overridden bazarr_timeout (see that constant's docstring)
     - NEVER exposes API keys, URLs, or other sensitive data in responses or logs
     - Returns success/failure with user-friendly messages
 
@@ -409,22 +429,30 @@ async def test_bazarr_connection(
     )
 
     try:
+        bazarr_url: str | None
+        api_key: str | None
         if test_request.bazarr_url is not None:
             # Test the values currently in the (possibly unsaved) settings form.
-            client = await get_bazarr_client(
-                test_request.bazarr_url,
-                test_request.bazarr_api_key,
-                (
-                    test_request.bazarr_timeout
-                    if test_request.bazarr_timeout is not None
-                    else 30.0
-                ),
-            )
+            bazarr_url = test_request.bazarr_url
+            api_key = test_request.bazarr_api_key
+            if api_key is None or api_key == MASKED_VALUE:
+                # The API key field is blank or still holds the masked
+                # placeholder from a prior GET (the raw key is never sent to
+                # the client) - fall back to the saved key rather than using
+                # the placeholder as a literal credential.
+                _, _, api_key, _ = await get_bazarr_client_with_settings(db, settings)
         else:
-            # Get Bazarr client using database settings first, then environment fallback
-            client, bazarr_url, bazarr_api_key, bazarr_timeout = (
-                await get_bazarr_client_with_settings(db, settings)
+            # Use configured settings (database first, then environment
+            # fallback). The client/timeout this returns are discarded below -
+            # the test always builds its own client with the fixed test
+            # timeout instead of whatever bazarr_timeout is configured.
+            _, bazarr_url, api_key, _ = await get_bazarr_client_with_settings(
+                db, settings
             )
+
+        client = await get_bazarr_client(
+            bazarr_url, api_key, CONNECTION_TEST_TIMEOUT_SECONDS
+        )
 
         if client is None:
             return BazarrConnectionTestResponse(
@@ -433,8 +461,21 @@ async def test_bazarr_connection(
                 error="bazarr_not_configured",
             )
 
-        # Attempt a lightweight API call to test connectivity
-        # Use list_all_series with limit=1 to minimize impact
+        # Attempt a lightweight, auth-checked API call to test connectivity.
+        # list_all_series(length=1) is the best available probe in Bazarr's
+        # API (verified against Bazarr's own source, not just its docs):
+        #   - /api/system/ping is explicitly unauthenticated and always
+        #     returns 200, so it would report "success" even with a wrong
+        #     or missing API key - useless for an auth test.
+        #   - /api/system/status looks lighter but calls into
+        #     get_radarr_info.version()/get_sonarr_info.version(), which make
+        #     live outbound HTTP requests to the user's Radarr/Sonarr
+        #     instances (only cached for 60s) - slower and adds failure modes
+        #     unrelated to Bazarr itself.
+        #   - /api/badges runs several DB aggregate queries across episodes,
+        #     movies, health and providers - not actually cheaper.
+        # /api/series requires the same @authenticate check as every other
+        # endpoint and, with length=1, returns at most one row.
         try:
             await client.list_all_series(start=0, length=1)
             # If we get here, the connection succeeded

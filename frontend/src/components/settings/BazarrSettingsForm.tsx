@@ -23,23 +23,40 @@ export function BazarrSettingsForm({
 
   const handleNumberChange = (field: keyof SettingsPatch) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
-    const num = value === "" ? 0 : parseFloat(value)
-    onChange({ [field]: isNaN(num) ? 0 : num })
+    // An emptied field means "no override", not zero - a timeout/interval of
+    // 0 would make every request fail (or poll) instantly.
+    if (value === "") {
+      onChange({ [field]: undefined })
+      return
+    }
+    const num = parseFloat(value)
+    if (!isNaN(num)) {
+      onChange({ [field]: num })
+    }
   }
 
   const handleBooleanChange = (field: keyof SettingsPatch) => (checked: boolean) => {
     onChange({ [field]: checked })
   }
 
+  const failTestConnection = (message: string) => {
+    setTestConnectionStatus("error")
+    toast.error("Failed to connect to Bazarr: " + message)
+    setTimeout(() => setTestConnectionStatus("idle"), 5000)
+  }
+
   const handleTestConnection = async () => {
     setTestConnectionStatus("testing")
     try {
+      // No bazarr_timeout here: the backend always uses its own short,
+      // fixed timeout for this probe rather than the configured/edited
+      // Bazarr Timeout setting (which is for real sync/poll requests and
+      // can be much longer than we want to wait for a quick test).
       const response = await api.post<{ success: boolean; message: string | null; error: string | null }>(
         "/api/settings/test-bazarr-connection",
         {
           bazarr_url: formData.bazarr_url,
           bazarr_api_key: formData.bazarr_api_key,
-          bazarr_timeout: formData.bazarr_timeout,
         }
       )
       if (response.success) {
@@ -47,15 +64,11 @@ export function BazarrSettingsForm({
         toast.success(response.message || "Connected to Bazarr successfully")
         setTimeout(() => setTestConnectionStatus("idle"), 3000)
       } else {
-        setTestConnectionStatus("error")
-        toast.error("Failed to connect to Bazarr: " + (response.error || "Unknown error"))
-        setTimeout(() => setTestConnectionStatus("idle"), 5000)
+        failTestConnection(response.error || "Unknown error")
       }
     } catch (error) {
-      setTestConnectionStatus("error")
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
-      toast.error("Failed to connect to Bazarr: " + errorMessage)
-      setTimeout(() => setTestConnectionStatus("idle"), 5000)
+      failTestConnection(errorMessage)
     }
   }
 
@@ -102,7 +115,8 @@ export function BazarrSettingsForm({
           onChange={handleNumberChange("bazarr_timeout")}
         />
         <p className="text-sm text-muted-foreground">
-          Timeout for Bazarr API requests (1-300 seconds)
+          Timeout for real Bazarr sync/poll requests (1-300 seconds). Not used
+          by Test Connection, which always uses its own short fixed timeout.
         </p>
       </div>
 

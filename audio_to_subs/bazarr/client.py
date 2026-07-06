@@ -379,17 +379,21 @@ class BazarrClient:
         *,
         start: int = 0,
         length: int = -1,
+        radarrid: list[int] | None = None,
     ) -> MoviesPage:
         """List all movies.
 
         Args:
             start: Paging start (default 0)
             length: Paging length (default -1 for all)
+            radarrid: Filter by specific Radarr IDs
 
         Returns:
             MoviesPage with all movies
         """
-        params = {"start": start, "length": length}
+        params: dict[str, Any] = {"start": start, "length": length}
+        if radarrid:
+            params["radarrid[]"] = radarrid
         data = await self._get("/api/movies", params)
         return MoviesPage.model_validate(data)
 
@@ -590,11 +594,11 @@ class BazarrClient:
     async def get_movie_by_id(self, radarr_id: int) -> Movie | None:
         """Get a specific movie by Radarr ID.
 
-        Note: This uses the wanted endpoint with filtering since
-        Bazarr doesn't have a direct /api/movies/{id} endpoint.
+        Note: Bazarr has no path-based /api/movies/{id} endpoint, but
+        /api/movies accepts a radarrid[] filter, so this is a single
+        server-side-filtered request rather than a full-catalog scan.
         """
-        page = await self.list_all_movies(length=1000)
-        for movie in page.data:
-            if movie.radarrId == radarr_id:
-                return movie
+        page = await self.list_all_movies(radarrid=[radarr_id])
+        if page.data:
+            return page.data[0]
         return None

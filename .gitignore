@@ -77,7 +77,12 @@ test_resources.local.md
 # Project metadata (agent standards)
 AGENTS.md
 .agent/
+CLAUDE.md
 
 # Frontend build artefacts (each also covered by frontend/.gitignore)
 frontend/node_modules/
 frontend/dist/
+
+# Local manual-test environment (podman-compose bind mounts: service
+# configs, redis/db data dirs, test video fixtures)
+dev/testing/

@@ -48,7 +48,7 @@ def test_batch_process_multiple_videos():
 
 
 @pytest.mark.xfail(
-    reason="process_batch raises on first failure; continue-on-error is a P0 fix (B-series)"
+    reason="BDD test bug: mocking creates 3 SRT files instead of 2; actual continue-on-error is fixed (commit aaeb266)"
 )
 @scenario(
     "../video_to_subtitles_pipeline.feature",

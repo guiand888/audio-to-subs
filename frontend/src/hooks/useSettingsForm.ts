@@ -1,4 +1,4 @@
-import { useState, useMemo } from "react"
+import { useState, useEffect, useMemo } from "react"
 import type { SettingsOut, SettingsPatch } from "@/lib/types"
 
 /**
@@ -9,7 +9,7 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
   const [formData, setFormData] = useState<Partial<SettingsPatch>>({})
 
   // Sync form data with fetched settings on mount/update
-  const isInitialized = useMemo(() => {
+  useEffect(() => {
     if (settings && Object.keys(formData).length === 0) {
       setFormData({
         mistral_model: settings.mistral_model,
@@ -30,8 +30,9 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
         max_audio_length: settings.max_audio_length || 900,
       })
     }
-    return settings ? true : false
   }, [settings, formData])
+
+  const isInitialized = Boolean(settings)
 
   // Generic dirty field tracker: count fields that differ from original settings
   const changeCount = useMemo(() => {
