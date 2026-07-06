@@ -1,10 +1,5 @@
 """Tests for path utilities."""
 
-import os
-import tempfile
-
-import pytest
-
 from audio_to_subs.core.path_utils import (
     generate_output_path,
     get_media_type,
@@ -42,9 +37,7 @@ class TestValidateMediaPath:
 
     def test_path_outside_roots(self) -> None:
         """Path outside configured roots should be invalid."""
-        is_valid, error = validate_media_path(
-            "/other/path/file.mp4", "/movies", "/tv"
-        )
+        is_valid, error = validate_media_path("/other/path/file.mp4", "/movies", "/tv")
         assert is_valid is False
         assert error is not None
         assert "not within configured root directories" in error
@@ -73,9 +66,7 @@ class TestGetMediaType:
 
     def test_path_in_tv_root(self) -> None:
         """Path in TV root should return tv."""
-        media_type = get_media_type(
-            "/tv/comedy/series/ep1.mp4", None, "/tv"
-        )
+        media_type = get_media_type("/tv/comedy/series/ep1.mp4", None, "/tv")
         assert media_type == "tv"
 
     def test_path_not_in_any_root(self) -> None:

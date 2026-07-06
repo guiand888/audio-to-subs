@@ -6,7 +6,7 @@ threshold. This handles worker crashes and allows jobs to be picked up by other 
 
 import logging
 from datetime import datetime, timedelta, timezone
-from typing import TYPE_CHECKING, Optional
+from typing import TYPE_CHECKING
 
 from sqlalchemy import delete, update
 from sqlalchemy.exc import IntegrityError

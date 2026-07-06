@@ -1,8 +1,9 @@
 """Tests for core/cancel.py module."""
 
-import pytest
 import threading
 import time
+
+import pytest
 
 from audio_to_subs.core.cancel import Cancelled, CancelToken
 

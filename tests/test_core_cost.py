@@ -1,13 +1,13 @@
 """Tests for core/cost.py module."""
 
-from unittest.mock import MagicMock, Mock
+from unittest.mock import Mock
 
 import pytest
 
 from audio_to_subs.core.cost import (
+    CostBreakdown,
     compute_cost,
     extract_usage,
-    CostBreakdown,
 )
 
 

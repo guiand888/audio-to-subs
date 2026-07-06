@@ -1,11 +1,12 @@
 """Tests for job reaper (stale job cleanup)."""
 
-import pytest
 from datetime import datetime, timedelta, timezone
 from uuid import uuid4
+
+import pytest
 from sqlalchemy import select
 
-from audio_to_subs.db.models import Job, JobStatus, JobSource
+from audio_to_subs.db.models import Job, JobSource, JobStatus
 from audio_to_subs.queue_.reaper import delete_stale_jobs, reap_stale_running
 
 
@@ -45,15 +46,11 @@ async def test_reaper_only_deletes_old_jobs(mock_db_session):
     assert deleted_count == 1
 
     # Verify fresh job still exists
-    result = await mock_db_session.execute(
-        select(Job).where(Job.id == fresh_job.id)
-    )
+    result = await mock_db_session.execute(select(Job).where(Job.id == fresh_job.id))
     assert result.scalar_one_or_none() is not None
 
     # Verify old job is gone
-    result = await mock_db_session.execute(
-        select(Job).where(Job.id == old_job.id)
-    )
+    result = await mock_db_session.execute(select(Job).where(Job.id == old_job.id))
     assert result.scalar_one_or_none() is None
 
 
@@ -93,15 +90,11 @@ async def test_reaper_ignores_active_jobs(mock_db_session):
     assert deleted_count == 1
 
     # Verify active job still exists
-    result = await mock_db_session.execute(
-        select(Job).where(Job.id == active_job.id)
-    )
+    result = await mock_db_session.execute(select(Job).where(Job.id == active_job.id))
     assert result.scalar_one_or_none() is not None
 
     # Verify stale job is gone
-    result = await mock_db_session.execute(
-        select(Job).where(Job.id == stale_job.id)
-    )
+    result = await mock_db_session.execute(select(Job).where(Job.id == stale_job.id))
     assert result.scalar_one_or_none() is None
 
 
@@ -141,15 +134,11 @@ async def test_reaper_timestamp_consistency(mock_db_session):
     assert deleted_count == 1
 
     # Verify fresh job still exists
-    result = await mock_db_session.execute(
-        select(Job).where(Job.id == fresh.id)
-    )
+    result = await mock_db_session.execute(select(Job).where(Job.id == fresh.id))
     assert result.scalar_one_or_none() is not None
 
     # Verify stale job is gone
-    result = await mock_db_session.execute(
-        select(Job).where(Job.id == stale.id)
-    )
+    result = await mock_db_session.execute(select(Job).where(Job.id == stale.id))
     assert result.scalar_one_or_none() is None
 
 

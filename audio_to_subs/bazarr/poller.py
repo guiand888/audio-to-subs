@@ -8,17 +8,16 @@ import logging
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
-from sqlalchemy import select, update, delete, func, or_
-from sqlalchemy.orm import Mapped
+from sqlalchemy import delete, or_, select
 
 from audio_to_subs.bazarr.client import BazarrClient
 from audio_to_subs.bazarr.pathmap import PathMap
-from audio_to_subs.bazarr.schemas import BazarrEpisode, BazarrMovie
 from audio_to_subs.db.models import BazarrCache
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
     from fastapi import FastAPI
+    from sqlalchemy.ext.asyncio import AsyncSession
+
     from audio_to_subs.api.settings import Settings
 
 logger = logging.getLogger(__name__)

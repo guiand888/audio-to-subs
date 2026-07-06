@@ -54,7 +54,7 @@ def _get_video_duration(video_path: str) -> float:
         raise AudioExtractionError(f"Failed to get video duration: {str(e)}") from e
 
 
-def extract_audio(
+def extract_audio(  # noqa: C901
     video_path: str,
     output_path: str,
     progress_callback: Optional[Callable[[str], None]] = None,
@@ -157,7 +157,9 @@ def extract_audio(
             logger.error("FFmpeg extraction timed out after 30 minutes")
             process.kill()
             process.wait()
-            raise AudioExtractionError("FFmpeg extraction timed out after 30 minutes") from e
+            raise AudioExtractionError(
+                "FFmpeg extraction timed out after 30 minutes"
+            ) from e
 
         if process.returncode != 0:
             error_msg = stderr if stderr else "Unknown error"

@@ -116,6 +116,7 @@ export interface SettingsOut {
   movies_root_path: string | null
   tv_root_path: string | null
   subtitles_same_directory: boolean
+  max_audio_length: number
 }
 
 export interface SettingsPatch {
@@ -134,6 +135,7 @@ export interface SettingsPatch {
   movies_root_path?: string | null
   tv_root_path?: string | null
   subtitles_same_directory?: boolean
+  max_audio_length?: number
 }
 
 // --------------- Logs ---------------
@@ -186,6 +188,7 @@ export interface SettingsFormData {
   movies_root_path: string | null
   tv_root_path: string | null
   subtitles_same_directory: boolean
+  max_audio_length: number
 }
 
 // Path mapping

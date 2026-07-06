@@ -50,7 +50,7 @@ def get_audio_duration(audio_path: str) -> float:
         raise AudioSplitterError(f"Failed to get audio duration: {str(e)}") from e
 
 
-def split_audio(
+def split_audio(  # noqa: C901
     audio_path: str,
     output_dir: str,
     max_length: int = MAX_AUDIO_LENGTH,

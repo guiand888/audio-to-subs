@@ -1,7 +1,5 @@
 """Tests for password hashing."""
 
-import pytest
-
 from audio_to_subs.auth.passwords import (
     hash_password,
     needs_rehash,

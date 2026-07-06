@@ -14,9 +14,10 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M4 — Frontend foundation | ✅ Done | 2026-06-02 | Depends on M3 |
 | M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
 | M5.1 — M5 cleanup and verification | ✅ Done | 2026-07-01 | Depends on M5 |
-| M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | 🔄 In Progress | - | Depends on M5.1 |
-| M5.3 — Structural refactor batch (Phases 5–8) | 🔄 In Progress | - | Depends on M5.2; see `REFACTOR.md` |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.3 |
+| M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | ✅ Done | 2026-07-01 | Depends on M5.1 |
+| M5.3 — Structural refactor batch (Phases 5–8) | ✅ Done | 2026-07-05 | Depends on M5.2; see `REFACTOR.md` |
+| M5.4 — Refactor cleanup & configurable limits | ✅ Done | 2026-07-06 | Depends on M5.3 |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.4 |
 
 Every milestone ends with the same quality bar:
 
@@ -252,6 +253,31 @@ Acceptance: each unit lands independently with `pytest`/`black`/`ruff`/`mypy`
 clean and coverage non-decreasing (per `REFACTOR.md`'s verification
 checklist); no behavior change expected from Phase 5–7 work beyond the fixes
 explicitly called out as bugs in earlier phases of that plan.
+
+## M5.4 — Refactor cleanup & configurable limits
+
+**Goal**: Close remaining M5.3 gaps (lint/format/mypy), implement D5 (configurable max_audio_length with per-model presets), and D13 (raw SQL → ORM).
+
+**Depends on**: M5.3
+
+Tasks:
+- **M5.4.1** — Lint/format/mypy cleanup: ruff --fix (516 auto-fixable), black (45 files), mypy python_version 3.9→3.11, ruff config migration to `[tool.ruff.lint]`
+- **M5.4.2** — D13: 5 raw SQL UPDATE sites → ORM; fix `__main__.py:158` missing `updated_at` (latent bug)
+- **M5.4.3** — D5: configurable `max_audio_length` (60–10800s, default 900) with per-model presets:
+  - Backend: `audio_to_subs/core/models.py` (MODEL_SPECS), DB settings + validation, worker clamp (`min(setting, model_preset)`), Pipeline param, audio_splitter uses runtime value
+  - Frontend: types (SettingsOut/Patch/FormData), MistralSettingsForm with auto-fill + clamp, useSettingsForm dirty-tracking
+  - Model presets: voxtral-mini-2602/latest=10800s, voxtral-mini-2507/small-2507=900s
+  - Unify default model to `voxtral-mini-2602` across all layers (DB, Pipeline, worker, client)
+- **M5.4.4** — Remove stale xfail (B25 done; BDD test itself has a mocking issue, re-added xfail with updated reason)
+- **M5.4.5** — Docs: MILESTONES.md M5.4 section (this), TESTING.md (no updates needed)
+
+Acceptance:
+- ruff, black --check, mypy all clean
+- `max_audio_length` configurable in WebUI Settings; per-model clamp enforced at runtime
+- No raw SQL UPDATE statements in jobs/worker paths
+- Full test suite green (523 passed, 3 skipped, 1 xfailed)
+- Default model unified to `voxtral-mini-2602` across all layers
+- Branch `m5.4-refactor-cleanup` ready to merge into `dev`
 
 ## M6 — Polish, docs, coverage, security pass
 

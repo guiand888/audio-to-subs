@@ -13,7 +13,7 @@ from sqlalchemy.orm import Session
 from audio_to_subs.db.base import Base, get_async_engine, get_sync_engine
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import create_async_engine
+    pass
 
 
 # Default DSN
@@ -26,10 +26,10 @@ async def get_async_session(
     dsn: str | None = None,
 ) -> AsyncGenerator[AsyncSession, None]:
     """Async context manager for database session.
-    
+
     Args:
         dsn: Database URL. If None, uses default.
-    
+
     Yields:
         Async SQLAlchemy session
     """
@@ -57,17 +57,17 @@ def get_sync_session(
     dsn: str | None = None,
 ) -> Generator[Session, None, None]:
     """Sync context manager for database session.
-    
+
     Args:
         dsn: Database URL. If None, uses default.
-    
+
     Yields:
         Sync SQLAlchemy session
     """
     if dsn is None:
         dsn = DEFAULT_SYNC_DSN
     engine = get_sync_engine(dsn)
-    
+
     session = Session(engine, expire_on_commit=False)
     try:
         yield session
@@ -81,7 +81,7 @@ def get_sync_session(
 
 async def init_db(dsn: str | None = None) -> None:
     """Initialize database with all tables.
-    
+
     Args:
         dsn: Database URL. If None, uses default.
     """

@@ -16,7 +16,6 @@ from sqlalchemy import (
     Float,
     ForeignKey,
     Integer,
-    JSON,
     String,
     Text,
     func,
@@ -27,7 +26,7 @@ from sqlalchemy.orm import Mapped, mapped_column, relationship
 from audio_to_subs.db.base import Base
 
 if TYPE_CHECKING:
-    from sqlalchemy.ext.asyncio import AsyncSession
+    pass
 
 
 # Enums
@@ -120,9 +119,7 @@ class Job(Base):
         Boolean, nullable=False, default=False
     )
     worker_id: Mapped[str | None] = mapped_column(String(255), nullable=True)
-    audio_duration_seconds: Mapped[float | None] = mapped_column(
-        Float, nullable=True
-    )
+    audio_duration_seconds: Mapped[float | None] = mapped_column(Float, nullable=True)
     mistral_usage_json: Mapped[str | None] = mapped_column(Text, nullable=True)
     estimated_cost_usd: Mapped[float | None] = mapped_column(Float, nullable=True)
     error_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -185,9 +182,7 @@ class JobLog(Base):
     job_id: Mapped[str | None] = mapped_column(
         String(36), ForeignKey("jobs.id", ondelete="CASCADE"), nullable=True
     )
-    ts: Mapped[datetime] = mapped_column(
-        DateTime, nullable=False, default=func.now()
-    )
+    ts: Mapped[datetime] = mapped_column(DateTime, nullable=False, default=func.now())
     level: Mapped[LogLevel] = mapped_column(String(20), nullable=False)
     message: Mapped[str] = mapped_column(Text, nullable=False)
 

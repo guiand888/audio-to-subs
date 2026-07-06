@@ -4,8 +4,6 @@ import os
 import tempfile
 from unittest.mock import MagicMock
 
-import pytest
-
 from audio_to_subs.core.pipeline import Pipeline
 from audio_to_subs.core.transcription_client import TranscriptionClient
 
@@ -67,13 +65,17 @@ class TestProgressReporting:
 
         try:
             # Mock the Mistral API call
-            with patch(
-                "audio_to_subs.core.transcription_client.Mistral"
-            ) as mock_mistral, patch(
-                "audio_to_subs.core.transcription_client.os.path.getsize"
-            ) as mock_getsize, patch(
-                "audio_to_subs.core.transcription_client.Path.exists"
-            ) as mock_exists:
+            with (
+                patch(
+                    "audio_to_subs.core.transcription_client.Mistral"
+                ) as mock_mistral,
+                patch(
+                    "audio_to_subs.core.transcription_client.os.path.getsize"
+                ) as mock_getsize,
+                patch(
+                    "audio_to_subs.core.transcription_client.Path.exists"
+                ) as mock_exists,
+            ):
                 mock_exists.return_value = True
                 mock_getsize.return_value = 2048
                 mock_client = MagicMock()
@@ -92,7 +94,9 @@ class TestProgressReporting:
                 )
 
                 # Verify upload progress was reported
-                upload_messages = [msg for msg in progress_messages if "Uploading" in msg[0]]
+                upload_messages = [
+                    msg for msg in progress_messages if "Uploading" in msg[0]
+                ]
                 assert len(upload_messages) > 0
 
                 # Verify progress includes percentages
@@ -237,13 +241,17 @@ class TestProgressReporting:
 
         try:
             # Mock the Mistral API call
-            with patch(
-                "audio_to_subs.core.transcription_client.Mistral"
-            ) as mock_mistral, patch(
-                "audio_to_subs.core.transcription_client.os.path.getsize"
-            ) as mock_getsize, patch(
-                "audio_to_subs.core.transcription_client.Path.exists"
-            ) as mock_exists:
+            with (
+                patch(
+                    "audio_to_subs.core.transcription_client.Mistral"
+                ) as mock_mistral,
+                patch(
+                    "audio_to_subs.core.transcription_client.os.path.getsize"
+                ) as mock_getsize,
+                patch(
+                    "audio_to_subs.core.transcription_client.Path.exists"
+                ) as mock_exists,
+            ):
                 mock_exists.return_value = True
                 mock_getsize.return_value = 5 * 1024 * 1024
                 mock_client = MagicMock()
@@ -262,13 +270,13 @@ class TestProgressReporting:
                 )
 
                 # Verify we have multiple progress updates
-                upload_messages = [msg for msg in progress_messages if "Uploading" in msg[0]]
+                upload_messages = [
+                    msg for msg in progress_messages if "Uploading" in msg[0]
+                ]
                 assert len(upload_messages) > 0
 
                 # Verify we have intermediate percentages
-                percentages = [
-                    msg[1] for msg in upload_messages if msg[1] is not None
-                ]
+                percentages = [msg[1] for msg in upload_messages if msg[1] is not None]
                 assert len(percentages) > 0
 
                 # Verify percentages are increasing (no regression)
@@ -355,14 +363,10 @@ class TestProgressReporting:
 
         # Should have progress for both segments
         segment_1_messages = [
-            msg
-            for msg in segment_messages
-            if "1/2" in msg[0] or "1 of 2" in msg[0]
+            msg for msg in segment_messages if "1/2" in msg[0] or "1 of 2" in msg[0]
         ]
         segment_2_messages = [
-            msg
-            for msg in segment_messages
-            if "2/2" in msg[0] or "2 of 2" in msg[0]
+            msg for msg in segment_messages if "2/2" in msg[0] or "2 of 2" in msg[0]
         ]
         assert len(segment_1_messages) > 0
         assert len(segment_2_messages) > 0

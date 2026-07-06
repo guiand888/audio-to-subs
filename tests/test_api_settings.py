@@ -1,7 +1,5 @@
 """Tests for API settings endpoints."""
 
-import pytest
-
 
 def test_get_settings_empty_db(authenticated_client):
     """GET /api/settings returns default settings on a fresh database."""
@@ -54,13 +52,13 @@ def test_update_bazarr_settings(authenticated_client, sync_session):
     # First get current settings
     response = authenticated_client.get("/api/settings")
     assert response.status_code == 200
-    original_data = response.json()
+    response.json()
 
     # Update Bazarr settings
     update_data = {
         "bazarr_url": "http://test-bazarr:6767",
         "bazarr_api_key": "test-api-key-123",
-        "bazarr_timeout": 45.0
+        "bazarr_timeout": 45.0,
     }
 
     response = authenticated_client.patch("/api/settings", json=update_data)
@@ -75,6 +73,7 @@ def test_update_bazarr_settings(authenticated_client, sync_session):
     assert updated_data["bazarr_timeout"] == 45.0
 
     from sqlalchemy import select
+
     from audio_to_subs.db.models import Setting
 
     setting = sync_session.execute(
@@ -95,12 +94,13 @@ def test_update_bazarr_settings(authenticated_client, sync_session):
 # Pure model tests (no DB required)
 # ---------------------------------------------------------------------------
 
+
 class TestSettingsResponseModel:
     """Test SettingsResponse model validation."""
 
     def test_settings_response_defaults(self):
         """SettingsResponse.from_db_settings({}) fills in all defaults."""
-        from audio_to_subs.api.routes.settings import SettingsResponse, DEFAULT_SETTINGS
+        from audio_to_subs.api.routes.settings import DEFAULT_SETTINGS, SettingsResponse
 
         response = SettingsResponse.from_db_settings({})
 
@@ -110,7 +110,7 @@ class TestSettingsResponseModel:
 
     def test_settings_response_includes_bazarr_connection_fields(self):
         """SettingsResponse includes Bazarr connection fields."""
-        from audio_to_subs.api.routes.settings import SettingsResponse, DEFAULT_SETTINGS
+        from audio_to_subs.api.routes.settings import SettingsResponse
 
         response = SettingsResponse.from_db_settings({})
 
@@ -181,32 +181,33 @@ class TestSettingsUpdateModel:
 # BAZARR_API_KEY_FILE tests
 # ---------------------------------------------------------------------------
 
+
 class TestBazarrApiKeyFile:
     """Test BAZARR_API_KEY_FILE loading functionality."""
 
     def test_bazarr_api_key_from_env(self, monkeypatch):
         """Test BAZARR_API_KEY loaded directly from environment."""
-        from audio_to_subs.api.settings import Settings, get_settings
-        
         # Reset settings
         import audio_to_subs.api.settings as api_settings
+        from audio_to_subs.api.settings import get_settings
+
         api_settings._settings = None
-        
+
         monkeypatch.setenv("BAZARR_API_KEY", "direct-key-123")
         monkeypatch.setenv("BAZARR_API_KEY_FILE", "")
-        
+
         settings = get_settings()
         assert settings.BAZARR_API_KEY == "direct-key-123"
         assert settings.bazarr_api_key == "direct-key-123"
 
     def test_bazarr_api_key_from_file(self, monkeypatch, tmp_path):
         """Test BAZARR_API_KEY loaded from file."""
-        from audio_to_subs.api.settings import Settings, get_settings
-        
         # Reset settings
         import audio_to_subs.api.settings as api_settings
+        from audio_to_subs.api.settings import get_settings
+
         api_settings._settings = None
-        
+
         # Create a temporary file with API key
         api_key_file = tmp_path / "bazarr_key.txt"
         api_key_file.write_text("file-key-456\n")
@@ -216,7 +217,7 @@ class TestBazarrApiKeyFile:
         # existing MISTRAL_API_KEY_FILE/SESSION_SECRET_FILE convention.
         monkeypatch.delenv("BAZARR_API_KEY", raising=False)
         monkeypatch.setenv("BAZARR_API_KEY_FILE", str(api_key_file))
-        
+
         settings = get_settings()
         # The mode="before" field_validator populates BAZARR_API_KEY itself
         # from the file (same as the pre-existing MISTRAL_API_KEY_FILE pattern).
@@ -226,34 +227,34 @@ class TestBazarrApiKeyFile:
 
     def test_bazarr_api_key_env_takes_priority(self, monkeypatch, tmp_path):
         """Test BAZARR_API_KEY from env takes priority over file."""
-        from audio_to_subs.api.settings import Settings, get_settings
-        
         # Reset settings
         import audio_to_subs.api.settings as api_settings
+        from audio_to_subs.api.settings import get_settings
+
         api_settings._settings = None
-        
+
         # Create a temporary file with API key
         api_key_file = tmp_path / "bazarr_key.txt"
         api_key_file.write_text("file-key-789\n")
-        
+
         monkeypatch.setenv("BAZARR_API_KEY", "env-key-priority")
         monkeypatch.setenv("BAZARR_API_KEY_FILE", str(api_key_file))
-        
+
         settings = get_settings()
         assert settings.BAZARR_API_KEY == "env-key-priority"
         assert settings.bazarr_api_key == "env-key-priority"
 
     def test_bazarr_api_key_file_not_found(self, monkeypatch):
         """Test BAZARR_API_KEY_FILE returns None when file not found."""
-        from audio_to_subs.api.settings import Settings, get_settings
-        
         # Reset settings
         import audio_to_subs.api.settings as api_settings
+        from audio_to_subs.api.settings import get_settings
+
         api_settings._settings = None
-        
+
         monkeypatch.delenv("BAZARR_API_KEY", raising=False)
         monkeypatch.setenv("BAZARR_API_KEY_FILE", "/nonexistent/path/key.txt")
-        
+
         settings = get_settings()
         assert settings.BAZARR_API_KEY is None
         assert settings.BAZARR_API_KEY_FILE == "/nonexistent/path/key.txt"
@@ -268,7 +269,7 @@ class TestBazarrConnectionTestEndpoint:
         # Without configuring Bazarr, the endpoint should still exist
         # and return an appropriate response
         response = authenticated_client.post("/api/settings/test-bazarr-connection")
-        
+
         # The endpoint should exist and return 200
         assert response.status_code == 200
         data = response.json()
@@ -286,11 +287,11 @@ class TestBazarrConnectionTestEndpoint:
             "bazarr_api_key": "test-api-key-123",
         }
         authenticated_client.patch("/api/settings", json=update_data)
-        
+
         # Test the connection - will likely fail without real Bazarr,
         # but endpoint should exist and return structured response
         response = authenticated_client.post("/api/settings/test-bazarr-connection")
-        
+
         # Should return 200 with structured response
         assert response.status_code == 200
         data = response.json()
@@ -301,7 +302,9 @@ class TestBazarrConnectionTestEndpoint:
         assert isinstance(data["success"], bool)
         assert isinstance(data["error"], str) or data["error"] is None
 
-    def test_connection_test_uses_request_overrides_not_saved_settings(self, authenticated_client):
+    def test_connection_test_uses_request_overrides_not_saved_settings(
+        self, authenticated_client
+    ):
         """Passing bazarr_url in the body should test those values, not saved settings."""
         # Save one (empty/unconfigured) set of settings.
         authenticated_client.patch(

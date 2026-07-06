@@ -17,7 +17,6 @@ import asyncio
 from types import SimpleNamespace
 from unittest.mock import patch
 
-import pytest
 from fastapi.testclient import TestClient
 
 from audio_to_subs.api.app import create_app

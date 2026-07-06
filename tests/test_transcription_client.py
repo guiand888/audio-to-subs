@@ -1,11 +1,13 @@
 """Tests for transcription_client module."""
 
+from unittest.mock import MagicMock, mock_open, patch
+
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
+
 from audio_to_subs.core.transcription_client import (
+    AudioFileError,
     TranscriptionClient,
     TranscriptionError,
-    AudioFileError,
 )
 
 
@@ -30,7 +32,9 @@ class TestTranscriptionClient:
     @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
     @patch("audio_to_subs.core.transcription_client.Mistral")
-    def test_transcribe_audio_success(self, mock_mistral_class, mock_file, mock_exists, mock_getsize):
+    def test_transcribe_audio_success(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
         """Test successful audio transcription."""
         # Arrange
         mock_exists.return_value = True
@@ -120,7 +124,9 @@ class TestTranscriptionClient:
     @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
     @patch("audio_to_subs.core.transcription_client.Mistral")
-    def test_transcribe_audio_with_language(self, mock_mistral_class, mock_file, mock_exists, mock_getsize):
+    def test_transcribe_audio_with_language(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
         """Test transcription with language parameter."""
         # Arrange
         mock_exists.return_value = True
@@ -170,15 +176,12 @@ class TestTranscriptionClient:
         mock_client.audio.transcriptions.complete.return_value = mock_response
 
         client = TranscriptionClient(
-            api_key="test_key",
-            progress_callback=mock_progress_callback
+            api_key="test_key", progress_callback=mock_progress_callback
         )
 
         # Act
         result = client.transcribe_audio_with_timestamps(
-            "test_audio.wav",
-            segment_number=1,
-            total_segments=2
+            "test_audio.wav", segment_number=1, total_segments=2
         )
 
         # Assert
@@ -334,7 +337,9 @@ class TestTranscriptionClient:
         mock_mistral_class.return_value = mock_client
 
         # All calls fail
-        mock_client.audio.transcriptions.complete.side_effect = TimeoutError("Persistent timeout")
+        mock_client.audio.transcriptions.complete.side_effect = TimeoutError(
+            "Persistent timeout"
+        )
 
         client = TranscriptionClient(api_key="test_key")
 

@@ -3,7 +3,7 @@
 import asyncio
 import json
 from contextlib import asynccontextmanager
-from datetime import datetime, timezone, timedelta
+from datetime import datetime, timedelta, timezone
 from unittest.mock import AsyncMock, Mock, patch
 
 import pytest
@@ -12,21 +12,20 @@ from sqlalchemy import select
 from audio_to_subs.bazarr.client import BazarrClient
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.bazarr.poller import (
-    poll_once,
-    run_bazarr_poller,
-    start_poller,
-    stop_poller,
+    _delete_stale,
+    _get_poll_interval,
+    _poll_all_episodes,
+    _process_episode,
+    _process_movie,
     get_bazarr_client,
     get_bazarr_client_with_settings,
     get_path_map,
     get_settings_value,
     get_track_no_subs,
-    _process_movie,
-    _process_episode,
-    _delete_stale,
-    _get_poll_interval,
-    _poll_all_episodes,
-    _poll_all_movies,
+    poll_once,
+    run_bazarr_poller,
+    start_poller,
+    stop_poller,
 )
 from audio_to_subs.db.models import BazarrCache, Setting
 
@@ -41,11 +40,11 @@ class TestGetBazarrClient:
             bazarr_url="http://test:6767",
             bazarr_api_key="test-key",
         )
-        
+
         assert client is not None
         assert client.base_url == "http://test:6767"
         assert client.api_key == "test-key"
-        
+
         await client.close()
 
     @pytest.mark.asyncio
@@ -56,12 +55,12 @@ class TestGetBazarrClient:
             bazarr_api_key="test-key",
             bazarr_timeout=60.0,
         )
-        
+
         assert client is not None
         assert client.base_url == "http://test:6767"
         assert client.api_key == "test-key"
         # Note: timeout is stored in the client but not directly accessible
-        
+
         await client.close()
 
     @pytest.mark.asyncio
@@ -71,7 +70,7 @@ class TestGetBazarrClient:
             bazarr_url=None,
             bazarr_api_key="test-key",
         )
-        
+
         assert client is None
 
     @pytest.mark.asyncio
@@ -81,7 +80,7 @@ class TestGetBazarrClient:
             bazarr_url="http://test:6767",
             bazarr_api_key=None,
         )
-        
+
         assert client is None
 
     @pytest.mark.asyncio
@@ -91,7 +90,7 @@ class TestGetBazarrClient:
             bazarr_url=None,
             bazarr_api_key=None,
         )
-        
+
         assert client is None
 
 
@@ -111,15 +110,17 @@ class TestGetBazarrClientWithSettings:
             mock_db_session.add(setting)
         await mock_db_session.commit()
 
-        client, url, api_key, timeout = await get_bazarr_client_with_settings(mock_db_session)
-        
+        client, url, api_key, timeout = await get_bazarr_client_with_settings(
+            mock_db_session
+        )
+
         assert client is not None
         assert client.base_url == "http://db-bazarr:6767"
         assert client.api_key == "db-api-key"
         assert url == "http://db-bazarr:6767"
         assert api_key == "db-api-key"
         assert timeout == 60.0
-        
+
         await client.close()
 
     @pytest.mark.asyncio
@@ -127,23 +128,24 @@ class TestGetBazarrClientWithSettings:
         """Test getting client falls back to environment settings when database is empty."""
         # Create mock environment settings
         from audio_to_subs.api.settings import Settings
+
         mock_env_settings = Settings(
             BAZARR_URL="http://env-bazarr:6767",
             BAZARR_API_KEY="env-api-key",
-            BAZARR_TIMEOUT=90.0
+            BAZARR_TIMEOUT=90.0,
         )
 
         client, url, api_key, timeout = await get_bazarr_client_with_settings(
             mock_db_session, mock_env_settings
         )
-        
+
         assert client is not None
         assert client.base_url == "http://env-bazarr:6767"
         assert client.api_key == "env-api-key"
         assert url == "http://env-bazarr:6767"
         assert api_key == "env-api-key"
         assert timeout == 90.0
-        
+
         await client.close()
 
     @pytest.mark.asyncio
@@ -161,23 +163,24 @@ class TestGetBazarrClientWithSettings:
 
         # Create mock environment settings with different values
         from audio_to_subs.api.settings import Settings
+
         mock_env_settings = Settings(
             BAZARR_URL="http://env-bazarr:6767",  # Should be ignored
-            BAZARR_API_KEY="env-api-key",      # Should be ignored
-            BAZARR_TIMEOUT=90.0                # Should be ignored
+            BAZARR_API_KEY="env-api-key",  # Should be ignored
+            BAZARR_TIMEOUT=90.0,  # Should be ignored
         )
 
         client, url, api_key, timeout = await get_bazarr_client_with_settings(
             mock_db_session, mock_env_settings
         )
-        
+
         assert client is not None
         assert client.base_url == "http://db-bazarr:6767"  # DB takes priority
-        assert client.api_key == "db-api-key"      # DB takes priority
+        assert client.api_key == "db-api-key"  # DB takes priority
         assert url == "http://db-bazarr:6767"
         assert api_key == "db-api-key"
         assert timeout == 60.0  # DB takes priority
-        
+
         await client.close()
 
     @pytest.mark.asyncio
@@ -194,6 +197,7 @@ class TestGetBazarrClientWithSettings:
 
         # Create mock environment settings with non-empty values
         from audio_to_subs.api.settings import Settings
+
         mock_env_settings = Settings(
             BAZARR_URL="http://env-bazarr:6767",  # Should NOT be used
             BAZARR_API_KEY="env-api-key",
@@ -202,11 +206,11 @@ class TestGetBazarrClientWithSettings:
         client, url, api_key, timeout = await get_bazarr_client_with_settings(
             mock_db_session, mock_env_settings
         )
-        
+
         # Client should be None because URL is empty string (falsy but explicitly set)
         assert client is None
         assert url == ""  # Empty string from DB, not env fallback
-        
+
     @pytest.mark.asyncio
     async def test_get_client_timeout_30_no_fallback(self, mock_db_session):
         """Test that timeout=30.0 in DB does NOT fall back to env (sentinel fix)."""
@@ -222,6 +226,7 @@ class TestGetBazarrClientWithSettings:
 
         # Create mock environment settings with different timeout
         from audio_to_subs.api.settings import Settings
+
         mock_env_settings = Settings(
             BAZARR_URL="http://db-bazarr:6767",
             BAZARR_API_KEY="db-api-key",
@@ -260,6 +265,7 @@ class TestGetBazarrClientWithSettings:
         await mock_db_session.commit()
 
         from audio_to_subs.api.settings import Settings
+
         mock_env_settings = Settings(
             BAZARR_URL="http://env-bazarr:6767",
             BAZARR_API_KEY="env-api-key",
@@ -285,7 +291,7 @@ class TestGetPathMap:
     async def test_get_path_map_empty_db(self, mock_db_session):
         """Test get_path_map with empty database."""
         path_map = await get_path_map(mock_db_session)
-        
+
         assert isinstance(path_map, PathMap)
         assert len(path_map.get_mappings()) == 0
 
@@ -296,16 +302,16 @@ class TestGetPathMap:
         path_mappings = [
             {"bazarr_prefix": "/bazarr/movies", "local_prefix": "/local/movies"},
         ]
-        
+
         setting = Setting(
             key="path_mappings",
             value_json=json.dumps(path_mappings),
         )
         mock_db_session.add(setting)
         await mock_db_session.commit()
-        
+
         path_map = await get_path_map(mock_db_session)
-        
+
         assert isinstance(path_map, PathMap)
         assert len(path_map.get_mappings()) == 1
 
@@ -322,9 +328,9 @@ class TestGetSettingsValue:
         )
         mock_db_session.add(setting)
         await mock_db_session.commit()
-        
+
         value = await get_settings_value(mock_db_session, "test_setting", "default")
-        
+
         assert value == "test_value"
 
     @pytest.mark.asyncio
@@ -333,7 +339,7 @@ class TestGetSettingsValue:
         value = await get_settings_value(
             mock_db_session, "nonexistent", "default_value"
         )
-        
+
         assert value == "default_value"
 
 
@@ -344,7 +350,7 @@ class TestGetTrackNoSubs:
     async def test_get_track_no_subs_false(self, mock_db_session):
         """Test get_track_no_subs returns False by default."""
         value = await get_track_no_subs(mock_db_session)
-        
+
         assert value is False
 
     @pytest.mark.asyncio
@@ -356,9 +362,9 @@ class TestGetTrackNoSubs:
         )
         mock_db_session.add(setting)
         await mock_db_session.commit()
-        
+
         value = await get_track_no_subs(mock_db_session)
-        
+
         assert value is True
 
 
@@ -368,25 +374,26 @@ class TestProcessMovie:
     @pytest.mark.asyncio
     async def test_process_movie_new_entry(self, mock_db_session):
         """Test processing a movie creates a new cache entry."""
+
         # Create a mock wanted movie
         class MockWantedMovie:
             title = "Inception"
             radarrId = 123
             sceneName = "/bazarr/movies/Inception.mkv"
             missing_subtitles = []
-        
+
         mock_movie = MockWantedMovie()
         path_map = PathMap([("/bazarr/movies", "/local/movies")])
         started_at = datetime.now(timezone.utc)
-        
+
         await _process_movie(mock_db_session, mock_movie, path_map, started_at)
-        
+
         # Check that the entry was created
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:123")
         )
         entry = result.scalar_one_or_none()
-        
+
         assert entry is not None
         assert entry.kind == "movie"
         assert entry.ext_id == 123
@@ -410,26 +417,26 @@ class TestProcessMovie:
         )
         mock_db_session.add(existing)
         await mock_db_session.commit()
-        
+
         # Create a mock wanted movie with updated info
         class MockWantedMovie:
             title = "New Title"
             radarrId = 123
             sceneName = "/bazarr/movies/NewTitle.mkv"
             missing_subtitles = []
-        
+
         mock_movie = MockWantedMovie()
         path_map = PathMap([("/bazarr/movies", "/local/movies")])
         started_at = datetime.now(timezone.utc)
-        
+
         await _process_movie(mock_db_session, mock_movie, path_map, started_at)
-        
+
         # Check that the entry was updated
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:123")
         )
         entry = result.scalar_one_or_none()
-        
+
         assert entry is not None
         assert entry.title == "New Title"
         assert "/local/movies/NewTitle.mkv" in entry.media_path
@@ -441,6 +448,7 @@ class TestProcessEpisode:
     @pytest.mark.asyncio
     async def test_process_episode_new_entry(self, mock_db_session):
         """Test processing an episode creates a new cache entry."""
+
         # Create a mock wanted episode
         class MockSubtitleLanguage:
             name = "English"
@@ -448,7 +456,7 @@ class TestProcessEpisode:
             code3 = "eng"
             forced = False
             hi = False
-        
+
         class MockWantedEpisode:
             seriesTitle = "Test Show"
             episodeTitle = "Pilot"
@@ -459,19 +467,19 @@ class TestProcessEpisode:
             missing_subtitles = [MockSubtitleLanguage()]
             tags = []
             seriesType = "standard"
-        
+
         mock_episode = MockWantedEpisode()
         path_map = PathMap([("/bazarr/tv", "/local/tv")])
         started_at = datetime.now(timezone.utc)
-        
+
         await _process_episode(mock_db_session, mock_episode, path_map, started_at)
-        
+
         # Check that the entry was created
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "episode:456")
         )
         entry = result.scalar_one_or_none()
-        
+
         assert entry is not None
         assert entry.kind == "episode"
         assert entry.ext_id == 456
@@ -486,7 +494,7 @@ class TestDeleteStale:
         """Test that stale entries are deleted."""
         # Create old entries
         old_time = datetime.now(timezone.utc) - timedelta(days=1)
-        
+
         old_entry1 = BazarrCache(
             id="movie:1",
             kind="movie",
@@ -509,11 +517,11 @@ class TestDeleteStale:
         )
         mock_db_session.add_all([old_entry1, old_entry2])
         await mock_db_session.commit()
-        
+
         # Delete stale entries
         started_at = datetime.now(timezone.utc)
         deleted_count = await _delete_stale(mock_db_session, started_at)
-        
+
         assert deleted_count == 2
 
     @pytest.mark.asyncio
@@ -547,7 +555,7 @@ class TestGetPollInterval:
     async def test_get_poll_interval_default(self, mock_db_session):
         """Test get_poll_interval returns default value."""
         interval = await _get_poll_interval(mock_db_session)
-        
+
         assert interval == 3600
 
     @pytest.mark.asyncio
@@ -559,9 +567,9 @@ class TestGetPollInterval:
         )
         mock_db_session.add(setting)
         await mock_db_session.commit()
-        
+
         interval = await _get_poll_interval(mock_db_session)
-        
+
         assert interval == 7200
 
 
@@ -573,21 +581,21 @@ class TestPollerIntegration:
         """Test poll_once with a mock client."""
         # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
-        
+
         # Mock empty responses
         mock_client.list_wanted_movies.return_value = AsyncMock()
         mock_client.list_wanted_movies.return_value.data = []
         mock_client.list_wanted_movies.return_value.total = 0
-        
+
         mock_client.list_wanted_episodes.return_value = AsyncMock()
         mock_client.list_wanted_episodes.return_value.data = []
         mock_client.list_wanted_episodes.return_value.total = 0
-        
+
         path_map = PathMap()
-        
+
         # Call poll_once
         processed = await poll_once(mock_db_session, mock_client, path_map)
-        
+
         assert processed == 0
         mock_client.list_wanted_movies.assert_awaited_once()
         mock_client.list_wanted_episodes.assert_awaited_once()
@@ -599,9 +607,9 @@ class TestPollerIntegration:
         mock_app.state = Mock()
         mock_app.state.shutdown = asyncio.Event()
         mock_app.state.poller_task = None
-        
+
         await start_poller(mock_app)
-        
+
         assert mock_app.state.poller_task is not None
 
     @pytest.mark.asyncio
@@ -716,9 +724,9 @@ class TestPollerIntegration:
 
         exit_idx = lifecycle.index("exit")
         wait_idx = next(i for i, e in enumerate(lifecycle) if e.startswith("wait:3600"))
-        assert exit_idx < wait_idx, (
-            f"Session must close before the inter-poll sleep; lifecycle={lifecycle}"
-        )
+        assert (
+            exit_idx < wait_idx
+        ), f"Session must close before the inter-poll sleep; lifecycle={lifecycle}"
 
 
 class TestPollAllEpisodes:
@@ -732,10 +740,15 @@ class TestPollAllEpisodes:
 
         # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
-        
+
         # Mock series and episodes responses
-        from audio_to_subs.bazarr.schemas import Series, Episode, SeriesPage, EpisodesPage
-        
+        from audio_to_subs.bazarr.schemas import (
+            Episode,
+            EpisodesPage,
+            Series,
+            SeriesPage,
+        )
+
         mock_series = Series(
             sonarrSeriesId=1,
             title="Test Series",
@@ -755,7 +768,7 @@ class TestPollAllEpisodes:
             year=None,
             audio_language=None,
         )
-        
+
         mock_episode_no_subs = Episode(
             sonarrEpisodeId=100,
             sonarrSeriesId=789,
@@ -766,18 +779,26 @@ class TestPollAllEpisodes:
             path="/bazarr/tv/Test Series/Season 01/Episode 01.mkv",
             sceneName="/bazarr/tv/Test Series/Season 01/Episode 01.mkv",
         )
-        
+
         mock_episode_with_subs = Episode(
             sonarrEpisodeId=101,
             sonarrSeriesId=789,
             title="Test Episode 2",
-            subtitles=[{"code2": "en", "code3": "eng", "name": "English", "forced": False, "hi": False}],  # Has subtitles
+            subtitles=[
+                {
+                    "code2": "en",
+                    "code3": "eng",
+                    "name": "English",
+                    "forced": False,
+                    "hi": False,
+                }
+            ],  # Has subtitles
             season=1,
             episode=2,
             path="/bazarr/tv/Test Series/Season 01/Episode 02.mkv",
             sceneName="/bazarr/tv/Test Series/Season 01/Episode 02.mkv",
         )
-        
+
         mock_client.list_all_series.return_value = SeriesPage(
             data=[mock_series],
             total=1,
@@ -786,19 +807,19 @@ class TestPollAllEpisodes:
             data=[mock_episode_no_subs, mock_episode_with_subs],
             total=2,
         )
-        
+
         path_map = PathMap([("/bazarr/tv", "/local/tv")])
         started_at = datetime.now(timezone.utc)
-        
+
         # Call the function
         await _poll_all_episodes(mock_db_session, mock_client, path_map, started_at)
-        
+
         # Verify only episode without subtitles was cached
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.kind == "episode")
         )
         cached = result.scalars().all()
-        
+
         assert len(cached) == 1
         assert cached[0].ext_id == 100  # Only the episode without subs
         assert cached[0].has_any_subs is False
@@ -862,8 +883,8 @@ class TestManualPolling:
     @pytest.mark.asyncio
     async def test_manual_poll_movies_only(self, mock_db_session):
         """Test manual polling for movies only skips episode API calls."""
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.api.routes.wanted import WantedItemType
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.schemas import (
             WantedEpisodesPage,
             WantedMovie,
@@ -907,8 +928,8 @@ class TestManualPolling:
     @pytest.mark.asyncio
     async def test_manual_poll_episodes_only(self, mock_db_session):
         """Test manual polling for episodes only skips movie API calls."""
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.api.routes.wanted import WantedItemType
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.schemas import (
             WantedEpisode,
             WantedEpisodesPage,
@@ -926,9 +947,7 @@ class TestManualPolling:
             sonarrEpisodeId=456,
         )
 
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=[], total=0
-        )
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(data=[], total=0)
         mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
             data=[episode], total=1
         )
@@ -956,8 +975,8 @@ class TestManualPolling:
         """Test manual polling respects bazarr_track_no_subs setting."""
         import json
 
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.api.routes.wanted import WantedItemType
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.schemas import (
             Episode,
             EpisodesPage,
@@ -1060,8 +1079,8 @@ class TestManualPolling:
     @pytest.mark.asyncio
     async def test_manual_poll_handles_client_error(self, mock_db_session):
         """Test manual polling propagates Bazarr client errors instead of masking them as success."""
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.client import BazarrServerError
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
 
         # Create mock client that raises error
         mock_client = AsyncMock(spec=BazarrClient)

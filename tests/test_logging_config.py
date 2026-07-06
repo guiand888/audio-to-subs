@@ -3,6 +3,7 @@
 Tests logging configuration with different verbosity levels
 and logger suppression.
 """
+
 import logging
 import sys
 from io import StringIO
@@ -107,9 +108,9 @@ class TestConfigureLogging:
         configure_logging(verbose=True)
 
         # Assert - loggers should not have WARNING level set
-        mistral_logger = logging.getLogger("mistralai")
-        httpx_logger = logging.getLogger("httpx")
-        urllib3_logger = logging.getLogger("urllib3")
+        logging.getLogger("mistralai")
+        logging.getLogger("httpx")
+        logging.getLogger("urllib3")
 
         # In verbose mode, these should not be explicitly set to WARNING
         # (they inherit from root logger)
@@ -120,7 +121,7 @@ class TestConfigureLogging:
         """Test that configure_logging with force=True reconfigures."""
         # Arrange - set up initial logging
         configure_logging(verbose=False)
-        initial_handler_count = len(logging.root.handlers)
+        len(logging.root.handlers)
 
         # Act - reconfigure with different setting
         configure_logging(verbose=True)
@@ -180,7 +181,7 @@ class TestConfigureLogging:
         test_logger.debug("Debug message")
 
         # Assert - root logger level is INFO, so DEBUG won't be propagated
-        output = captured_output.getvalue()
+        captured_output.getvalue()
         # Since root logger is INFO level, debug won't appear at root
         # (but would appear if we logged through root directly)
 

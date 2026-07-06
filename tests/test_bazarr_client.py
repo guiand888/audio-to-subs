@@ -6,12 +6,12 @@ import httpx
 import pytest
 
 from audio_to_subs.bazarr.client import (
-    BazarrClient,
     BazarrAuthError,
+    BazarrClient,
+    BazarrError,
     BazarrNotFoundError,
     BazarrRateLimited,
     BazarrServerError,
-    BazarrError,
 )
 
 
@@ -33,7 +33,7 @@ class TestBazarrClientInit:
             base_url="http://localhost:6767",
             api_key="test-key",
         )
-        
+
         assert client.base_url == "http://localhost:6767"
         assert client.api_key == "test-key"
 
@@ -43,7 +43,7 @@ class TestBazarrClientInit:
             base_url="http://localhost:6767/",
             api_key="test-key",
         )
-        
+
         assert client.base_url == "http://localhost:6767"
 
     def test_init_with_custom_timeouts(self):
@@ -54,7 +54,7 @@ class TestBazarrClientInit:
             connect_timeout=5.0,
             read_timeout=60.0,
         )
-        
+
         # The timeout object should be created with custom values
         assert client.timeout.connect == 5.0
         assert client.timeout.read == 60.0
@@ -68,7 +68,7 @@ class TestBazarrClientContextManager:
         """Test that client can be used as async context manager."""
         async with mock_client as client:
             assert client is mock_client
-        
+
         # Client should be closed after context exit
         assert mock_client._client is None
 
@@ -77,7 +77,7 @@ class TestBazarrClientContextManager:
         """Test explicit close."""
         await mock_client._ensure_client()
         assert mock_client._client is not None
-        
+
         await mock_client.close()
         assert mock_client._client is None
 
@@ -89,7 +89,7 @@ class TestBazarrClientHeaders:
     async def test_api_key_header(self, mock_client):
         """Test that X-API-Key header is sent."""
         await mock_client._ensure_client()
-        
+
         # The headers should include the API key
         assert "X-API-Key" in mock_client._headers
         assert mock_client._headers["X-API-Key"] == "test-api-key"
@@ -131,7 +131,13 @@ class TestBazarrClientRequests:
                 {
                     "title": "Inception",
                     "missing_subtitles": [
-                        {"name": "English", "code2": "en", "code3": "eng", "forced": False, "hi": False}
+                        {
+                            "name": "English",
+                            "code2": "en",
+                            "code3": "eng",
+                            "forced": False,
+                            "hi": False,
+                        }
                     ],
                     "radarrId": 123,
                     "sceneName": "/movies/Inception.mkv",
@@ -140,7 +146,7 @@ class TestBazarrClientRequests:
             ],
             "total": 1,
         }
-        
+
         respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
             return_value=httpx.Response(200, json=mock_response)
         )
@@ -166,7 +172,13 @@ class TestBazarrClientRequests:
                     "episode_number": "1x01",
                     "episodeTitle": "Pilot",
                     "missing_subtitles": [
-                        {"name": "French", "code2": "fr", "code3": "fre", "forced": False, "hi": False}
+                        {
+                            "name": "French",
+                            "code2": "fr",
+                            "code3": "fre",
+                            "forced": False,
+                            "hi": False,
+                        }
                     ],
                     "sonarrSeriesId": 456,
                     "sonarrEpisodeId": 789,
@@ -177,7 +189,7 @@ class TestBazarrClientRequests:
             ],
             "total": 1,
         }
-        
+
         respx_mock.get("http://test-bazarr:6767/api/episodes/wanted").mock(
             return_value=httpx.Response(200, json=mock_response)
         )
@@ -187,7 +199,7 @@ class TestBazarrClientRequests:
             api_key="test-key",
         ) as client:
             result = await client.list_wanted_episodes()
-            
+
             assert result.total == 1
             assert len(result.data) == 1
             assert result.data[0].seriesTitle == "Test Show"
@@ -199,7 +211,7 @@ class TestBazarrClientRequests:
         respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
             return_value=httpx.Response(401, json={"error": "Unauthorized"}),
         )
-        
+
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="wrong-key",
@@ -213,7 +225,7 @@ class TestBazarrClientRequests:
         respx_mock.get("http://test-bazarr:6767/api/nonexistent").mock(
             return_value=httpx.Response(404, json={"error": "Not found"}),
         )
-        
+
         async with BazarrClient(
             base_url="http://test-bazarr:6767",
             api_key="test-key",
@@ -225,7 +237,9 @@ class TestBazarrClientRequests:
     async def test_rate_limited_error(self, respx_mock):
         """Test 429 rate limited error raises after retries are exhausted."""
         route = respx_mock.get("http://test-bazarr:6767/api/movies/wanted").mock(
-            return_value=httpx.Response(429, json={"error": "Rate limited"}, headers={"Retry-After": "30"}),
+            return_value=httpx.Response(
+                429, json={"error": "Rate limited"}, headers={"Retry-After": "30"}
+            ),
         )
 
         async with BazarrClient(
@@ -502,7 +516,7 @@ class TestSeries:
             ],
             "total": 1,
         }
-        
+
         respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
             return_value=httpx.Response(200, json=mock_response)
         )
@@ -512,7 +526,7 @@ class TestSeries:
             api_key="test-key",
         ) as client:
             result = await client.list_episodes(seriesid=123)
-            
+
             assert len(result.data) == 1
             assert result.total == 1
             assert result.data[0].sonarrEpisodeId == 100
@@ -541,7 +555,7 @@ class TestSeries:
             ],
             "total": 1,
         }
-        
+
         respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
             return_value=httpx.Response(200, json=mock_response)
         )
@@ -551,7 +565,7 @@ class TestSeries:
             api_key="test-key",
         ) as client:
             result = await client.get_episode(100)
-            
+
             assert result is not None
             assert result.sonarrEpisodeId == 100
             assert result.sonarrSeriesId == 123
@@ -561,7 +575,7 @@ class TestSeries:
     async def test_get_episode_not_found(self, respx_mock):
         """Test get_episode returns None when episode not found."""
         mock_response = {"data": [], "total": 0}
-        
+
         respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
             return_value=httpx.Response(200, json=mock_response)
         )
@@ -571,5 +585,5 @@ class TestSeries:
             api_key="test-key",
         ) as client:
             result = await client.get_episode(999)
-            
+
             assert result is None

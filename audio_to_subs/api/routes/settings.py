@@ -6,8 +6,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import func, select, update
-from sqlalchemy.orm import Session
+from sqlalchemy import func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 
@@ -21,7 +20,7 @@ router = APIRouter(prefix="/api/settings", tags=["settings"])
 
 # Default settings values
 DEFAULT_SETTINGS = {
-    "mistral_model": "voxtral-mini-latest",
+    "mistral_model": "voxtral-mini-2602",
     "mistral_rate_usd_per_minute": 0.003,
     "mistral_input_token_rate_usd": None,
     "mistral_output_token_rate_usd": None,
@@ -36,6 +35,7 @@ DEFAULT_SETTINGS = {
     "movies_root_path": "/movies",
     "tv_root_path": "/tv",
     "subtitles_same_directory": True,
+    "max_audio_length": 900,
 }
 
 
@@ -77,6 +77,9 @@ class SettingsResponse(BaseModel):
     )
     subtitles_same_directory: bool = Field(
         default=True, description="Save subtitles alongside source video files"
+    )
+    max_audio_length: int = Field(
+        default=900, description="Maximum audio segment length in seconds (60-10800)"
     )
 
     @classmethod
@@ -141,6 +144,22 @@ class SettingsUpdate(BaseModel):
     subtitles_same_directory: bool | None = Field(
         default=None, description="Save subtitles alongside source video files"
     )
+    max_audio_length: int | None = Field(
+        default=None, description="Maximum audio segment length in seconds (60-10800)"
+    )
+
+    @field_validator("max_audio_length")
+    @classmethod
+    def validate_max_audio_length(cls, v: int | None) -> int | None:
+        """Validate max_audio_length is within bounds (60-10800)."""
+        if v is None:
+            return v
+        from audio_to_subs.core.models import MAX_AUDIO_LENGTH_BOUNDS
+
+        lo, hi = MAX_AUDIO_LENGTH_BOUNDS
+        if not (lo <= v <= hi):
+            raise ValueError(f"max_audio_length must be between {lo} and {hi} seconds")
+        return v
 
     @field_validator("bazarr_url")
     @classmethod
@@ -160,7 +179,7 @@ class SettingsUpdate(BaseModel):
             if not parsed.netloc:
                 raise ValueError("bazarr_url must have a valid hostname")
         except Exception as e:
-            raise ValueError(f"Invalid bazarr_url format: {e}")
+            raise ValueError(f"Invalid bazarr_url format: {e}") from e
         return v
 
 
@@ -319,11 +338,11 @@ async def get_setting(
         if key in ("bazarr_api_key", "SESSION_SECRET"):
             value = "***MASKED***"
         return {"key": key, "value": value}
-    except json.JSONDecodeError:
+    except json.JSONDecodeError as e:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail=f"Failed to parse setting {key}",
-        )
+        ) from e
 
 
 # Connection test models
@@ -364,7 +383,7 @@ class BazarrConnectionTestResponse(BaseModel):
 async def test_bazarr_connection(
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
-    test_request: BazarrConnectionTestRequest = Body(
+    test_request: BazarrConnectionTestRequest = Body(  # noqa: B008
         default_factory=BazarrConnectionTestRequest
     ),
 ) -> BazarrConnectionTestResponse:
@@ -417,7 +436,7 @@ async def test_bazarr_connection(
         # Attempt a lightweight API call to test connectivity
         # Use list_all_series with limit=1 to minimize impact
         try:
-            series_page = await client.list_all_series(start=0, length=1)
+            await client.list_all_series(start=0, length=1)
             # If we get here, the connection succeeded
             await client.close()
             return BazarrConnectionTestResponse(

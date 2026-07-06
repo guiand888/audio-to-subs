@@ -6,13 +6,13 @@ from audio_to_subs.db.models import Job, JobLog, JobSource, JobStatus, LogLevel
 
 
 def _make_job(sync_session, **overrides) -> Job:
-    defaults = dict(
-        id=str(uuid4()),
-        status=JobStatus.RUNNING,
-        source=JobSource.MANUAL,
-        media_path="/test/video.mp4",
-        output_format="srt",
-    )
+    defaults = {
+        "id": str(uuid4()),
+        "status": JobStatus.RUNNING,
+        "source": JobSource.MANUAL,
+        "media_path": "/test/video.mp4",
+        "output_format": "srt",
+    }
     defaults.update(overrides)
     job = Job(**defaults)
     sync_session.add(job)

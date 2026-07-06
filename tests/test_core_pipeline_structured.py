@@ -1,9 +1,5 @@
 """Tests for structured progress in pipeline."""
 
-from unittest.mock import MagicMock, patch
-
-import pytest
-
 from audio_to_subs.core.pipeline import (
     Pipeline,
     PipelineResult,

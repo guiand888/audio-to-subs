@@ -1,16 +1,13 @@
 """Initial schema for v2.
 
 Revision ID: 0001
-Revises: 
+Revises:
 Create Date: 2026-06-02 00:00:00.000000
 
 """
 
-from typing import Any
-
-from alembic import op
 import sqlalchemy as sa
-
+from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "0001"
@@ -27,7 +24,9 @@ def upgrade() -> None:
         sa.Column("id", sa.Integer(), primary_key=True, autoincrement=True),
         sa.Column("username", sa.String(length=255), nullable=False, unique=True),
         sa.Column("password_hash", sa.String(length=255), nullable=False),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("last_login_at", sa.DateTime(), nullable=True),
     )
 
@@ -66,7 +65,9 @@ def upgrade() -> None:
         sa.Column("mistral_usage_json", sa.Text(), nullable=True),
         sa.Column("estimated_cost_usd", sa.Float(), nullable=True),
         sa.Column("error_message", sa.Text(), nullable=True),
-        sa.Column("created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "created_at", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("started_at", sa.DateTime(), nullable=True),
         sa.Column("finished_at", sa.DateTime(), nullable=True),
         sa.Column(
@@ -130,7 +131,9 @@ def upgrade() -> None:
         sa.Column("media_path", sa.Text(), nullable=False),
         sa.Column("has_any_subs", sa.Boolean(), nullable=False, default=False),
         sa.Column("missing_subtitles", sa.JSON(), nullable=False, default=[]),
-        sa.Column("last_polled", sa.DateTime(), nullable=False, server_default=sa.func.now()),
+        sa.Column(
+            "last_polled", sa.DateTime(), nullable=False, server_default=sa.func.now()
+        ),
         sa.Column("active_job_id", sa.String(length=36), nullable=True),
         sa.CheckConstraint(
             "kind IN ('movie','episode')",

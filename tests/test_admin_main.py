@@ -20,9 +20,7 @@ def _point_admin_cli_at_test_db(monkeypatch, tmp_path):
     import audio_to_subs.db.session as db_session
     from audio_to_subs.api.settings import get_settings
 
-    monkeypatch.setattr(
-        db_session, "DEFAULT_ASYNC_DSN", get_settings().DATABASE_URL
-    )
+    monkeypatch.setattr(db_session, "DEFAULT_ASYNC_DSN", get_settings().DATABASE_URL)
 
 
 class TestCmdSetPassword:
@@ -47,7 +45,9 @@ class TestCmdSetPassword:
         # conftest's autouse fixture seeds an "admin" user already.
         args = argparse.Namespace(username="admin")
 
-        with patch("getpass.getpass", side_effect=["rotatedpassword456", "rotatedpassword456"]):
+        with patch(
+            "getpass.getpass", side_effect=["rotatedpassword456", "rotatedpassword456"]
+        ):
             exit_code = await cmd_set_password(args)
 
         assert exit_code == 0

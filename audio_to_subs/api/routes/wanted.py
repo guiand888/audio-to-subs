@@ -135,9 +135,9 @@ def _to_wanted_item(
 
 
 @router.get("", response_model=WantedListResponse)
-async def list_wanted(
+async def list_wanted(  # noqa: C901
     db: Annotated["AsyncSession", Depends(get_db)],
-    item_type: WantedItemType = Query(
+    item_type: WantedItemType = Query(  # noqa: B008
         default=WantedItemType.ALL, description="Filter by item type"
     ),
     language: str | None = Query(
@@ -146,8 +146,10 @@ async def list_wanted(
     has_job: bool | None = Query(
         default=None, description="Filter by whether item has an active job"
     ),
-    page: int = Query(default=1, ge=1, description="Page number"),
-    page_size: int = Query(default=100, ge=1, le=1000, description="Items per page"),
+    page: int = Query(default=1, ge=1, description="Page number"),  # noqa: B008
+    page_size: int = Query(
+        default=100, ge=1, le=1000, description="Items per page"
+    ),  # noqa: B008
 ) -> WantedListResponse:
     """List wanted items from Bazarr cache.
 
@@ -315,7 +317,9 @@ class WantedRefreshResponse(BaseModel):
 async def refresh_wanted_list(
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
-    refresh_request: WantedRefreshRequest = Body(default_factory=WantedRefreshRequest),
+    refresh_request: WantedRefreshRequest = Body(  # noqa: B008
+        default_factory=WantedRefreshRequest
+    ),
 ) -> WantedRefreshResponse:
     """Trigger a manual refresh of the wanted list from Bazarr.
 

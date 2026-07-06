@@ -7,7 +7,6 @@ Provides utilities for:
 """
 
 import os
-import re
 from pathlib import Path
 from typing import Literal
 
@@ -33,7 +32,9 @@ def _is_within(path: str, root: str) -> bool:
             resolved_root += os.sep
 
         # Check if path is exactly the root or within it
-        return resolved_path == resolved_root.rstrip(os.sep) or resolved_path.startswith(resolved_root)
+        return resolved_path == resolved_root.rstrip(
+            os.sep
+        ) or resolved_path.startswith(resolved_root)
     except (OSError, ValueError):
         # Path doesn't exist or is invalid
         return False

@@ -10,7 +10,6 @@ from pathlib import Path
 from typing import Any
 
 from itsdangerous import URLSafeTimedSerializer
-from itsdangerous.exc import BadSignature, SignatureExpired
 
 logger = logging.getLogger(__name__)
 
@@ -37,7 +36,7 @@ class SessionManager:
         ttl: int = DEFAULT_SESSION_TTL,
     ):
         """Initialize session manager.
-        
+
         Args:
             secret: Session secret string
             secret_file: Path to file containing secret
@@ -72,7 +71,7 @@ class SessionManager:
     def _read_secret_file(path: str) -> str:
         """Read secret from file."""
         try:
-            with open(path, "r") as f:
+            with open(path) as f:
                 return f.read().strip()
         except FileNotFoundError:
             # File doesn't exist yet - will be created on first boot
@@ -88,11 +87,11 @@ class SessionManager:
     @staticmethod
     def write_secret_file(path: str, secret: str | None = None) -> str:
         """Write session secret to file.
-        
+
         Args:
             path: Path to write secret to
             secret: Secret to write (generates new if None)
-        
+
         Returns:
             The secret that was written
         """
@@ -114,26 +113,28 @@ class SessionManager:
 
     def create_session(self, user_id: int) -> str:
         """Create a new session token.
-        
+
         Args:
             user_id: User ID to include in session
-        
+
         Returns:
             Signed session token string
         """
         payload = {"user_id": user_id, "iat": int(time.time())}
         return self._serializer.dumps(payload)
 
-    def validate_session(self, token: str, max_age: int | None = None) -> dict[str, Any]:
+    def validate_session(
+        self, token: str, max_age: int | None = None
+    ) -> dict[str, Any]:
         """Validate and decode a session token.
-        
+
         Args:
             token: Session token string
             max_age: Maximum age in seconds (uses TTL if None)
-        
+
         Returns:
             Decoded payload dictionary
-        
+
         Raises:
             BadSignature: If token signature is invalid
             SignatureExpired: If token has expired
@@ -144,10 +145,10 @@ class SessionManager:
 
     def needs_renewal(self, payload: dict[str, Any]) -> bool:
         """Check if session needs sliding renewal.
-        
+
         Args:
             payload: Decoded session payload
-        
+
         Returns:
             True if session should be renewed
         """
@@ -156,10 +157,10 @@ class SessionManager:
 
     def renew_session(self, token: str) -> str:
         """Renew a session token.
-        
+
         Args:
             token: Current session token
-        
+
         Returns:
             New session token with updated iat
         """

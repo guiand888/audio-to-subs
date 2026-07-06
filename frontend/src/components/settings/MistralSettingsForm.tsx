@@ -13,20 +13,31 @@ import type { SettingsPatch } from "@/lib/types"
 
 const MISTRAL_MODELS = [
   {
+    value: "voxtral-mini-2602",
+    label: "Voxtral Mini Transcribe 2",
+    ratePerMin: 0.003,
+    inputTokenRate: null as number | null,
+    outputTokenRate: null as number | null,
+    pricingLine: "$0.003 / min",
+    maxAudioLength: 10800,
+  },
+  {
     value: "voxtral-mini-latest",
     label: "Voxtral Mini (latest)",
     ratePerMin: 0.003,
     inputTokenRate: null as number | null,
     outputTokenRate: null as number | null,
     pricingLine: "$0.003 / min",
+    maxAudioLength: 10800,
   },
   {
-    value: "voxtral-mini-2602",
-    label: "Voxtral Mini 2602",
+    value: "voxtral-mini-2507",
+    label: "Voxtral Mini Transcribe",
     ratePerMin: 0.003,
     inputTokenRate: null as number | null,
     outputTokenRate: null as number | null,
     pricingLine: "$0.003 / min",
+    maxAudioLength: 900,
   },
   {
     value: "voxtral-small-2507",
@@ -35,6 +46,7 @@ const MISTRAL_MODELS = [
     inputTokenRate: 0.0000001,
     outputTokenRate: 0.0000003,
     pricingLine: "$0.004 / min · in $0.1/M · out $0.3/M",
+    maxAudioLength: 900,
   },
 ]
 
@@ -75,11 +87,17 @@ export function MistralSettingsForm({
   const handleModelChange = (value: string) => {
     const model = MISTRAL_MODELS.find((m) => m.value === value)
     if (!model) return
+
+    // Clamp max_audio_length to model's cap
+    const currentMaxAudioLength = formData.max_audio_length ?? 900
+    const cappedMax = Math.min(currentMaxAudioLength, model.maxAudioLength)
+
     onChange({
       mistral_model: value,
       mistral_rate_usd_per_minute: model.ratePerMin,
       mistral_input_token_rate_usd: model.inputTokenRate,
       mistral_output_token_rate_usd: model.outputTokenRate,
+      max_audio_length: cappedMax,
     })
   }
 
@@ -88,6 +106,9 @@ export function MistralSettingsForm({
     const num = value === "" ? 0 : parseFloat(value)
     onChange({ [field]: isNaN(num) ? 0 : num })
   }
+
+  const selectedModel = MISTRAL_MODELS.find((m) => m.value === formData.mistral_model)
+  const maxAudioLengthCap = selectedModel?.maxAudioLength ?? 10800
 
   return (
     <div className="space-y-4">
@@ -106,6 +127,25 @@ export function MistralSettingsForm({
             ))}
           </SelectContent>
         </Select>
+      </div>
+
+      <div className="space-y-2">
+        <Label htmlFor="max-audio-length">
+          Maximum Audio Length (seconds)
+        </Label>
+        <Input
+          id="max-audio-length"
+          type="number"
+          min="60"
+          max={maxAudioLengthCap}
+          placeholder="900"
+          value={formData.max_audio_length ?? ""}
+          onChange={handleNumberChange("max_audio_length")}
+        />
+        <p className="text-sm text-muted-foreground">
+          Audio files longer than this will be split. Minimum 60s, maximum{" "}
+          {maxAudioLengthCap}s for the selected model.
+        </p>
       </div>
 
       <div className="space-y-2">

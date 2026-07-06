@@ -37,7 +37,7 @@ class CostBreakdown:
     token_cost_usd: float | None = None
 
 
-def extract_usage(mistral_response: Any) -> dict[str, Any] | None:
+def extract_usage(mistral_response: Any) -> dict[str, Any] | None:  # noqa: C901
     """Extract usage information from a Mistral transcription response.
 
     Attempts multiple access patterns to handle different SDK response shapes.

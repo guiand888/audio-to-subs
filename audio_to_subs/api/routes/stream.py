@@ -89,7 +89,9 @@ async def _redis_listener_coro(
 
         while True:
             try:
-                message = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=2.0)
+                message = await asyncio.wait_for(
+                    pubsub.get_message(timeout=1.0), timeout=2.0
+                )
                 if message and message.get("type") == "message":
                     try:
                         data = json.loads(message["data"])

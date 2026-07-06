@@ -5,7 +5,6 @@ import pytest
 from audio_to_subs.auth.bootstrap import bootstrap_admin
 from audio_to_subs.db.session import get_async_session, init_db
 
-
 # One in-memory DSN per test: init_db sets up the engine cache, then
 # get_async_session returns the same cached engine so schema and queries
 # share the same StaticPool connection.
@@ -30,6 +29,7 @@ async def test_bootstrap_admin_creates_user():
         assert result is True
 
         from sqlalchemy import select
+
         from audio_to_subs.db.models import User
 
         rows = (await session.execute(select(User))).scalars().all()
@@ -41,8 +41,8 @@ async def test_bootstrap_admin_creates_user():
 async def test_bootstrap_admin_skips_existing_user():
     """Test that bootstrap_admin skips when user already exists."""
     import audio_to_subs.db.base as db_base
-    from audio_to_subs.db.models import User
     from audio_to_subs.auth.passwords import hash_password
+    from audio_to_subs.db.models import User
 
     db_base._async_engines.pop(_TEST_DSN, None)
 

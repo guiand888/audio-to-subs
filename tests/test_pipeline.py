@@ -1,7 +1,9 @@
 """Tests for pipeline module."""
 
-import pytest
 from unittest.mock import MagicMock
+
+import pytest
+
 from audio_to_subs.core.pipeline import Pipeline, PipelineError
 
 
@@ -38,7 +40,9 @@ class TestPipeline:
     def test_process_video_video_not_found(self, mocked_pipeline_deps, tmp_path):
         """Test pipeline fails when video file not found."""
         # Arrange
-        mocked_pipeline_deps["extract_audio"].side_effect = FileNotFoundError("Video not found")
+        mocked_pipeline_deps["extract_audio"].side_effect = FileNotFoundError(
+            "Video not found"
+        )
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
@@ -69,8 +73,8 @@ class TestPipeline:
         mocked_pipeline_deps["needs_splitting"].return_value = False
         mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
         mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
-        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = Exception(
-            "API error"
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = (
+            Exception("API error")
         )
 
         pipeline = Pipeline(api_key="test_key")
@@ -79,7 +83,9 @@ class TestPipeline:
         with pytest.raises(PipelineError, match="Transcription failed"):
             pipeline.process_video(str(video_file), "output.srt")
 
-    def test_process_video_subtitle_generation_fails(self, mocked_pipeline_deps, tmp_path):
+    def test_process_video_subtitle_generation_fails(
+        self, mocked_pipeline_deps, tmp_path
+    ):
         """Test pipeline fails when subtitle generation fails."""
         # Arrange
         video_file = tmp_path / "test.mp4"
@@ -154,7 +160,9 @@ class TestPipeline:
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
-        with pytest.raises(PipelineError, match="AI service did not return timestamp data"):
+        with pytest.raises(
+            PipelineError, match="AI service did not return timestamp data"
+        ):
             pipeline.process_video(str(video_file), "output.srt")
 
     def test_pipeline_with_multiple_segments(self, mocked_pipeline_deps, tmp_path):
@@ -169,7 +177,10 @@ class TestPipeline:
 
         mocked_pipeline_deps["needs_splitting"].return_value = True
         mocked_pipeline_deps["extract_audio"].return_value = str(audio_file1)
-        mocked_pipeline_deps["split_audio"].return_value = [str(audio_file1), str(audio_file2)]
+        mocked_pipeline_deps["split_audio"].return_value = [
+            str(audio_file1),
+            str(audio_file2),
+        ]
         # Duration > 900 seconds (15 minutes) to trigger splitting
         mocked_pipeline_deps["get_audio_duration"].return_value = 1200.0
         mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = [
@@ -201,7 +212,9 @@ class TestPipeline:
         mocked_pipeline_deps["needs_splitting"].return_value = False
         mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
         mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
-        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = Exception("API error")
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = (
+            Exception("API error")
+        )
 
         pipeline = Pipeline(api_key="test_key")
 
@@ -212,7 +225,9 @@ class TestPipeline:
         # Note: We can't easily verify the cleanup happened due to container isolation,
         # but the cleanup code path is tested
 
-    def test_process_video_extract_audio_ffmpeg_error(self, mocked_pipeline_deps, tmp_path):
+    def test_process_video_extract_audio_ffmpeg_error(
+        self, mocked_pipeline_deps, tmp_path
+    ):
         """Test FFmpegNotFoundError in _extract_audio (lines 213-214)."""
         from audio_to_subs.core.audio_extractor import FFmpegNotFoundError
 
@@ -221,7 +236,9 @@ class TestPipeline:
         video_file.touch()
 
         mocked_pipeline_deps["needs_splitting"].return_value = False
-        mocked_pipeline_deps["extract_audio"].side_effect = FFmpegNotFoundError("ffmpeg not found")
+        mocked_pipeline_deps["extract_audio"].side_effect = FFmpegNotFoundError(
+            "ffmpeg not found"
+        )
 
         pipeline = Pipeline(api_key="test_key")
 
@@ -242,12 +259,16 @@ class TestPipeline:
         mocked_pipeline_deps["needs_splitting"].return_value = False
         mocked_pipeline_deps["extract_audio"].return_value = str(audio_file)
         mocked_pipeline_deps["get_audio_duration"].return_value = 60.0
-        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = TranscriptionError("Transcription failed")
+        mocked_pipeline_deps["transcribe_audio_with_timestamps"].side_effect = (
+            TranscriptionError("Transcription failed")
+        )
 
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
-        with pytest.raises(PipelineError, match="Transcription failed: Transcription failed"):
+        with pytest.raises(
+            PipelineError, match="Transcription failed: Transcription failed"
+        ):
             pipeline.process_video(str(video_file), "output.srt")
 
     def test_generate_subtitles_format_error(self, mocked_pipeline_deps, tmp_path):
@@ -266,10 +287,14 @@ class TestPipeline:
         mocked_pipeline_deps["transcribe_audio_with_timestamps"].return_value = [
             {"start": 0.0, "end": 2.5, "text": "Hello"},
         ]
-        mocked_pipeline_deps["generate"].side_effect = SubtitleFormatError("Invalid format")
+        mocked_pipeline_deps["generate"].side_effect = SubtitleFormatError(
+            "Invalid format"
+        )
 
         pipeline = Pipeline(api_key="test_key")
 
         # Act & Assert
-        with pytest.raises(PipelineError, match="Subtitle generation failed: Invalid format"):
+        with pytest.raises(
+            PipelineError, match="Subtitle generation failed: Invalid format"
+        ):
             pipeline.process_video(str(video_file), "output.srt")

@@ -11,8 +11,7 @@ the per-test file DB.  Tests that only need a raw SQLAlchemy session can use
 ``sync_session``.
 """
 
-import os
-from typing import Generator
+from collections.abc import Generator
 from unittest.mock import MagicMock, patch
 from uuid import uuid4
 
@@ -20,10 +19,10 @@ import pytest
 from sqlalchemy import create_engine
 from sqlalchemy.orm import Session
 
-import audio_to_subs.db.base as _db_base
 import audio_to_subs.api.settings as _api_settings
 import audio_to_subs.auth.sessions as _auth_sessions
 import audio_to_subs.core.ffmpeg_utils as _ffmpeg_utils
+import audio_to_subs.db.base as _db_base
 
 # Secret reused by every test — arbitrary but non-placeholder.
 TEST_SESSION_SECRET = "test-only-session-secret-do-not-use-in-production"
@@ -58,14 +57,19 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     sync_url = f"sqlite:///{db_path}"
     # Import models BEFORE Base so that all tables are registered in
     # Base.metadata before create_all() is called.  Base alone has no tables.
-    from audio_to_subs.db.models import User  # noqa: F401 — registers all models
-    from audio_to_subs.db.base import Base
     from audio_to_subs.auth.passwords import hash_password
+    from audio_to_subs.db.base import Base
+    from audio_to_subs.db.models import User  # noqa: F401 — registers all models
 
     sync_engine = create_engine(sync_url, connect_args={"check_same_thread": False})
     Base.metadata.create_all(sync_engine)
     with Session(sync_engine) as session:
-        session.add(User(username="admin", password_hash=hash_password("test-secure-password-12345")))
+        session.add(
+            User(
+                username="admin",
+                password_hash=hash_password("test-secure-password-12345"),
+            )
+        )
         session.commit()
     sync_engine.dispose()
 
@@ -110,8 +114,8 @@ async def mock_db_session():
     Used by tests that need async ORM operations (e.g. bazarr poller tests)
     without going through the full FastAPI stack.
     """
-    from audio_to_subs.db.session import get_async_session
     from audio_to_subs.api.settings import get_settings
+    from audio_to_subs.db.session import get_async_session
 
     settings = get_settings()
     async with get_async_session(settings.DATABASE_URL) as session:
@@ -128,10 +132,11 @@ def api_client():
     creates the ``admin`` user.  All routes therefore have a real DB.
     """
     from fastapi.testclient import TestClient
-    from audio_to_subs.api.app import create_app
-    import audio_to_subs.db.base as db_base
+
     import audio_to_subs.api.settings as api_settings
     import audio_to_subs.auth.sessions as auth_sessions
+    import audio_to_subs.db.base as db_base
+    from audio_to_subs.api.app import create_app
 
     # Reset again in case an earlier fixture call dirtied the cache.
     db_base._async_engines.clear()
@@ -170,7 +175,7 @@ def make_job(**kwargs):
       - audio_duration_seconds: float
       - estimated_cost_usd: float
     """
-    from audio_to_subs.db.models import Job, JobStatus, JobSource
+    from audio_to_subs.db.models import Job, JobSource, JobStatus
 
     defaults = {
         "id": str(uuid4()),
@@ -202,12 +207,20 @@ def mocked_pipeline_deps():
     """
     from audio_to_subs.core.transcription_client import TranscriptionClient
 
-    with patch("audio_to_subs.core.pipeline.extract_audio") as mock_extract, \
-         patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0) as mock_duration, \
-         patch("audio_to_subs.core.pipeline.split_audio") as mock_split, \
-         patch.object(TranscriptionClient, "transcribe_audio_with_timestamps") as mock_transcribe, \
-         patch("audio_to_subs.core.pipeline.SubtitleGenerator.generate") as mock_generate, \
-         patch("audio_to_subs.core.pipeline.Path") as mock_path:
+    with (
+        patch("audio_to_subs.core.pipeline.extract_audio") as mock_extract,
+        patch(
+            "audio_to_subs.core.pipeline.get_audio_duration", return_value=60.0
+        ) as mock_duration,
+        patch("audio_to_subs.core.pipeline.split_audio") as mock_split,
+        patch.object(
+            TranscriptionClient, "transcribe_audio_with_timestamps"
+        ) as mock_transcribe,
+        patch(
+            "audio_to_subs.core.pipeline.SubtitleGenerator.generate"
+        ) as mock_generate,
+        patch("audio_to_subs.core.pipeline.Path") as mock_path,
+    ):
 
         # Configure defaults for common mocks
         mock_path_instance = MagicMock()
@@ -218,7 +231,9 @@ def mocked_pipeline_deps():
         yield {
             "extract_audio": mock_extract,
             "get_audio_duration": mock_duration,
-            "needs_splitting": MagicMock(return_value=False),  # Kept for test compatibility
+            "needs_splitting": MagicMock(
+                return_value=False
+            ),  # Kept for test compatibility
             "split_audio": mock_split,
             "transcribe_audio_with_timestamps": mock_transcribe,
             "generate": mock_generate,

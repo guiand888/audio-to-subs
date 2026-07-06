@@ -49,7 +49,9 @@ class WantedEpisode(BaseModel):
     )
     sonarrSeriesId: int = Field(description="Sonarr series ID")
     sonarrEpisodeId: int = Field(description="Sonarr episode ID")
-    sceneName: str | None = Field(default=None, description="Scene name for the episode")
+    sceneName: str | None = Field(
+        default=None, description="Scene name for the episode"
+    )
     tags: list[str] = Field(default_factory=list, description="Episode tags")
     seriesType: str | None = Field(default=None, description="Series type")
 
@@ -92,7 +94,9 @@ class Episode(BaseModel):
     season: int | None = Field(default=None, description="Season number")
     episode: int | None = Field(default=None, description="Episode number")
     path: str | None = Field(default=None, description="File path for the episode")
-    sceneName: str | None = Field(default=None, description="Scene name for the episode")
+    sceneName: str | None = Field(
+        default=None, description="Scene name for the episode"
+    )
 
 
 class EpisodesPage(BaseModel):
@@ -139,7 +143,9 @@ class FileEntry(BaseModel):
     """File entry from Bazarr file browser."""
 
     name: str = Field(description="File/directory name")
-    children: bool = Field(description="Whether this entry has children (is a directory)")
+    children: bool = Field(
+        description="Whether this entry has children (is a directory)"
+    )
     path: str = Field(description="Full path to the file/directory")
 
 

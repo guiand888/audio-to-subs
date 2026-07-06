@@ -6,8 +6,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, desc, func, or_
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, desc, func, select
 
 from audio_to_subs.api.deps import get_db
 from audio_to_subs.api.routes._helpers import get_job_or_404

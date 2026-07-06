@@ -1,8 +1,9 @@
 """Tests for queue event publishing (pub/sub) and SSE observer registration."""
 
 import asyncio
-import pytest
+
 import fakeredis.aioredis
+import pytest
 
 
 @pytest.mark.asyncio
@@ -20,8 +21,8 @@ async def test_publish_new_event():
         await publish_new(redis, job_id)
 
         # Skip subscription confirmation messages
-        msg1 = await pubsub.get_message()
-        msg2 = await pubsub.get_message()
+        await pubsub.get_message()
+        await pubsub.get_message()
 
         # Get the actual published messages from the channels
         message = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=2.0)
@@ -66,12 +67,14 @@ async def test_observer_registration():
     """Test that SSE observers can be registered with the events module."""
     # Clear any previous observers by importing fresh
     import importlib
+
     import audio_to_subs.queue_.events as events_module
+
     importlib.reload(events_module)
 
     from audio_to_subs.queue_.events import (
-        register_job_stream_observer,
         register_global_stream_observer,
+        register_job_stream_observer,
     )
 
     # Track calls to observers
@@ -117,12 +120,13 @@ async def test_sse_observer_single_worker():
     """Test SSE observer callbacks work in single-worker scenario."""
     # Clear any previous subscribers
     from audio_to_subs.api.routes import stream
+
     stream._job_subscribers.clear()
     stream._global_subscribers.clear()
 
     from audio_to_subs.api.routes.stream import (
-        publish_to_job_stream,
         _subscribe_job_stream,
+        publish_to_job_stream,
     )
 
     # Simulate a client subscribing to a job stream
@@ -146,6 +150,7 @@ async def test_multi_worker_sse_event_delivery():
     one publishes an event, another receives it via Redis subscription.
     """
     import json
+
     from audio_to_subs.queue_.events import publish_progress
 
     # Shared Redis instance (both "workers" use the same instance)

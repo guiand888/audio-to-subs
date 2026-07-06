@@ -22,20 +22,22 @@ from audio_to_subs.worker.runner import (
 
 def make_claimed_job(**overrides) -> ClaimedJob:
     """Build a ClaimedJob with sensible test defaults."""
-    defaults = dict(
-        id=uuid4(),
-        media_path="/test/video.mp4",
-        output_path="/test/output.srt",
-        language_code="en",
-        output_format="srt",
-        source=JobSource.MANUAL.value,
-        source_ref=None,
-    )
+    defaults = {
+        "id": uuid4(),
+        "media_path": "/test/video.mp4",
+        "output_path": "/test/output.srt",
+        "language_code": "en",
+        "output_format": "srt",
+        "source": JobSource.MANUAL.value,
+        "source_ref": None,
+    }
     defaults.update(overrides)
     return ClaimedJob(**defaults)
 
 
-def make_worker_deps(session, redis=None, settings=None, database_url=None) -> WorkerDeps:
+def make_worker_deps(
+    session, redis=None, settings=None, database_url=None
+) -> WorkerDeps:
     """Build WorkerDeps with a mocked redis client and minimal settings."""
     if redis is None:
         redis = AsyncMock()
@@ -49,6 +51,7 @@ def make_worker_deps(session, redis=None, settings=None, database_url=None) -> W
         )
     if database_url is None:
         from audio_to_subs.api.settings import get_settings
+
         settings_obj = get_settings()
         database_url = settings_obj.DATABASE_URL
     return WorkerDeps(
@@ -64,7 +67,9 @@ class TestPersistResult:
     """Test persist_result writes job outcome fields to the DB."""
 
     @pytest.mark.asyncio
-    async def test_persist_result_success_updates_status_and_cost(self, mock_db_session):
+    async def test_persist_result_success_updates_status_and_cost(
+        self, mock_db_session
+    ):
         job = Job(
             id=str(uuid4()),
             status=JobStatus.RUNNING,
@@ -148,10 +153,14 @@ class TestPersistLog:
         await persist_log(mock_db_session, job.id, LogLevel.ERROR, "something failed")
 
         rows = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == job.id)
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == job.id)
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(rows) == 1
         assert rows[0].level == LogLevel.ERROR
         assert rows[0].message == "something failed"
@@ -199,7 +208,9 @@ class TestRunJob:
     """Test run_job's end-to-end orchestration with a mocked Pipeline."""
 
     @pytest.mark.asyncio
-    async def test_run_job_success_publishes_done_and_returns_result(self, mock_db_session):
+    async def test_run_job_success_publishes_done_and_returns_result(
+        self, mock_db_session
+    ):
         claimed = make_claimed_job()
         deps = make_worker_deps(mock_db_session)
 
@@ -267,14 +278,20 @@ class TestRunJob:
         deps.redis.publish.assert_called()
 
         logs = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == str(claimed.id))
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == str(claimed.id))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert any("pipeline exploded" in log.message for log in logs)
 
     @pytest.mark.asyncio
-    async def test_run_job_generates_output_path_when_not_provided(self, mock_db_session):
+    async def test_run_job_generates_output_path_when_not_provided(
+        self, mock_db_session
+    ):
         claimed = make_claimed_job(output_path="")
         deps = make_worker_deps(mock_db_session)
 
@@ -285,9 +302,12 @@ class TestRunJob:
             segments_count=1,
         )
 
-        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class, patch(
-            "audio_to_subs.worker.runner.generate_output_path"
-        ) as mock_generate_path:
+        with (
+            patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class,
+            patch(
+                "audio_to_subs.worker.runner.generate_output_path"
+            ) as mock_generate_path,
+        ):
             mock_generate_path.return_value = "/generated/output.srt"
             mock_pipeline = MagicMock()
             mock_pipeline.process_video.return_value = pipeline_result

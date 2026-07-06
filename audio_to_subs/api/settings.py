@@ -1,6 +1,5 @@
 """Application settings using pydantic-settings."""
 
-
 from pydantic import Field, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 

@@ -12,14 +12,18 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.core.cancel import Cancelled, CancelToken
 from audio_to_subs.core.cost import compute_cost
+from audio_to_subs.core.models import (
+    DEFAULT_MAX_AUDIO_LENGTH,
+    MODEL_SPECS,
+)
 from audio_to_subs.core.path_utils import generate_output_path
 from audio_to_subs.core.pipeline import Pipeline, PipelineResult
-from audio_to_subs.db.models import JobLog, JobStatus, LogLevel, Setting
+from audio_to_subs.db.models import Job, JobLog, JobStatus, LogLevel, Setting
 from audio_to_subs.queue_.claim import ClaimedJob
 from audio_to_subs.queue_.events import publish_done
 from audio_to_subs.worker.progress import ProgressBridge
@@ -70,28 +74,23 @@ async def persist_result(
 ) -> None:
     """Persist job result to database."""
     try:
-        update_fields = {
-            "status": result.status.value,
-            "finished_at": datetime.now(timezone.utc),
-            "updated_at": datetime.now(timezone.utc),
-            "error_message": result.error_message,
-        }
+        job = await session.get(Job, job_id)
+        if job:
+            job.status = result.status
+            job.finished_at = datetime.now(timezone.utc)
+            job.updated_at = datetime.now(timezone.utc)
+            job.error_message = result.error_message
 
-        # Only set these if they have values
-        if result.audio_duration_seconds is not None:
-            update_fields["audio_duration_seconds"] = result.audio_duration_seconds
-        if result.mistral_usage_json is not None:
-            update_fields["mistral_usage_json"] = result.mistral_usage_json
-        if result.estimated_cost_usd is not None:
-            update_fields["estimated_cost_usd"] = result.estimated_cost_usd
+            if result.audio_duration_seconds is not None:
+                job.audio_duration_seconds = result.audio_duration_seconds
+            if result.mistral_usage_json is not None:
+                job.mistral_usage_json = result.mistral_usage_json
+            if result.estimated_cost_usd is not None:
+                job.estimated_cost_usd = result.estimated_cost_usd
 
-        # Build update statement dynamically
-        set_clause = ", ".join([f"{k} = :{k}" for k in update_fields.keys()])
-        update_stmt = text(f"UPDATE jobs SET {set_clause} WHERE id = :job_id")
-
-        params = {**update_fields, "job_id": str(job_id)}
-        await session.execute(update_stmt, params)
-        await session.commit()
+            await session.commit()
+        else:
+            logger.error(f"Job {job_id} not found for result persistence")
 
     except IntegrityError:
         await session.rollback()
@@ -139,6 +138,7 @@ async def _get_db_settings(session: "AsyncSession") -> dict[str, Any]:
                 "mistral_rate_usd_per_minute",
                 "mistral_input_token_rate_usd",
                 "mistral_output_token_rate_usd",
+                "max_audio_length",
             ):
                 # Parse JSON if needed
                 value = setting.value_json or setting.value
@@ -214,6 +214,16 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         "mistral_output_token_rate_usd",
         getattr(deps.settings, "mistral_output_token_rate_usd", None),
     )
+    max_audio_length_setting = db_settings.get(
+        "max_audio_length",
+        getattr(deps.settings, "max_audio_length", DEFAULT_MAX_AUDIO_LENGTH),
+    )
+
+    # Compute effective max_audio_length: min(setting, model preset cap)
+    model_cap = MODEL_SPECS.get(mistral_model, {}).get(
+        "max_audio_length", DEFAULT_MAX_AUDIO_LENGTH
+    )
+    effective_max_audio_length = min(int(max_audio_length_setting), int(model_cap))
 
     # Build output path if not provided
     output_path = claimed.output_path
@@ -234,6 +244,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         transcription_model=mistral_model,
         language=claimed.language_code,
         verbose_progress=False,  # We use structured callback
+        max_audio_length=effective_max_audio_length,
     )
 
     try:

@@ -2,6 +2,7 @@
 
 Tests ConfigParser for reading and validating .audio-to-subs.yaml files.
 """
+
 import tempfile
 from pathlib import Path
 from unittest.mock import patch
@@ -9,7 +10,7 @@ from unittest.mock import patch
 import pytest
 import yaml
 
-from audio_to_subs.core.config_parser import ConfigParser, ConfigError
+from audio_to_subs.core.config_parser import ConfigError, ConfigParser
 
 
 @pytest.fixture
@@ -39,9 +40,9 @@ class TestConfigParser:
         """Test initialization fails when file cannot be read."""
         config_file = temp_config_dir / "unreadable.yaml"
         config_file.write_text("{}")
-        
+
         # Mock open to raise an exception
-        with patch('builtins.open', side_effect=OSError("Cannot read file")):
+        with patch("builtins.open", side_effect=OSError("Cannot read file")):
             with pytest.raises(ConfigError, match="Failed to read config"):
                 ConfigParser(str(config_file))
 
@@ -49,11 +50,7 @@ class TestConfigParser:
         """Test initialization with valid config file."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "video.mp4", "output": "video.srt"}
-                ]
-            })
+            yaml.dump({"jobs": [{"input": "video.mp4", "output": "video.srt"}]})
         )
 
         parser = ConfigParser(str(config_file))
@@ -73,10 +70,7 @@ class TestConfigParser:
         """Test get_defaults adds missing format to partial defaults."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "defaults": {"temp_dir": "/tmp"},
-                "jobs": []
-            })
+            yaml.dump({"defaults": {"temp_dir": "/tmp"}, "jobs": []})
         )
 
         parser = ConfigParser(str(config_file))
@@ -88,12 +82,7 @@ class TestConfigParser:
     def test_get_defaults_with_format(self, temp_config_dir):
         """Test get_defaults returns custom format."""
         config_file = temp_config_dir / "config.yaml"
-        config_file.write_text(
-            yaml.dump({
-                "defaults": {"format": "vtt"},
-                "jobs": []
-            })
-        )
+        config_file.write_text(yaml.dump({"defaults": {"format": "vtt"}, "jobs": []}))
 
         parser = ConfigParser(str(config_file))
         defaults = parser.get_defaults()
@@ -124,11 +113,7 @@ class TestConfigParser:
         """Test get_jobs returns single job."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "video.mp4", "output": "video.srt"}
-                ]
-            })
+            yaml.dump({"jobs": [{"input": "video.mp4", "output": "video.srt"}]})
         )
 
         parser = ConfigParser(str(config_file))
@@ -143,12 +128,18 @@ class TestConfigParser:
         """Test get_jobs returns multiple jobs."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "video1.mp4", "output": "video1.srt"},
-                    {"input": "video2.mkv", "output": "video2.vtt", "format": "vtt"}
-                ]
-            })
+            yaml.dump(
+                {
+                    "jobs": [
+                        {"input": "video1.mp4", "output": "video1.srt"},
+                        {
+                            "input": "video2.mkv",
+                            "output": "video2.vtt",
+                            "format": "vtt",
+                        },
+                    ]
+                }
+            )
         )
 
         parser = ConfigParser(str(config_file))
@@ -161,13 +152,7 @@ class TestConfigParser:
     def test_get_jobs_missing_input(self, temp_config_dir):
         """Test get_jobs raises error when input is missing."""
         config_file = temp_config_dir / "config.yaml"
-        config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"output": "video.srt"}
-                ]
-            })
-        )
+        config_file.write_text(yaml.dump({"jobs": [{"output": "video.srt"}]}))
 
         parser = ConfigParser(str(config_file))
 
@@ -177,13 +162,7 @@ class TestConfigParser:
     def test_get_jobs_missing_output(self, temp_config_dir):
         """Test get_jobs raises error when output is missing."""
         config_file = temp_config_dir / "config.yaml"
-        config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "video.mp4"}
-                ]
-            })
-        )
+        config_file.write_text(yaml.dump({"jobs": [{"input": "video.mp4"}]}))
 
         parser = ConfigParser(str(config_file))
 
@@ -194,11 +173,17 @@ class TestConfigParser:
         """Test get_jobs raises error with unsupported format."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "video.mp4", "output": "video.srt", "format": "invalid"}
-                ]
-            })
+            yaml.dump(
+                {
+                    "jobs": [
+                        {
+                            "input": "video.mp4",
+                            "output": "video.srt",
+                            "format": "invalid",
+                        }
+                    ]
+                }
+            )
         )
 
         parser = ConfigParser(str(config_file))
@@ -210,12 +195,14 @@ class TestConfigParser:
         """Test job format overrides defaults."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "defaults": {"format": "srt"},
-                "jobs": [
-                    {"input": "video.mp4", "output": "video.vtt", "format": "vtt"}
-                ]
-            })
+            yaml.dump(
+                {
+                    "defaults": {"format": "srt"},
+                    "jobs": [
+                        {"input": "video.mp4", "output": "video.vtt", "format": "vtt"}
+                    ],
+                }
+            )
         )
 
         parser = ConfigParser(str(config_file))
@@ -244,11 +231,7 @@ class TestConfigParser:
         """Test validate returns True for valid config."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "video.mp4", "output": "video.srt"}
-                ]
-            })
+            yaml.dump({"jobs": [{"input": "video.mp4", "output": "video.srt"}]})
         )
 
         parser = ConfigParser(str(config_file))
@@ -273,14 +256,27 @@ class TestConfigParserRealWorld:
         """Test realistic batch processing configuration."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "defaults": {"format": "srt"},
-                "jobs": [
-                    {"input": "videos/meeting.mp4", "output": "subtitles/meeting.srt"},
-                    {"input": "videos/presentation.mkv", "output": "subtitles/presentation.vtt", "format": "vtt"},
-                    {"input": "videos/tutorial.avi", "output": "subtitles/tutorial.sbv", "format": "sbv"}
-                ]
-            })
+            yaml.dump(
+                {
+                    "defaults": {"format": "srt"},
+                    "jobs": [
+                        {
+                            "input": "videos/meeting.mp4",
+                            "output": "subtitles/meeting.srt",
+                        },
+                        {
+                            "input": "videos/presentation.mkv",
+                            "output": "subtitles/presentation.vtt",
+                            "format": "vtt",
+                        },
+                        {
+                            "input": "videos/tutorial.avi",
+                            "output": "subtitles/tutorial.sbv",
+                            "format": "sbv",
+                        },
+                    ],
+                }
+            )
         )
 
         parser = ConfigParser(str(config_file))
@@ -295,12 +291,20 @@ class TestConfigParserRealWorld:
         """Test config with relative and absolute paths."""
         config_file = temp_config_dir / "config.yaml"
         config_file.write_text(
-            yaml.dump({
-                "jobs": [
-                    {"input": "./videos/local.mp4", "output": "./subtitles/local.srt"},
-                    {"input": "/absolute/path/video.mp4", "output": "/absolute/output/video.srt"}
-                ]
-            })
+            yaml.dump(
+                {
+                    "jobs": [
+                        {
+                            "input": "./videos/local.mp4",
+                            "output": "./subtitles/local.srt",
+                        },
+                        {
+                            "input": "/absolute/path/video.mp4",
+                            "output": "/absolute/output/video.srt",
+                        },
+                    ]
+                }
+            )
         )
 
         parser = ConfigParser(str(config_file))

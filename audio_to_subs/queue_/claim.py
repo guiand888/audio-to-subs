@@ -5,14 +5,11 @@ transaction. This ensures safe concurrent access from multiple workers.
 """
 
 from dataclasses import dataclass
-from datetime import datetime
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
 
-from sqlalchemy import select, text
+from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
-
-from audio_to_subs.db.models import Job, JobStatus, JobSource, OutputFormat
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -64,12 +61,12 @@ async def claim_one(
     Returns:
         ClaimedJob if a job was claimed, None if no queued jobs available
     """
-    from sqlalchemy import update, and_, or_
 
     try:
         # Atomic claim: update the oldest highest-priority queued job and return it
         # Using a subquery to select the job in the WHERE clause
-        claim_stmt = text("""
+        claim_stmt = text(
+            """
             UPDATE jobs
             SET
                 status = 'running',
@@ -85,7 +82,8 @@ async def claim_one(
                 LIMIT 1
             )
             RETURNING id, media_path, output_path, language_code, output_format, source, source_ref
-        """)
+        """
+        )
 
         result = await session.execute(
             claim_stmt,

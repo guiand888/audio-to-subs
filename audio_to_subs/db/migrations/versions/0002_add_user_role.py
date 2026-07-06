@@ -5,7 +5,9 @@ Revises: 0001
 Create Date: 2025-01-15 00:00:00.000000
 
 """
-from typing import Sequence, Union
+
+from collections.abc import Sequence
+from typing import Union
 
 import sqlalchemy as sa
 from alembic import op
@@ -19,7 +21,9 @@ depends_on: Union[str, Sequence[str], None] = None
 
 def upgrade() -> None:
     # Add role column with default value
-    op.add_column("users", sa.Column("role", sa.String(20), nullable=False, server_default="user"))
+    op.add_column(
+        "users", sa.Column("role", sa.String(20), nullable=False, server_default="user")
+    )
 
 
 def downgrade() -> None:

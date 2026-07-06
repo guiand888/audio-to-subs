@@ -2,8 +2,6 @@
 
 from uuid import uuid4
 
-import pytest
-
 from audio_to_subs.db.models import Job, JobSource, JobStatus
 
 
@@ -34,7 +32,9 @@ def test_notify_bazarr_manual_job(authenticated_client, sync_session):
     assert "Manual job" in data["reason"]
 
 
-def test_notify_bazarr_bazarr_movie_no_bazarr_config(authenticated_client, sync_session):
+def test_notify_bazarr_bazarr_movie_no_bazarr_config(
+    authenticated_client, sync_session
+):
     """POST /api/jobs/{id}/notify-bazarr skips when Bazarr is not configured."""
     job = Job(
         id=str(uuid4()),

@@ -1,14 +1,12 @@
 """Tests for session management."""
 
-import os
-import tempfile
 import time
 
 import pytest
 from freezegun import freeze_time
+from itsdangerous import BadSignature, SignatureExpired
 
 from audio_to_subs.auth.sessions import (
-    DEFAULT_SESSION_SECRET_FILE,
     PLACEHOLDER_SECRET,
     SessionManager,
     get_session_manager,
@@ -29,21 +27,25 @@ class TestSessionManagerInit:
         secret_file = tmp_path / "secret.txt"
         secret = "test-secret-from-file"
         secret_file.write_text(secret)
-        
+
         manager = SessionManager(secret_file=str(secret_file))
         assert manager._secret == secret
 
     def test_init_refuses_placeholder(self):
         """Test that initialization refuses placeholder secret."""
-        with pytest.raises(ValueError, match="Refusing to start with default placeholder"):
+        with pytest.raises(
+            ValueError, match="Refusing to start with default placeholder"
+        ):
             SessionManager(secret=PLACEHOLDER_SECRET)
 
     def test_init_refuses_placeholder_from_file(self, tmp_path):
         """Test that initialization refuses placeholder secret from file."""
         secret_file = tmp_path / "secret.txt"
         secret_file.write_text(PLACEHOLDER_SECRET)
-        
-        with pytest.raises(ValueError, match="Refusing to start with default placeholder"):
+
+        with pytest.raises(
+            ValueError, match="Refusing to start with default placeholder"
+        ):
             SessionManager(secret_file=str(secret_file))
 
 
@@ -55,7 +57,7 @@ class TestSessionManagerSecretFile:
         secret_file = tmp_path / "secret.txt"
         secret = "my-secret"
         secret_file.write_text(secret)
-        
+
         assert SessionManager._read_secret_file(str(secret_file)) == secret
 
     def test_read_secret_file_not_found(self):
@@ -73,7 +75,7 @@ class TestSessionManagerSecretFile:
         """Test writing secret to file."""
         secret_file = tmp_path / "secret.txt"
         secret = "my-secret"
-        
+
         result = SessionManager.write_secret_file(str(secret_file), secret)
         assert result == secret
         assert secret_file.read_text() == secret
@@ -81,7 +83,7 @@ class TestSessionManagerSecretFile:
     def test_write_secret_file_generates(self, tmp_path):
         """Test writing secret to file generates new secret if not provided."""
         secret_file = tmp_path / "secret.txt"
-        
+
         result = SessionManager.write_secret_file(str(secret_file))
         assert isinstance(result, str)
         assert len(result) > 64
@@ -95,7 +97,7 @@ class TestSessionManagerCreate:
         """Test creating a session token."""
         manager = SessionManager(secret="test-secret")
         token = manager.create_session(123)
-        
+
         assert isinstance(token, str)
         assert len(token) > 0
 
@@ -104,7 +106,7 @@ class TestSessionManagerCreate:
         manager = SessionManager(secret="test-secret")
         token1 = manager.create_session(1)
         token2 = manager.create_session(2)
-        
+
         assert token1 != token2
 
 
@@ -115,7 +117,7 @@ class TestSessionManagerValidate:
         """Test validating a valid session token."""
         manager = SessionManager(secret="test-secret")
         token = manager.create_session(123)
-        
+
         payload = manager.validate_session(token)
         assert payload["user_id"] == 123
         assert "iat" in payload
@@ -123,8 +125,8 @@ class TestSessionManagerValidate:
     def test_validate_session_invalid_signature(self):
         """Test validating session with invalid signature."""
         manager = SessionManager(secret="test-secret")
-        
-        with pytest.raises(Exception):  # BadSignature
+
+        with pytest.raises(BadSignature):
             manager.validate_session("invalid-token")
 
     def test_validate_session_expired(self):
@@ -135,7 +137,7 @@ class TestSessionManagerValidate:
         with freeze_time("2024-01-01 00:00:00") as frozen_time:
             frozen_time.move_to("2024-01-01 00:00:02")  # Advance 2 seconds
 
-            with pytest.raises(Exception):  # SignatureExpired
+            with pytest.raises(SignatureExpired):
                 manager.validate_session(token)
 
 
@@ -145,19 +147,19 @@ class TestSessionManagerRenewal:
     def test_needs_renewal_true(self):
         """Test that old sessions need renewal."""
         manager = SessionManager(secret="test-secret", ttl=3600)
-        
+
         # Create payload with old timestamp
         payload = {"user_id": 123, "iat": int(time.time()) - 3601}
-        
+
         assert manager.needs_renewal(payload) is True
 
     def test_needs_renewal_false(self):
         """Test that recent sessions do not need renewal."""
         manager = SessionManager(secret="test-secret", ttl=3600)
-        
+
         # Create payload with recent timestamp
         payload = {"user_id": 123, "iat": int(time.time())}
-        
+
         assert manager.needs_renewal(payload) is False
 
     def test_renew_session(self):
@@ -184,17 +186,19 @@ class TestGetSessionManager:
         """Test that get_session_manager returns the same instance."""
         # Reset global state
         import audio_to_subs.auth.sessions as sessions_module
+
         sessions_module._session_manager = None
-        
+
         manager1 = get_session_manager()
         manager2 = get_session_manager()
-        
+
         assert manager1 is manager2
 
     def test_get_session_manager_creates(self):
         """Test that get_session_manager creates a manager."""
         import audio_to_subs.auth.sessions as sessions_module
+
         sessions_module._session_manager = None
-        
+
         manager = get_session_manager()
         assert isinstance(manager, SessionManager)

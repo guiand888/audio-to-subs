@@ -53,7 +53,9 @@ class TestHandleProgressEvent:
         redis = AsyncMock()
         bridge = make_bridge(job_id=job_id, redis=redis)
 
-        await bridge._handle({"percent": 10, "stage": "extraction", "message": "Extracting"})
+        await bridge._handle(
+            {"percent": 10, "stage": "extraction", "message": "Extracting"}
+        )
 
         redis.publish.assert_called()
 
@@ -71,14 +73,26 @@ class TestHandleProgressEvent:
         await make_job_row(mock_db_session, job_id)
         bridge = make_bridge(job_id=job_id)
 
-        await bridge._handle({"percent": 0, "stage": "extraction", "message": "Starting extraction"})
-        await bridge._handle({"percent": 50, "stage": "transcription", "message": "Starting transcription"})
+        await bridge._handle(
+            {"percent": 0, "stage": "extraction", "message": "Starting extraction"}
+        )
+        await bridge._handle(
+            {
+                "percent": 50,
+                "stage": "transcription",
+                "message": "Starting transcription",
+            }
+        )
 
         logs = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == str(job_id))
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == str(job_id))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         stages_logged = [log.message for log in logs]
         assert any("transcription" in msg for msg in stages_logged)
@@ -91,13 +105,19 @@ class TestHandleProgressEvent:
         bridge = make_bridge(job_id=job_id)
 
         await bridge._handle({"percent": 0, "stage": "extraction", "message": "start"})
-        await bridge._handle({"percent": 5, "stage": "extraction", "message": "still going"})
+        await bridge._handle(
+            {"percent": 5, "stage": "extraction", "message": "still going"}
+        )
 
         logs = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == str(job_id))
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == str(job_id))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         # Only the initial stage transition (None -> extraction) should log.
         assert len(logs) == 1
@@ -127,10 +147,14 @@ class TestHandleProgressEvent:
         await bridge._write_job_log("extraction", "test message")
 
         logs = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == str(job_id))
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == str(job_id))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         assert len(logs) == 1
         assert logs[0].message == "[extraction] test message"
 
@@ -178,10 +202,14 @@ class TestConcurrentProgress:
 
         # Verify stage transitions were logged
         logs = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == str(job_id))
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == str(job_id))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
         logged_stages = [log.message for log in logs]
 
         # All distinct stage transitions should be logged
@@ -214,10 +242,14 @@ class TestConcurrentProgress:
 
         # All stage transitions should have been logged (no data loss)
         logs = (
-            await mock_db_session.execute(
-                select(JobLog).where(JobLog.job_id == str(job_id))
+            (
+                await mock_db_session.execute(
+                    select(JobLog).where(JobLog.job_id == str(job_id))
+                )
             )
-        ).scalars().all()
+            .scalars()
+            .all()
+        )
 
         # Should have one log per distinct stage
         assert len(logs) == len(stages)

@@ -44,43 +44,43 @@ async def login(
     settings: SettingsDep,
 ) -> LoginResponse:
     """Login endpoint.
-    
+
     Authenticates user and sets session cookie.
     No authentication required.
     """
     from sqlalchemy import select
-    
+
     # Find user by username
     result = await db.execute(
         select(User).where(User.username == login_request.username)
     )
     user = result.scalar_one_or_none()
-    
+
     if user is None:
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
-    
+
     # Verify password
     if not verify_password(login_request.password, user.password_hash):
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
         )
-    
+
     # Update last login time
     user.last_login_at = datetime.now(timezone.utc)
     await db.commit()
     await db.refresh(user)
-    
+
     # Create session
     session_manager = get_session_manager(
         secret=settings.SESSION_SECRET,
         secret_file=settings.SESSION_SECRET_FILE,
     )
     token = session_manager.create_session(user.id)
-    
+
     # Set cookie
     secure = settings.BEHIND_TLS
     response.set_cookie(
@@ -92,7 +92,7 @@ async def login(
         secure=secure,
         max_age=30 * 24 * 3600,  # 30 days
     )
-    
+
     return LoginResponse(user=UserOut(id=user.id, username=user.username))
 
 
@@ -101,7 +101,7 @@ async def logout(
     response: Response,
 ) -> None:
     """Logout endpoint.
-    
+
     Clears session cookie.
     Authentication required.
     """

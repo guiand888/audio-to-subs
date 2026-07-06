@@ -23,7 +23,7 @@ async def healthz(
     settings: SettingsDep,
 ) -> HealthResponse:
     """Health check endpoint.
-    
+
     Returns 200 if all services are healthy.
     No authentication required.
     """
@@ -40,7 +40,7 @@ async def healthz(
     redis_status: str | None = None
     try:
         import redis.asyncio as redis
-        
+
         redis_client = redis.from_url(settings.REDIS_URL)
         await redis_client.ping()
         await redis_client.close()

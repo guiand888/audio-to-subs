@@ -1,9 +1,10 @@
 """Tests for healthz API endpoint."""
 
+from unittest.mock import patch
+
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
-from unittest.mock import patch
 
 from audio_to_subs.api.app import create_app
 
@@ -12,9 +13,10 @@ from audio_to_subs.api.app import create_app
 def client_without_lifespan():
     """Create test client without running lifespan."""
     import os
+
     os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
     os.environ["BEHIND_TLS"] = "false"
-    
+
     app = create_app()
     # Override lifespan to skip startup
     app.router.lifespan_context = None
@@ -28,7 +30,7 @@ class TestHealthz:
         """Test that /api/healthz route exists."""
         # This will fail because DB isn't initialized, but we're testing route exists
         response = client_without_lifespan.get("/api/healthz")
-        
+
         # Should get 503 or similar error (not 404)
         assert response.status_code != 404
 

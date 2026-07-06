@@ -30,7 +30,7 @@ class TranscriptionClient:
     def __init__(
         self,
         api_key: str,
-        model: str = "voxtral-mini-latest",
+        model: str = "voxtral-mini-2602",
         language: str | None = None,
         progress_callback: Any | None = None,
     ):
@@ -38,7 +38,7 @@ class TranscriptionClient:
 
         Args:
             api_key: Mistral AI API key
-            model: Transcription model to use (default: voxtral-mini-latest per Mistral docs)
+            model: Transcription model to use (default: voxtral-mini-2602)
             language: Optional language code for transcription (e.g., 'en', 'fr'). Default: None (auto-detect)
             progress_callback: Optional callback for progress updates (receives progress messages)
 

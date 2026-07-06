@@ -22,6 +22,7 @@ from audio_to_subs.core.audio_splitter import (
     split_audio,
 )
 from audio_to_subs.core.cancel import Cancelled, CancelToken
+from audio_to_subs.core.models import DEFAULT_MAX_AUDIO_LENGTH
 from audio_to_subs.core.subtitle_generator import (
     SubtitleFormatError,
     SubtitleGenerator,
@@ -106,6 +107,7 @@ class Pipeline:
         *,
         structured_progress_callback: Optional[StructuredProgressCallback] = None,
         cancel_token: Optional[CancelToken] = None,
+        max_audio_length: int = DEFAULT_MAX_AUDIO_LENGTH,
     ) -> None:
         """Initialize pipeline.
 
@@ -113,11 +115,12 @@ class Pipeline:
             api_key: Mistral AI API key
             progress_callback: Optional legacy callback for progress updates (message, percentage)
             temp_dir: Optional temporary directory for intermediate files
-            transcription_model: Mistral transcription model (default: voxtral-mini-latest)
+            transcription_model: Mistral transcription model (default: voxtral-mini-2602)
             language: Optional language code for transcription (e.g., 'en', 'fr')
             verbose_progress: Enable detailed progress reporting (upload, segments)
             structured_progress_callback: Optional v2 callback receiving ProgressEvent dicts
             cancel_token: Optional v2 cancellation token for cooperative cancellation
+            max_audio_length: Maximum audio segment length in seconds before splitting
 
         Raises:
             ValueError: If API key is not provided
@@ -131,9 +134,11 @@ class Pipeline:
         self.temp_dir = temp_dir or tempfile.gettempdir()
         self.verbose_progress = verbose_progress
         self._cancel_token = cancel_token
+        self.max_audio_length = max_audio_length
         logger.debug(
             f"Pipeline initialized: model={transcription_model}, language={language}, "
-            f"temp_dir={self.temp_dir}, verbose_progress={verbose_progress}"
+            f"temp_dir={self.temp_dir}, verbose_progress={verbose_progress}, "
+            f"max_audio_length={max_audio_length}"
         )
         self.transcription_client = TranscriptionClient(
             api_key=api_key,
@@ -425,14 +430,12 @@ class Pipeline:
             PipelineError: If splitting fails
             Cancelled: If cancellation was requested
         """
-        # Stage 2: Check if audio needs splitting (>15 minutes)
+        # Stage 2: Check if audio needs splitting (configurable threshold)
         # D6: Dedup get_audio_duration by using cached duration instead of calling needs_splitting
-        from audio_to_subs.core.audio_splitter import MAX_AUDIO_LENGTH
-
-        if audio_duration_seconds > MAX_AUDIO_LENGTH:
+        if audio_duration_seconds > self.max_audio_length:
             self._emit_progress(
                 "split",
-                "Audio exceeds 15 minutes, splitting into segments...",
+                f"Audio exceeds {self.max_audio_length}s, splitting into segments...",
                 percent=25,
             )
             self._check_cancel()
@@ -440,6 +443,7 @@ class Pipeline:
             audio_segments = split_audio(
                 audio_path,
                 self.temp_dir,
+                max_length=self.max_audio_length,
                 progress_callback=(
                     self.progress_callback if self.verbose_progress else None
                 ),

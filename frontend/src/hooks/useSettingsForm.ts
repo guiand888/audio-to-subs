@@ -27,6 +27,7 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
         movies_root_path: settings.movies_root_path || "",
         tv_root_path: settings.tv_root_path || "",
         subtitles_same_directory: settings.subtitles_same_directory ?? true,
+        max_audio_length: settings.max_audio_length || 900,
       })
     }
     return settings ? true : false
@@ -51,6 +52,7 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
       "movies_root_path",
       "tv_root_path",
       "subtitles_same_directory",
+      "max_audio_length",
     ]
 
     let count = 0

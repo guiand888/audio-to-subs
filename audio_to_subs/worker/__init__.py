@@ -6,7 +6,7 @@ and stored in the database.
 """
 
 from audio_to_subs.worker.progress import ProgressBridge
-from audio_to_subs.worker.runner import run_job, WorkerDeps
+from audio_to_subs.worker.runner import WorkerDeps, run_job
 
 __all__ = [
     "ProgressBridge",

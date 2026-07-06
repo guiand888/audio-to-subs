@@ -20,6 +20,7 @@ import os
 import signal
 import socket
 import uuid
+from datetime import datetime, timezone
 from typing import Any
 
 from redis.asyncio import Redis
@@ -149,17 +150,20 @@ class Worker:
                 await asyncio.sleep(1)
 
     async def _mark_job_failed(
-        self, session: Any, job_id: Any, error_message: str
+        self, session: Any, job_id: str, error_message: str
     ) -> None:
         """Mark a job as failed in the database."""
-        from sqlalchemy import text
+        from audio_to_subs.db.models import Job, JobStatus
 
-        update_stmt = text(
-            "UPDATE jobs SET status='failed', finished_at=CURRENT_TIMESTAMP, "
-            "error_message=:error WHERE id=:id"
-        )
-        await session.execute(update_stmt, {"error": error_message, "id": str(job_id)})
-        await session.commit()
+        job = await session.get(Job, job_id)
+        if job:
+            job.status = JobStatus.FAILED
+            job.finished_at = datetime.now(timezone.utc)
+            job.updated_at = datetime.now(timezone.utc)
+            job.error_message = error_message
+            await session.commit()
+        else:
+            logger.error(f"Job {job_id} not found for failure marking")
 
     async def run(self) -> None:
         """Main worker loop."""

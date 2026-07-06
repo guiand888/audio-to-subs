@@ -15,14 +15,7 @@ belong in integration / end-to-end tests against a real running server.
 import uuid
 from unittest.mock import patch
 
-import pytest
 from fastapi.responses import Response
-
-
-
-def client():
-    app = create_app()
-    return TestClient(app, raise_server_exceptions=False)
 
 
 class _FakeSSE(Response):

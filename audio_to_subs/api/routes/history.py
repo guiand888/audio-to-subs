@@ -3,13 +3,13 @@
 from datetime import datetime
 from typing import TYPE_CHECKING, Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request
+from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, or_, desc, func
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, desc, func, select
 
 from audio_to_subs.api.deps import get_db
-from audio_to_subs.db.models import Job, JobStatus, JobSource
+from audio_to_subs.api.routes.jobs import JobResponse
+from audio_to_subs.db.models import Job, JobSource, JobStatus
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -49,15 +49,11 @@ class HistoryResponse(BaseModel):
     offset: int = Field(description="Pagination offset")
 
 
-# Import JobResponse from jobs.py to reuse it
-from audio_to_subs.api.routes.jobs import JobResponse
-
-
 @router.get("", response_model=HistoryResponse)
 async def get_history(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
-    status_filter: list[JobStatus] | None = Query(default=None),
+    status_filter: list[JobStatus] | None = Query(default=None),  # noqa: B008
     source_filter: JobSource | None = None,
     language_filter: str | None = None,
     since: datetime | None = None,

@@ -17,10 +17,10 @@ _PH = PasswordHasher(
 
 def hash_password(plain: str) -> str:
     """Hash a password using argon2id.
-    
+
     Args:
         plain: Plain text password
-    
+
     Returns:
         Argon2 hashed password string
     """
@@ -29,11 +29,11 @@ def hash_password(plain: str) -> str:
 
 def verify_password(plain: str, hashed: str) -> bool:
     """Verify a password against an argon2 hash.
-    
+
     Args:
         plain: Plain text password to verify
         hashed: Stored argon2 hash
-    
+
     Returns:
         True if password matches, False otherwise
     """

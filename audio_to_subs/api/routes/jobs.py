@@ -1,13 +1,13 @@
 """Job routes for managing transcription jobs."""
 
 import logging
-from datetime import datetime
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func, select, text
+from sqlalchemy import and_, desc, func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.routes._helpers import get_job_or_404, publish_job_event
@@ -236,30 +236,24 @@ async def cancel_job(
 
     # If job is still queued, cancel it immediately
     if job.status == JobStatus.QUEUED:
-        update_stmt = text(
-            "UPDATE jobs SET status='cancelled', finished_at=CURRENT_TIMESTAMP, "
-            "updated_at=CURRENT_TIMESTAMP WHERE id=:job_id"
-        )
-        await db.execute(update_stmt, {"job_id": str(job_id)})
+        job.status = JobStatus.CANCELLED
+        job.finished_at = datetime.now(timezone.utc)
+        job.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
         await publish_job_event(settings, publish_cancel, str(job_id), "cancel")
 
-        # Refresh job
         await db.refresh(job)
         return JobResponse.model_validate(job)
 
     # If job is running, set cancel_requested flag
     elif job.status == JobStatus.RUNNING:
-        update_stmt = text(
-            "UPDATE jobs SET cancel_requested=1, updated_at=CURRENT_TIMESTAMP WHERE id=:job_id"
-        )
-        await db.execute(update_stmt, {"job_id": str(job_id)})
+        job.cancel_requested = True
+        job.updated_at = datetime.now(timezone.utc)
         await db.commit()
 
         await publish_job_event(settings, publish_cancel, str(job_id), "cancel")
 
-        # Refresh job
         await db.refresh(job)
         return JobResponse.model_validate(job)
 
@@ -269,10 +263,8 @@ async def cancel_job(
 
     # For other states, still try to set cancel_requested
     else:
-        update_stmt = text(
-            "UPDATE jobs SET cancel_requested=1, updated_at=CURRENT_TIMESTAMP WHERE id=:job_id"
-        )
-        await db.execute(update_stmt, {"job_id": str(job_id)})
+        job.cancel_requested = True
+        job.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(job)
         return JobResponse.model_validate(job)

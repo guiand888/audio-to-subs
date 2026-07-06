@@ -101,7 +101,7 @@ def terminate_ffmpeg(process: subprocess.Popen) -> None:
         process.wait()
 
 
-def parse_ffmpeg_progress(
+def parse_ffmpeg_progress(  # noqa: C901
     stdout,
     progress_callback: Callable[[str], None],
     total_duration: float,

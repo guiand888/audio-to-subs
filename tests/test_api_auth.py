@@ -1,7 +1,5 @@
 """Tests for auth API routes."""
 
-import pytest
-
 
 class TestHealthz:
     """Test health check endpoint."""

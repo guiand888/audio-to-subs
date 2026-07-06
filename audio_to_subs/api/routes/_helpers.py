@@ -6,7 +6,8 @@ part of the public API surface.
 """
 
 import logging
-from typing import TYPE_CHECKING, Awaitable, Callable
+from collections.abc import Awaitable
+from typing import TYPE_CHECKING, Callable
 from uuid import UUID
 
 from fastapi import HTTPException, status
