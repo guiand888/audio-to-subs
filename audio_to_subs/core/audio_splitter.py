@@ -4,6 +4,7 @@ Handles audio files exceeding Mistral's 15-minute limit by splitting
 into segments and processing independently.
 """
 
+import logging
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -18,6 +19,8 @@ from audio_to_subs.core.ffmpeg_utils import (
 from audio_to_subs.core.ffmpeg_utils import (
     probe_duration,
 )
+
+logger = logging.getLogger(__name__)
 
 MAX_AUDIO_LENGTH = 900  # 15 minutes in seconds
 OVERLAP = 2  # 2-second overlap to preserve context at boundaries
@@ -136,7 +139,19 @@ def split_audio(
             elif cancel_token:
                 _check_cancel_periodically(process, cancel_token)
 
-            _, stderr = process.communicate()
+            # Wait for segment to complete (timeout: 30 minutes per segment)
+            try:
+                _, stderr = process.communicate(timeout=1800)
+            except subprocess.TimeoutExpired as e:
+                logger.error(
+                    f"FFmpeg splitting timed out for segment {idx} after 30 minutes"
+                )
+                process.kill()
+                process.wait()
+                raise AudioSplitterError(
+                    f"FFmpeg splitting timed out for segment {idx} after 30 minutes"
+                ) from e
+
             if process.returncode != 0:
                 error_msg = stderr if stderr else "Unknown error"
                 raise AudioSplitterError(f"FFmpeg error during splitting: {error_msg}")
