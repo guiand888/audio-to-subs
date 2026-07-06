@@ -1,18 +1,17 @@
 """Wanted API routes for Bazarr integration."""
 
 import logging
-from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Annotated
+from datetime import datetime
 from enum import Enum
+from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, desc, func, or_, and_
-from sqlalchemy.orm import joinedload, Mapped
+from sqlalchemy import desc, func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
-from audio_to_subs.db.models import BazarrCache, Job, JobStatus
 from audio_to_subs.bazarr.pathmap import PathMap
+from audio_to_subs.db.models import BazarrCache, Job, JobStatus
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -105,6 +104,36 @@ async def _get_last_refreshed(db: "AsyncSession") -> datetime | None:
     return max_polled if max_polled else None
 
 
+def _to_wanted_item(
+    item: BazarrCache,
+    active_job_status: str | None,
+    active_job_progress: int | None,
+) -> WantedItem:
+    """Build a WantedItem response from a BazarrCache row plus job status.
+
+    Args:
+        item: BazarrCache row (with path already translated)
+        active_job_status: Status of the item's active job, if any
+        active_job_progress: Progress percent of the item's active job, if any
+
+    Returns:
+        Assembled WantedItem
+    """
+    return WantedItem(
+        id=item.id,
+        kind=item.kind,
+        ext_id=item.ext_id,
+        title=item.title,
+        media_path=item.media_path,
+        has_any_subs=item.has_any_subs,
+        missing_subtitles=item.missing_subtitles,
+        last_polled=item.last_polled,
+        active_job_id=str(item.active_job_id) if item.active_job_id else None,
+        active_job_status=active_job_status,
+        active_job_progress=active_job_progress,
+    )
+
+
 @router.get("", response_model=WantedListResponse)
 async def list_wanted(
     db: Annotated["AsyncSession", Depends(get_db)],
@@ -173,6 +202,21 @@ async def list_wanted(
     # Translate paths
     items = await _translate_paths(db, items)
 
+    # Batch-load active job status/progress for all items in one query
+    # (avoids one SELECT per item).
+    active_job_ids = [item.active_job_id for item in items if item.active_job_id]
+    jobs_by_id: dict[str, tuple[str, int | None]] = {}
+    if active_job_ids:
+        job_result = await db.execute(
+            select(Job.id, Job.status, Job.progress_percent)
+            .where(Job.id.in_(active_job_ids))
+            .where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+        )
+        jobs_by_id = {
+            job_id: (job_status, progress_percent)
+            for job_id, job_status, progress_percent in job_result.all()
+        }
+
     # Get active job status for each item
     wanted_items: list[WantedItem] = []
     for item in items:
@@ -180,35 +224,13 @@ async def list_wanted(
         active_job_progress = None
 
         if item.active_job_id:
-            # Load job details
-            job_result = await db.execute(
-                select(Job.status, Job.progress_percent)
-                .where(Job.id == item.active_job_id)
-                .where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
-            )
-            job = job_result.one_or_none()
-            if job:
-                active_job_status = (
-                    job.status.value
-                    if hasattr(job.status, "value")
-                    else str(job.status)
-                )
-                active_job_progress = job.progress_percent
+            job_info = jobs_by_id.get(item.active_job_id)
+            if job_info:
+                active_job_status, active_job_progress = job_info
 
-        wanted_item = WantedItem(
-            id=item.id,
-            kind=item.kind,
-            ext_id=item.ext_id,
-            title=item.title,
-            media_path=item.media_path,
-            has_any_subs=item.has_any_subs,
-            missing_subtitles=item.missing_subtitles,
-            last_polled=item.last_polled,
-            active_job_id=str(item.active_job_id) if item.active_job_id else None,
-            active_job_status=active_job_status,
-            active_job_progress=active_job_progress,
+        wanted_items.append(
+            _to_wanted_item(item, active_job_status, active_job_progress)
         )
-        wanted_items.append(wanted_item)
 
     # Get last refreshed time
     last_refreshed = await _get_last_refreshed(db)
@@ -261,19 +283,7 @@ async def get_wanted_item(
             active_job_status = job.status
             active_job_progress = job.progress_percent
 
-    return WantedItem(
-        id=item.id,
-        kind=item.kind,
-        ext_id=item.ext_id,
-        title=item.title,
-        media_path=item.media_path,
-        has_any_subs=item.has_any_subs,
-        missing_subtitles=item.missing_subtitles,
-        last_polled=item.last_polled,
-        active_job_id=str(item.active_job_id) if item.active_job_id else None,
-        active_job_status=active_job_status,
-        active_job_progress=active_job_progress,
-    )
+    return _to_wanted_item(item, active_job_status, active_job_progress)
 
 
 # Refresh endpoint models
