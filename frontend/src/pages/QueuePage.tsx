@@ -124,30 +124,23 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
 
 export function QueuePage() {
   const queryClient = useQueryClient()
-  const { data, refetch } = useJobs({ limit: 200 })
+  // Initial seed on mount, then Zustand store is the source of truth
+  const { data } = useJobs({ limit: 200 })
   const cancelJob = useCancelJob()
   const seed = useJobsStore((s) => s.seed)
   const remove = useJobsStore((s) => s.remove)
-  const pendingNewCount = useJobsStore((s) => s.pendingNewCount)
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
   const jobs = useJobsStore((s) => s.jobs)
 
   // Track job IDs we're currently animating out
   const [fadingOut, setFadingOut] = useState<Set<string>>(new Set())
 
-  // Seed the store whenever the API response changes
+  // Seed the store once on mount from API response
   useEffect(() => {
     if (data?.jobs) {
       seed(data.jobs)
     }
-  }, [data, seed])
-
-  // Refetch whenever a new job is created (via SSE "new" event)
-  useEffect(() => {
-    if (pendingNewCount > 0) {
-      void refetch()
-    }
-  }, [pendingNewCount, refetch])
+  }, [data?.jobs, seed])
 
   // When a job reaches terminal state: animate out, then remove after delay,
   // and invalidate the history + wanted caches
