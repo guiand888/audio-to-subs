@@ -15,7 +15,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5 — History + Logs + Settings | ✅ Done | 2026-06-03 | Depends on M4 |
 | M5.1 — M5 cleanup and verification | ✅ Done | 2026-07-01 | Depends on M5 |
 | M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | 🔄 In Progress | - | Depends on M5.1 |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.2 |
+| M5.3 — Structural refactor batch (Phases 5–8) | 🔄 In Progress | - | Depends on M5.2; see `REFACTOR.md` |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.3 |
 
 Every milestone ends with the same quality bar:
 
@@ -216,6 +217,41 @@ Acceptance:
 - No SELinux permission errors on Podman with enforcing SELinux
 - pytest, black, ruff, mypy all clean
 - New code ≥ 80% coverage
+
+## M5.3 — Structural refactor batch (Phases 5–8)
+
+**Goal**: work through the backend/frontend structural cleanup identified
+after M5.2, executed as a batch of independent, parallel-mergeable units.
+
+**Depends on**: M5.2
+
+**Authoritative plan**: [`../../../audio_to_subs_plans/REFACTOR.md`](../../../audio_to_subs_plans/REFACTOR.md)
+(sibling directory to this repo). That document is the source of truth for
+this milestone's scope, execution order, and per-item detail — this section
+only summarizes; do not duplicate its item lists here.
+
+Tasks (see `REFACTOR.md` for the full breakdown):
+- **Phase 5 — Backend structural refactors**: behavior-preserving dedup of
+  ~360+ duplicated lines (FFmpeg helpers, subtitle page-splitting, secret
+  file-reads, "fetch job or 404", path-map loading, Redis publish, WantedItem
+  serialization, WAL/BEGIN-IMMEDIATE listeners, etc.), plus a batch of
+  structural correctness/performance items (retry/backoff, timeouts, N+1
+  query fixes, SSE architecture moving to Redis pub/sub, worker session
+  ownership).
+- **Phase 6 — Frontend refactor**: extract data-fetching hooks
+  (`useHistory`/`useLogs`/`useSettings`), split the `SettingsPage.tsx`
+  monolith, unify job-state ownership (SSE→Zustand, everything else→
+  react-query), dedupe formatting helpers.
+- **Phase 7 — Hygiene sweep**: mechanical cleanup — unused imports, dead
+  code, type-hint modernization (`X | None`), oversized-function splits,
+  test fixture/naming standardization.
+- **Phase 8 — Docs**: this document and `TESTING.md` themselves are part of
+  this phase.
+
+Acceptance: each unit lands independently with `pytest`/`black`/`ruff`/`mypy`
+clean and coverage non-decreasing (per `REFACTOR.md`'s verification
+checklist); no behavior change expected from Phase 5–7 work beyond the fixes
+explicitly called out as bugs in earlier phases of that plan.
 
 ## M6 — Polish, docs, coverage, security pass
 
