@@ -280,6 +280,81 @@ async def poll_bazarr_manually(
     return movies_processed, episodes_processed
 
 
+def _build_missing_subtitles_list(missing_languages: list[Any] | None) -> list[dict]:
+    """Build a list of missing subtitle language dictionaries.
+
+    Args:
+        missing_languages: List of language objects from Bazarr API, or None
+
+    Returns:
+        List of dictionaries with language details
+    """
+    return [
+        {
+            "name": lang.name,
+            "code2": lang.code2,
+            "code3": lang.code3,
+            "forced": lang.forced,
+            "hi": lang.hi,
+        }
+        for lang in (missing_languages or [])
+    ]
+
+
+async def _upsert_cache_entry(
+    db: "AsyncSession",
+    cache_id: str,
+    kind: str,
+    ext_id: int | str,
+    title: str,
+    media_path: str,
+    has_any_subs: bool,
+    missing_subtitles: list[Any] | None,
+    started_at: datetime,
+) -> None:
+    """Upsert a Bazarr cache entry (select-update/insert pattern).
+
+    Args:
+        db: Async database session
+        cache_id: Unique cache ID
+        kind: "movie" or "episode"
+        ext_id: External ID (radarrId or sonarrEpisodeId)
+        title: Display title
+        media_path: Path to media file
+        has_any_subs: Whether the item has any subtitles
+        missing_subtitles: List of missing language objects
+        started_at: Poll start time
+    """
+    result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
+    existing = result.scalar_one_or_none()
+
+    missing_subs_list = _build_missing_subtitles_list(missing_subtitles)
+
+    if existing:
+        # Update existing record
+        existing.title = title
+        existing.media_path = media_path
+        existing.has_any_subs = has_any_subs
+        existing.missing_subtitles = missing_subs_list
+        existing.last_polled = started_at
+    else:
+        # Insert new record
+        cache_entry = BazarrCache(
+            id=cache_id,
+            kind=kind,
+            ext_id=ext_id,
+            title=title,
+            media_path=media_path,
+            has_any_subs=has_any_subs,
+            missing_subtitles=missing_subs_list,
+            last_polled=started_at,
+            active_job_id=None,
+        )
+        db.add(cache_entry)
+
+    await db.commit()
+
+
 async def _process_movie(
     db: "AsyncSession",
     wanted_movie: Any,
@@ -304,52 +379,17 @@ async def _process_movie(
 
     cache_id = BazarrCache.make_id("movie", wanted_movie.radarrId)
 
-    # Use merge (upsert) - SQLite doesn't support ON CONFLICT directly in SQLAlchemy 2.x
-    # We'll do a select-then-update/insert pattern
-    result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        # Update existing record
-        existing.title = wanted_movie.title
-        existing.media_path = media_path
-        existing.has_any_subs = has_any_subs
-        existing.missing_subtitles = [
-            {
-                "name": lang.name,
-                "code2": lang.code2,
-                "code3": lang.code3,
-                "forced": lang.forced,
-                "hi": lang.hi,
-            }
-            for lang in (wanted_movie.missing_subtitles or [])
-        ]
-        existing.last_polled = started_at
-    else:
-        # Insert new record
-        cache_entry = BazarrCache(
-            id=cache_id,
-            kind="movie",
-            ext_id=wanted_movie.radarrId,
-            title=wanted_movie.title,
-            media_path=media_path,
-            has_any_subs=has_any_subs,
-            missing_subtitles=[
-                {
-                    "name": lang.name,
-                    "code2": lang.code2,
-                    "code3": lang.code3,
-                    "forced": lang.forced,
-                    "hi": lang.hi,
-                }
-                for lang in (wanted_movie.missing_subtitles or [])
-            ],
-            last_polled=started_at,
-            active_job_id=None,
-        )
-        db.add(cache_entry)
-
-    await db.commit()
+    await _upsert_cache_entry(
+        db,
+        cache_id,
+        "movie",
+        wanted_movie.radarrId,
+        wanted_movie.title,
+        media_path,
+        has_any_subs,
+        wanted_movie.missing_subtitles,
+        started_at,
+    )
 
 
 async def _process_episode(
@@ -376,51 +416,17 @@ async def _process_episode(
 
     cache_id = BazarrCache.make_id("episode", wanted_episode.sonarrEpisodeId)
 
-    # Upsert logic
-    result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
-    existing = result.scalar_one_or_none()
-
-    if existing:
-        # Update existing record
-        existing.title = f"{wanted_episode.seriesTitle} - {wanted_episode.episodeTitle}"
-        existing.media_path = media_path
-        existing.has_any_subs = has_any_subs
-        existing.missing_subtitles = [
-            {
-                "name": lang.name,
-                "code2": lang.code2,
-                "code3": lang.code3,
-                "forced": lang.forced,
-                "hi": lang.hi,
-            }
-            for lang in (wanted_episode.missing_subtitles or [])
-        ]
-        existing.last_polled = started_at
-    else:
-        # Insert new record
-        cache_entry = BazarrCache(
-            id=cache_id,
-            kind="episode",
-            ext_id=wanted_episode.sonarrEpisodeId,
-            title=f"{wanted_episode.seriesTitle} - {wanted_episode.episodeTitle}",
-            media_path=media_path,
-            has_any_subs=has_any_subs,
-            missing_subtitles=[
-                {
-                    "name": lang.name,
-                    "code2": lang.code2,
-                    "code3": lang.code3,
-                    "forced": lang.forced,
-                    "hi": lang.hi,
-                }
-                for lang in (wanted_episode.missing_subtitles or [])
-            ],
-            last_polled=started_at,
-            active_job_id=None,
-        )
-        db.add(cache_entry)
-
-    await db.commit()
+    await _upsert_cache_entry(
+        db,
+        cache_id,
+        "episode",
+        wanted_episode.sonarrEpisodeId,
+        f"{wanted_episode.seriesTitle} - {wanted_episode.episodeTitle}",
+        media_path,
+        has_any_subs,
+        wanted_episode.missing_subtitles,
+        started_at,
+    )
 
 
 async def _poll_all_movies(
