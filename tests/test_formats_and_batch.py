@@ -3,22 +3,21 @@
 Tests subtitle generation in SRT, VTT, WebVTT, and SBV formats.
 Tests batch processing pipeline.
 """
-import tempfile
+
 from pathlib import Path
 from typing import Any
 from unittest.mock import MagicMock, patch
 
 import pytest
 
+from audio_to_subs.core.pipeline import Pipeline, PipelineError
 from audio_to_subs.core.subtitle_generator import (
+    SubtitleFormatError,
     SubtitleGenerator,
+    format_timestamp_sbv,
     format_timestamp_srt,
     format_timestamp_vtt,
-    format_timestamp_sbv,
-    SubtitleFormatError,
 )
-from audio_to_subs.core.pipeline import Pipeline, PipelineError
-
 
 # Test data fixtures
 SAMPLE_SEGMENTS: list[dict[str, Any]] = [
@@ -31,63 +30,29 @@ SAMPLE_SEGMENTS: list[dict[str, Any]] = [
 class TestTimestampFormatters:
     """Tests for timestamp formatting functions."""
 
-    class TestSRTTimestamp:
-        """Tests for SRT timestamp format (HH:MM:SS,mmm)."""
+    @pytest.mark.parametrize(
+        "seconds,expected_srt,expected_vtt,expected_sbv",
+        [
+            (0, "00:00:00,000", "00:00:00.000", "0:00:00,000"),
+            (1.5, "00:00:01,500", "00:00:01.500", "0:00:01,500"),
+            (65.5, "00:01:05,500", "00:01:05.500", "0:01:05,500"),
+            (3661.5, "01:01:01,500", "01:01:01.500", "1:01:01,500"),
+            (36661.999, "10:11:01,999", "10:11:01.999", "10:11:01,999"),
+        ],
+    )
+    def test_format_timestamps(self, seconds, expected_srt, expected_vtt, expected_sbv):
+        """Test timestamp formatting for all formats."""
+        assert format_timestamp_srt(seconds) == expected_srt
+        assert format_timestamp_vtt(seconds) == expected_vtt
+        assert format_timestamp_sbv(seconds) == expected_sbv
 
-        def test_format_zero_seconds(self):
-            """Test formatting 0 seconds."""
-            assert format_timestamp_srt(0) == "00:00:00,000"
-
-        def test_format_milliseconds(self):
-            """Test formatting with milliseconds."""
-            assert format_timestamp_srt(1.5) == "00:00:01,500"
-
-        def test_format_minutes(self):
-            """Test formatting with minutes."""
-            assert format_timestamp_srt(65.5) == "00:01:05,500"
-
-        def test_format_hours(self):
-            """Test formatting with hours."""
-            assert format_timestamp_srt(3661.5) == "01:01:01,500"
-
-        def test_format_large_value(self):
-            """Test formatting large time values."""
-            assert format_timestamp_srt(36661.999) == "10:11:01,999"
-
-    class TestVTTTimestamp:
-        """Tests for VTT timestamp format (HH:MM:SS.mmm)."""
-
-        def test_format_zero_seconds(self):
-            """Test formatting 0 seconds."""
-            assert format_timestamp_vtt(0) == "00:00:00.000"
-
-        def test_format_milliseconds(self):
-            """Test formatting with milliseconds."""
-            assert format_timestamp_vtt(1.5) == "00:00:01.500"
-
-        def test_format_uses_dot_separator(self):
-            """Test VTT uses dot instead of comma for milliseconds."""
-            srt = format_timestamp_srt(1.5)
-            vtt = format_timestamp_vtt(1.5)
-            assert "," in srt
-            assert "." in vtt
-            assert srt.replace(",", ".") == vtt
-
-    class TestSBVTimestamp:
-        """Tests for SBV timestamp format (H:MM:SS,mmm)."""
-
-        def test_format_zero_seconds(self):
-            """Test formatting 0 seconds."""
-            assert format_timestamp_sbv(0) == "0:00:00,000"
-
-        def test_format_no_leading_hour_zero(self):
-            """Test SBV doesn't use leading zero for hours."""
-            sbv = format_timestamp_sbv(3661.5)
-            srt = format_timestamp_srt(3661.5)
-            # SRT: 01:01:01,500
-            # SBV: 1:01:01,500
-            assert sbv == "1:01:01,500"
-            assert srt == "01:01:01,500"
+    def test_vtt_uses_dot_separator(self):
+        """Test VTT uses dot instead of comma for milliseconds."""
+        srt = format_timestamp_srt(1.5)
+        vtt = format_timestamp_vtt(1.5)
+        assert "," in srt
+        assert "." in vtt
+        assert srt.replace(",", ".") == vtt
 
 
 class TestSubtitleGenerator:
@@ -99,10 +64,9 @@ class TestSubtitleGenerator:
         return SubtitleGenerator()
 
     @pytest.fixture
-    def temp_output_dir(self):
+    def temp_output_dir(self, tmp_path):
         """Create temporary directory for output files."""
-        with tempfile.TemporaryDirectory() as tmpdir:
-            yield Path(tmpdir)
+        return tmp_path
 
     def test_supported_formats(self, generator):
         """Test SUPPORTED_FORMATS contains all formats."""
@@ -111,45 +75,32 @@ class TestSubtitleGenerator:
         assert "webvtt" in generator.SUPPORTED_FORMATS
         assert "sbv" in generator.SUPPORTED_FORMATS
 
-    def test_generate_srt(self, generator, temp_output_dir):
-        """Test SRT file generation."""
-        output_path = str(temp_output_dir / "output.srt")
-        result = generator.generate(SAMPLE_SEGMENTS, output_path, "srt")
+    @pytest.mark.parametrize(
+        "format_name,expected_ext,expected_content,separator",
+        [
+            ("srt", ".srt", "00:00:01,500 --> 00:00:05,000", ","),
+            ("vtt", ".vtt", "00:00:01.500 --> 00:00:05.000", "."),
+            ("webvtt", ".vtt", "WEBVTT", "."),
+            ("sbv", ".sbv", "0:00:01,500", ","),
+        ],
+    )
+    def test_generate_formats(
+        self,
+        generator,
+        temp_output_dir,
+        format_name,
+        expected_ext,
+        expected_content,
+        separator,
+    ):
+        """Test subtitle generation for all formats."""
+        output_path = str(temp_output_dir / f"output{expected_ext}")
+        result = generator.generate(SAMPLE_SEGMENTS, output_path, format_name)
 
         assert result == output_path
         assert Path(output_path).exists()
-
         content = Path(output_path).read_text()
-        assert "First subtitle" in content
-        assert "00:00:01,500 --> 00:00:05,000" in content
-        assert "1" in content  # subtitle number
-
-    def test_generate_vtt(self, generator, temp_output_dir):
-        """Test VTT file generation."""
-        output_path = str(temp_output_dir / "output.vtt")
-        result = generator.generate(SAMPLE_SEGMENTS, output_path, "vtt")
-
-        assert result == output_path
-        content = Path(output_path).read_text()
-        assert "WEBVTT" in content
-        assert "00:00:01.500 --> 00:00:05.000" in content  # dot separator
-        assert "First subtitle" in content
-
-    def test_generate_webvtt(self, generator, temp_output_dir):
-        """Test WebVTT format (same as vtt)."""
-        output_path = str(temp_output_dir / "output.vtt")
-        generator.generate(SAMPLE_SEGMENTS, output_path, "webvtt")
-
-        content = Path(output_path).read_text()
-        assert "WEBVTT" in content
-
-    def test_generate_sbv(self, generator, temp_output_dir):
-        """Test SBV file generation."""
-        output_path = str(temp_output_dir / "output.sbv")
-        generator.generate(SAMPLE_SEGMENTS, output_path, "sbv")
-
-        content = Path(output_path).read_text()
-        assert "0:00:01,500" in content  # SBV format
+        assert expected_content in content
         assert "First subtitle" in content
 
     def test_generate_unsupported_format(self, generator, temp_output_dir):
@@ -177,9 +128,7 @@ class TestSubtitleGenerator:
 
     def test_generate_multiline_text(self, generator, temp_output_dir):
         """Test generation with multiline subtitle text."""
-        segments = [
-            {"start": 0, "end": 5, "text": "First line\nSecond line"}
-        ]
+        segments = [{"start": 0, "end": 5, "text": "First line\nSecond line"}]
         output_path = str(temp_output_dir / "output.srt")
         generator.generate(segments, output_path, "srt")
 
@@ -194,19 +143,21 @@ class TestBatchProcessing:
     @pytest.fixture
     def pipeline_with_mock(self):
         """Create Pipeline with mocked dependencies."""
-        with patch("audio_to_subs.core.pipeline.extract_audio"), \
-             patch("audio_to_subs.core.pipeline.TranscriptionClient"), \
-             patch("audio_to_subs.core.pipeline.SubtitleGenerator"):
+        with (
+            patch("audio_to_subs.core.pipeline.extract_audio"),
+            patch("audio_to_subs.core.pipeline.TranscriptionClient"),
+            patch("audio_to_subs.core.pipeline.SubtitleGenerator"),
+        ):
             pipeline = Pipeline(api_key="test-key")
             return pipeline
 
     def test_process_batch_single_job(self, pipeline_with_mock):
         """Test batch processing with single job."""
-        jobs = [
-            {"input": "video1.mp4", "output": "video1.srt", "format": "srt"}
-        ]
+        jobs = [{"input": "video1.mp4", "output": "video1.srt", "format": "srt"}]
 
-        with patch.object(pipeline_with_mock, "process_video", return_value="video1.srt"):
+        with patch.object(
+            pipeline_with_mock, "process_video", return_value="video1.srt"
+        ):
             results = pipeline_with_mock.process_batch(jobs)
 
         assert len(results) == 1
@@ -223,7 +174,7 @@ class TestBatchProcessing:
         with patch.object(
             pipeline_with_mock,
             "process_video",
-            side_effect=["video1.srt", "video2.vtt", "video3.sbv"]
+            side_effect=["video1.srt", "video2.vtt", "video3.sbv"],
         ):
             results = pipeline_with_mock.process_batch(jobs)
 
@@ -242,7 +193,9 @@ class TestBatchProcessing:
             {"input": "video2.mkv", "output": "video2.vtt", "format": "vtt"},
         ]
 
-        with patch.object(pipeline_with_mock, "process_video", return_value="output.srt"):
+        with patch.object(
+            pipeline_with_mock, "process_video", return_value="output.srt"
+        ):
             pipeline_with_mock.process_batch(jobs)
 
         # Should be called for each job
@@ -268,9 +221,7 @@ class TestBatchProcessing:
 
     def test_process_batch_respects_format(self, pipeline_with_mock):
         """Test batch processing passes format to process_video."""
-        jobs = [
-            {"input": "video1.mp4", "output": "video1.vtt", "format": "vtt"}
-        ]
+        jobs = [{"input": "video1.mp4", "output": "video1.vtt", "format": "vtt"}]
 
         with patch.object(pipeline_with_mock, "process_video") as mock_process:
             mock_process.return_value = "video1.vtt"
@@ -286,25 +237,24 @@ class TestBatchProcessing:
 class TestFormatConversions:
     """Integration tests for format conversions."""
 
-    def test_all_formats_generate_same_content(self):
+    def test_all_formats_generate_same_content(self, tmp_path):
         """Test all formats contain the same text content."""
         generator = SubtitleGenerator()
 
-        with tempfile.TemporaryDirectory() as tmpdir:
-            srt_path = Path(tmpdir) / "output.srt"
-            vtt_path = Path(tmpdir) / "output.vtt"
-            sbv_path = Path(tmpdir) / "output.sbv"
+        srt_path = tmp_path / "output.srt"
+        vtt_path = tmp_path / "output.vtt"
+        sbv_path = tmp_path / "output.sbv"
 
-            generator.generate(SAMPLE_SEGMENTS, str(srt_path), "srt")
-            generator.generate(SAMPLE_SEGMENTS, str(vtt_path), "vtt")
-            generator.generate(SAMPLE_SEGMENTS, str(sbv_path), "sbv")
+        generator.generate(SAMPLE_SEGMENTS, str(srt_path), "srt")
+        generator.generate(SAMPLE_SEGMENTS, str(vtt_path), "vtt")
+        generator.generate(SAMPLE_SEGMENTS, str(sbv_path), "sbv")
 
-            srt_text = srt_path.read_text()
-            vtt_text = vtt_path.read_text()
-            sbv_text = sbv_path.read_text()
+        srt_text = srt_path.read_text()
+        vtt_text = vtt_path.read_text()
+        sbv_text = sbv_path.read_text()
 
-            # All should contain the subtitle text
-            for text in ["First subtitle", "Second subtitle", "Third subtitle"]:
-                assert text in srt_text
-                assert text in vtt_text
-                assert text in sbv_text
+        # All should contain the subtitle text
+        for text in ["First subtitle", "Second subtitle", "Third subtitle"]:
+            assert text in srt_text
+            assert text in vtt_text
+            assert text in sbv_text
