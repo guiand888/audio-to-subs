@@ -5,6 +5,7 @@ import os
 from pathlib import Path
 from typing import Any
 
+import tenacity
 from mistralai.client import Mistral
 from mistralai.client.models import File
 
@@ -63,8 +64,11 @@ class TranscriptionClient:
         segment_number: int | None,
         total_segments: int | None,
     ) -> "File":
-        """Read an audio file into a Mistral ``File`` object, reporting upload
-        progress in chunks if a progress callback and segment info are set.
+        """Read an audio file into a Mistral File object.
+
+        Note: The Mistral API requires the full file buffer, so streaming is not
+        supported. This method reads the entire file into memory. Progress
+        reporting (if enabled) shows 0% at start and 100% at completion.
 
         Args:
             audio_path: Path to audio file
@@ -75,39 +79,24 @@ class TranscriptionClient:
             Mistral File object wrapping the file's full contents
         """
         file_size = os.path.getsize(audio_path)
-        uploaded_bytes = 0
-        chunk_size = 1024 * 1024  # 1MB chunks
         report_progress = bool(
             self.progress_callback and segment_number and total_segments
         )
 
         if report_progress:
+            mb_total = file_size / (1024 * 1024)
             self.progress_callback(
-                f"Uploading segment {segment_number}/{total_segments}: 0 / {file_size / 1024 / 1024:.1f} MB (0%)",
+                f"Uploading segment {segment_number}/{total_segments}: 0 / {mb_total:.1f} MB (0%)",
                 0,
             )
 
         with open(audio_path, "rb") as audio_file:
-            file_content = b""
-            while uploaded_bytes < file_size:
-                chunk = audio_file.read(min(chunk_size, file_size - uploaded_bytes))
-                if not chunk:
-                    break
-                file_content += chunk
-                uploaded_bytes += len(chunk)
-
-                if report_progress:
-                    percentage = int((uploaded_bytes / file_size) * 100)
-                    mb_uploaded = uploaded_bytes / (1024 * 1024)
-                    mb_total = file_size / (1024 * 1024)
-                    self.progress_callback(
-                        f"Uploading segment {segment_number}/{total_segments}: {mb_uploaded:.1f}/{mb_total:.1f} MB ({percentage}%)",
-                        percentage,
-                    )
+            file_content = audio_file.read()
 
         if report_progress:
+            mb_total = file_size / (1024 * 1024)
             self.progress_callback(
-                f"Uploading segment {segment_number}/{total_segments}: {file_size / 1024 / 1024:.1f} / {file_size / 1024 / 1024:.1f} MB (100%)",
+                f"Uploading segment {segment_number}/{total_segments}: {mb_total:.1f} / {mb_total:.1f} MB (100%)",
                 100,
             )
 
@@ -126,27 +115,87 @@ class TranscriptionClient:
             elif isinstance(usage_obj, dict):
                 self._last_usage = usage_obj.copy()
 
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=1, min=2, max=10),
+        retry=tenacity.retry_if_exception_type((Exception,)),
+        reraise=True,
+    )
+    def _call_mistral_transcription(
+        self, model: str, file_obj: File, language: str | None, timeout: float = 60.0
+    ) -> Any:
+        """Call Mistral audio transcription API with retry and timeout.
+
+        Args:
+            model: Model name
+            file_obj: File object
+            language: Optional language code
+            timeout: Request timeout in seconds (default: 60)
+
+        Returns:
+            Mistral transcription response
+
+        Raises:
+            Exception: On API error after all retries exhausted
+        """
+        kwargs = {"model": model, "file": file_obj, "timeout": timeout}
+        if language:
+            kwargs["language"] = language
+        return self.client.audio.transcriptions.complete(**kwargs)
+
+    @tenacity.retry(
+        stop=tenacity.stop_after_attempt(3),
+        wait=tenacity.wait_exponential(multiplier=1, min=2, max=10),
+        retry=tenacity.retry_if_exception_type((Exception,)),
+        reraise=True,
+    )
+    def _call_mistral_transcription_with_timestamps(
+        self, model: str, file_obj: File, timeout: float = 60.0
+    ) -> Any:
+        """Call Mistral audio transcription API with timestamps and retry.
+
+        Args:
+            model: Model name
+            file_obj: File object
+            timeout: Request timeout in seconds (default: 60)
+
+        Returns:
+            Mistral transcription response with segments
+
+        Raises:
+            Exception: On API error after all retries exhausted
+        """
+        kwargs = {
+            "model": model,
+            "file": file_obj,
+            "timestamp_granularities": ["segment"],
+            "timeout": timeout,
+        }
+        return self.client.audio.transcriptions.complete(**kwargs)
+
     def transcribe_audio(
         self,
         audio_path: str,
         language: str | None = None,
         segment_number: int | None = None,
         total_segments: int | None = None,
+        timeout: float = 60.0,
     ) -> str:
-        """Transcribe audio file to text.
+        """Transcribe audio file to text with automatic retry on transient failures.
 
         Args:
             audio_path: Path to audio file
             language: Optional language code. Overrides instance default if provided.
             segment_number: Optional segment number (for progress reporting)
             total_segments: Optional total segments (for progress reporting)
+            timeout: Request timeout in seconds (default: 60)
 
         Returns:
             Transcribed text
 
         Raises:
             AudioFileError: If audio file not found
-            TranscriptionError: If transcription fails
+            TranscriptionError: If transcription fails after retries
         """
         audio_file = Path(audio_path)
         if not audio_file.exists():
@@ -161,11 +210,15 @@ class TranscriptionClient:
                 audio_path, segment_number, total_segments
             )
 
-            kwargs = {"model": self.model, "file": file_obj}
-            if lang:
-                kwargs["language"] = lang
-            logger.debug(f"Calling Mistral API: model={self.model}, language={lang}")
-            response = self.client.audio.transcriptions.complete(**kwargs)
+            logger.debug(
+                f"Calling Mistral API: model={self.model}, language={lang}, timeout={timeout}s"
+            )
+            response = self._call_mistral_transcription(
+                model=self.model,
+                file_obj=file_obj,
+                language=lang,
+                timeout=timeout,
+            )
             logger.debug(
                 f"Transcription response received, text length: {len(response.text)}"
             )
@@ -181,47 +234,45 @@ class TranscriptionClient:
         language: str | None = None,
         segment_number: int | None = None,
         total_segments: int | None = None,
+        timeout: float = 60.0,
     ) -> list[dict[str, Any]]:
-        """Transcribe audio with timestamp information.
+        """Transcribe audio with timestamp information and automatic retry on transient failures.
 
         Args:
             audio_path: Path to audio file
             language: Optional language code. Overrides instance default if provided.
+                Note: language is not compatible with timestamps per Mistral docs.
             segment_number: Optional segment number (for progress reporting)
             total_segments: Optional total segments (for progress reporting)
+            timeout: Request timeout in seconds (default: 60)
 
         Returns:
             List of segments with start, end times and text
 
         Raises:
             AudioFileError: If audio file not found
-            TranscriptionError: If transcription fails
-            Note: timestamp_granularities is not compatible with language per Mistral docs
+            TranscriptionError: If transcription fails after retries
         """
         audio_file = Path(audio_path)
         if not audio_file.exists():
             raise AudioFileError(f"Audio file not found: {audio_path}")
 
         try:
-            lang = language or self.language
+            # Note: language parameter is intentionally ignored here.
+            # Language and timestamp_granularities are mutually exclusive per Mistral docs.
+            # Timestamps are required for subtitle generation, so language is disabled.
+            # TODO: Support language parameter when Mistral API allows language + timestamps
 
             file_obj = self._read_file_with_progress(
                 audio_path, segment_number, total_segments
             )
 
-            kwargs = {
-                "model": self.model,
-                "file": file_obj,
-                "timestamp_granularities": ["segment"],
-            }
-            # Note: language and timestamp_granularities are mutually exclusive per Mistral docs
-            # Timestamps are required for subtitle generation, so language is disabled for now.
-            # TODO: Support language parameter when Mistral API allows language + timestamps
-            # if lang:
-            #     kwargs.pop("timestamp_granularities", None)
-            #     kwargs["language"] = lang
-            logger.debug(f"Calling Mistral API with timestamps: {kwargs.keys()}")
-            response = self.client.audio.transcriptions.complete(**kwargs)
+            logger.debug(f"Calling Mistral API with timestamps, timeout={timeout}s")
+            response = self._call_mistral_transcription_with_timestamps(
+                model=self.model,
+                file_obj=file_obj,
+                timeout=timeout,
+            )
             logger.debug(f"Transcription response type: {type(response)}")
             self._capture_usage(response)
 

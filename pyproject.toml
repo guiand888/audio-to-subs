@@ -55,6 +55,8 @@ dependencies = [
     "redis==5.0.3",
     # HTTP client for Bazarr
     "httpx>=0.28.1",
+    # Resilience: retry with exponential backoff
+    "tenacity==8.5.0",
 ]
 
 [project.optional-dependencies]

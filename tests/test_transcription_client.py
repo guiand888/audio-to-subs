@@ -244,7 +244,7 @@ class TestTranscriptionClient:
         class MockResponse:
             def __init__(self):
                 self.text = "Test without segments"
-        
+
         mock_response = MockResponse()
         mock_client.audio.transcriptions.complete.return_value = mock_response
 
@@ -255,3 +255,157 @@ class TestTranscriptionClient:
 
         # Assert - should return empty list
         assert result == []
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_timeout(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that timeout parameter is passed to API call."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.text = "Test transcription"
+        mock_client.audio.transcriptions.complete.return_value = mock_response
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio("test_audio.wav", timeout=120.0)
+
+        # Assert
+        assert result == "Test transcription"
+        # Verify timeout was passed to the API call
+        call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
+        assert call_kwargs.get("timeout") == 120.0
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_retries_on_transient_failure(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that transcription retries on transient API failures."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.text = "Successful transcription"
+
+        # First two calls fail with a timeout error, third succeeds
+        mock_client.audio.transcriptions.complete.side_effect = [
+            TimeoutError("Request timeout"),
+            TimeoutError("Request timeout"),
+            mock_response,
+        ]
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio("test_audio.wav")
+
+        # Assert
+        assert result == "Successful transcription"
+        # Verify that complete() was called 3 times (2 failures + 1 success)
+        assert mock_client.audio.transcriptions.complete.call_count == 3
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_exhausts_retries_on_persistent_failure(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that transcription fails after exhausting retries."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        # All calls fail
+        mock_client.audio.transcriptions.complete.side_effect = TimeoutError("Persistent timeout")
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act & Assert
+        with pytest.raises(TranscriptionError, match="Transcription failed"):
+            client.transcribe_audio("test_audio.wav")
+
+        # Verify that retries were attempted (max 3 attempts)
+        assert mock_client.audio.transcriptions.complete.call_count == 3
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_timestamps_retries_on_transient_failure(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that transcription with timestamps retries on transient API failures."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.segments = [
+            MagicMock(start=0.0, end=2.5, text="Test"),
+        ]
+
+        # First call fails with a connection error, second succeeds
+        mock_client.audio.transcriptions.complete.side_effect = [
+            ConnectionError("Connection failed"),
+            mock_response,
+        ]
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio_with_timestamps("test_audio.wav")
+
+        # Assert
+        assert len(result) == 1
+        assert result[0]["text"] == "Test"
+        # Verify that complete() was called 2 times (1 failure + 1 success)
+        assert mock_client.audio.transcriptions.complete.call_count == 2
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_timestamps_timeout(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that timeout parameter is passed to timestamps API call."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.segments = []
+        mock_client.audio.transcriptions.complete.return_value = mock_response
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio_with_timestamps("test_audio.wav", timeout=90.0)
+
+        # Assert
+        assert result == []
+        # Verify timeout was passed to the API call
+        call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
+        assert call_kwargs.get("timeout") == 90.0
