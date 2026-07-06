@@ -15,22 +15,38 @@ from audio_to_subs.core.cancel import Cancelled, CancelToken
 
 logger = logging.getLogger(__name__)
 
+# Cache for FFmpeg availability check (checked once at startup, not per-call)
+_ffmpeg_available_cached: Optional[bool] = None
+
 
 def check_ffmpeg_available() -> bool:
     """Check if FFmpeg is available on the system.
 
+    Result is cached after first check to avoid repeated subprocess calls.
+
     Returns:
         True if FFmpeg is available, False otherwise.
     """
+    global _ffmpeg_available_cached
+
+    if _ffmpeg_available_cached is not None:
+        return _ffmpeg_available_cached
+
     try:
         result = subprocess.run(
             ["ffmpeg", "-version"],
             capture_output=True,
             check=False,
+            timeout=10,
         )
-        return result.returncode == 0
+        _ffmpeg_available_cached = result.returncode == 0
     except FileNotFoundError:
-        return False
+        _ffmpeg_available_cached = False
+    except subprocess.TimeoutExpired:
+        logger.warning("FFmpeg availability check timed out after 10 seconds")
+        _ffmpeg_available_cached = False
+
+    return _ffmpeg_available_cached
 
 
 def probe_duration(media_path: str) -> float:
@@ -44,6 +60,7 @@ def probe_duration(media_path: str) -> float:
 
     Raises:
         subprocess.CalledProcessError: If ffprobe fails
+        subprocess.TimeoutExpired: If ffprobe times out
         ValueError: If ffprobe output cannot be parsed as a float
 
     Callers are expected to catch these and re-raise as their own
@@ -63,6 +80,7 @@ def probe_duration(media_path: str) -> float:
         capture_output=True,
         text=True,
         check=True,
+        timeout=60,
     )
     return float(result.stdout.strip())
 

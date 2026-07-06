@@ -23,6 +23,7 @@ from sqlalchemy.orm import Session
 import audio_to_subs.db.base as _db_base
 import audio_to_subs.api.settings as _api_settings
 import audio_to_subs.auth.sessions as _auth_sessions
+import audio_to_subs.core.ffmpeg_utils as _ffmpeg_utils
 
 # Secret reused by every test — arbitrary but non-placeholder.
 TEST_SESSION_SECRET = "test-only-session-secret-do-not-use-in-production"
@@ -50,6 +51,7 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     _db_base._sync_engine = None
     _api_settings._settings = None
     _auth_sessions._session_manager = None
+    _ffmpeg_utils._ffmpeg_available_cached = None
 
     # Pre-create schema and default admin user synchronously so tests that
     # skip the lifespan (non-context-manager TestClient) still have a working DB.
@@ -74,6 +76,7 @@ def _test_environment(tmp_path, monkeypatch) -> Generator:
     _db_base._sync_engine = None
     _api_settings._settings = None
     _auth_sessions._session_manager = None
+    _ffmpeg_utils._ffmpeg_available_cached = None
 
 
 @pytest.fixture

@@ -150,8 +150,14 @@ def extract_audio(
             # Check for cancellation periodically if no progress callback
             _check_cancel_periodically(process, cancel_token)
 
-        # Wait for process to complete
-        _, stderr = process.communicate()
+        # Wait for process to complete (timeout: 30 minutes for large files)
+        try:
+            _, stderr = process.communicate(timeout=1800)
+        except subprocess.TimeoutExpired as e:
+            logger.error("FFmpeg extraction timed out after 30 minutes")
+            process.kill()
+            process.wait()
+            raise AudioExtractionError("FFmpeg extraction timed out after 30 minutes") from e
 
         if process.returncode != 0:
             error_msg = stderr if stderr else "Unknown error"

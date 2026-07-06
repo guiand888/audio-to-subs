@@ -13,16 +13,17 @@ class TestFFmpegAvailability:
         """Test that check_ffmpeg_available returns True when FFmpeg is installed."""
         # Arrange
         mock_run.return_value = MagicMock(returncode=0)
-        
+
         # Act
         result = check_ffmpeg_available()
-        
+
         # Assert
         assert result is True
         mock_run.assert_called_once_with(
             ['ffmpeg', '-version'],
             capture_output=True,
-            check=False
+            check=False,
+            timeout=10
         )
 
     @patch('subprocess.run')
