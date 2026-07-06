@@ -8,9 +8,14 @@ import type { SettingsOut, SettingsPatch } from "@/lib/types"
 export function useSettingsForm(settings: SettingsOut | undefined) {
   const [formData, setFormData] = useState<Partial<SettingsPatch>>({})
 
-  // Sync form data with fetched settings on mount/update
+  // Sync form data with fetched settings whenever settings changes (mount,
+  // and after a save invalidates+refetches the query). Fields like
+  // bazarr_api_key come back masked by the server once set, so the form's
+  // baseline must be resynced from every fresh fetch - not just the first -
+  // or the "unsaved changes" indicator never clears once the raw value the
+  // user typed stops matching the masked placeholder echoed back.
   useEffect(() => {
-    if (settings && Object.keys(formData).length === 0) {
+    if (settings) {
       setFormData({
         mistral_model: settings.mistral_model,
         mistral_rate_usd_per_minute: settings.mistral_rate_usd_per_minute,
@@ -30,7 +35,7 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
         max_audio_length: settings.max_audio_length || 900,
       })
     }
-  }, [settings, formData])
+  }, [settings])
 
   const isInitialized = Boolean(settings)
 

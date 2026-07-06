@@ -55,6 +55,7 @@ const MOCK_SETTINGS = {
   movies_root_path: "/movies",
   tv_root_path: "/tv",
   subtitles_same_directory: true,
+  max_audio_length: 900,
 }
 
 const MOCK_CONNECTION_SUCCESS = {
@@ -196,6 +197,81 @@ describe("SettingsPage - Bazarr Configuration Section", () => {
       const urlInput = screen.getByLabelText(/Bazarr API URL/i)
       expect(urlInput).toBeInTheDocument()
       expect(urlInput).toHaveValue("http://localhost:6767")
+    })
+  })
+})
+
+describe("SettingsPage - Save Settings change tracking", () => {
+  it("clears the unsaved-changes indicator after a successful save", async () => {
+    // Model a real backend: GET reflects whatever the last PATCH persisted,
+    // instead of always returning the same static object. This is what
+    // exposes the bug - a mock that always resolves the same MOCK_SETTINGS
+    // would pass even with the indicator stuck, because it never simulates
+    // the server actually remembering the save.
+    let persisted = { ...MOCK_SETTINGS }
+    vi.mocked(api.get).mockImplementation(() => Promise.resolve({ ...persisted }))
+    vi.mocked(api.patch).mockImplementation((_url: unknown, body: unknown) => {
+      persisted = { ...persisted, ...(body as object) }
+      return Promise.resolve({ ...persisted })
+    })
+
+    const user = userEvent.setup()
+    render(<SettingsPage />, { wrapper })
+
+    const input = await screen.findByLabelText(/Movies Root Path/i)
+    await user.clear(input)
+    await user.type(input, "/media/movies")
+
+    await waitFor(() => {
+      expect(screen.getByText("1 change")).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText("Save Settings"))
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Settings saved")
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText(/^\d+ changes?$/)).not.toBeInTheDocument()
+    })
+  })
+
+  it("clears the indicator after saving a new Bazarr API key, even though the server always masks it back", async () => {
+    // Mirrors the real backend: SettingsResponse.sanitized() replaces
+    // bazarr_api_key with "***MASKED***" in every response once it's set
+    // (audio_to_subs/api/routes/settings.py). A form that never re-syncs its
+    // baseline from a fresh GET/PATCH response will keep comparing the raw
+    // key the user typed against the masked placeholder forever.
+    let persisted: Record<string, unknown> = { ...MOCK_SETTINGS, bazarr_api_key: null }
+    const sanitize = (s: Record<string, unknown>) => ({
+      ...s,
+      bazarr_api_key: s.bazarr_api_key ? "***MASKED***" : null,
+    })
+    vi.mocked(api.get).mockImplementation(() => Promise.resolve(sanitize(persisted)))
+    vi.mocked(api.patch).mockImplementation((_url: unknown, body: unknown) => {
+      persisted = { ...persisted, ...(body as object) }
+      return Promise.resolve(sanitize(persisted))
+    })
+
+    const user = userEvent.setup()
+    render(<SettingsPage />, { wrapper })
+
+    const apiKeyInput = await screen.findByLabelText(/^API Key$/i)
+    await user.type(apiKeyInput, "sk-real-secret-key")
+
+    await waitFor(() => {
+      expect(screen.getByText("1 change")).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText("Save Settings"))
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Settings saved")
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText(/^\d+ changes?$/)).not.toBeInTheDocument()
     })
   })
 })
