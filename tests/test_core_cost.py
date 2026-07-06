@@ -22,7 +22,7 @@ class TestExtractUsage:
             "completion_tokens": 20,
             "prompt_audio_seconds": 15,
         }
-        
+
         result = extract_usage(mock_response)
         assert result is not None
         assert result["prompt_tokens"] == 10
@@ -32,14 +32,16 @@ class TestExtractUsage:
     def test_extract_from_usage_attribute_with_model_dump(self) -> None:
         """Test extracting usage from an object with model_dump."""
         mock_usage = Mock()
-        mock_usage.model_dump = Mock(return_value={
-            "prompt_tokens": 5,
-            "completion_tokens": 10,
-            "prompt_audio_seconds": 8,
-        })
+        mock_usage.model_dump = Mock(
+            return_value={
+                "prompt_tokens": 5,
+                "completion_tokens": 10,
+                "prompt_audio_seconds": 8,
+            }
+        )
         mock_response = Mock()
         mock_response.usage = mock_usage
-        
+
         result = extract_usage(mock_response)
         assert result is not None
         assert result["prompt_tokens"] == 5
@@ -50,15 +52,17 @@ class TestExtractUsage:
         # Set usage=None so extract_usage skips the .usage branch and falls
         # through to the model_dump() branch.
         mock_response.usage = None
-        mock_response.model_dump = Mock(return_value={
-            "usage": {
-                "prompt_tokens": 100,
-                "completion_tokens": 200,
-                "prompt_audio_seconds": 30,
-            },
-            "text": "test",
-        })
-        
+        mock_response.model_dump = Mock(
+            return_value={
+                "usage": {
+                    "prompt_tokens": 100,
+                    "completion_tokens": 200,
+                    "prompt_audio_seconds": 30,
+                },
+                "text": "test",
+            }
+        )
+
         result = extract_usage(mock_response)
         assert result is not None
         assert result["prompt_tokens"] == 100
@@ -73,7 +77,7 @@ class TestExtractUsage:
                 "prompt_audio_seconds": 20,
             }
         }
-        
+
         result = extract_usage(mock_response)
         assert result is not None
         assert result["prompt_tokens"] == 50
@@ -82,7 +86,7 @@ class TestExtractUsage:
         """Test that None is returned when usage is not found."""
         mock_response = Mock()
         mock_response.usage = None
-        
+
         result = extract_usage(mock_response)
         assert result is None
 
@@ -104,13 +108,13 @@ class TestComputeCost:
         usage = {
             "prompt_audio_seconds": 60,  # 1 minute
         }
-        
+
         result = compute_cost(
             audio_duration_seconds=60.0,
             mistral_usage=usage,
             rate_usd_per_minute=0.5,
         )
-        
+
         assert result.source == "mistral_usage"
         assert result.audio_duration_seconds == 60.0
         assert result.estimated_cost_usd == pytest.approx(0.5)  # 1 minute * $0.50
@@ -123,7 +127,7 @@ class TestComputeCost:
             mistral_usage=None,
             rate_usd_per_minute=0.5,
         )
-        
+
         assert result.source == "duration_fallback"
         assert result.audio_duration_seconds == 120.0
         assert result.estimated_cost_usd == pytest.approx(1.0)  # 2 minutes * $0.50
@@ -136,7 +140,7 @@ class TestComputeCost:
             "prompt_tokens": 100,
             "completion_tokens": 200,
         }
-        
+
         result = compute_cost(
             audio_duration_seconds=60.0,
             mistral_usage=usage,
@@ -144,7 +148,7 @@ class TestComputeCost:
             input_token_rate_usd=0.01,
             output_token_rate_usd=0.02,
         )
-        
+
         # Duration cost: 1 minute * $0.50 = $0.50
         # Token cost: 100 * $0.01 + 200 * $0.02 = $1.00 + $4.00 = $5.00
         # Total: $5.50
@@ -158,7 +162,7 @@ class TestComputeCost:
             "prompt_tokens": 100,
             "completion_tokens": 200,
         }
-        
+
         result = compute_cost(
             audio_duration_seconds=60.0,
             mistral_usage=usage,
@@ -166,7 +170,7 @@ class TestComputeCost:
             input_token_rate_usd=None,
             output_token_rate_usd=None,
         )
-        
+
         # Only duration billing
         assert result.estimated_cost_usd == pytest.approx(0.50)
         assert result.token_cost_usd is None
@@ -178,8 +182,32 @@ class TestComputeCost:
             mistral_usage=None,
             rate_usd_per_minute=0.0,
         )
-        
+
         assert result.estimated_cost_usd == 0.0
+
+    def test_zero_cost_should_return_0_not_none(self) -> None:
+        """Test that zero-cost cases return 0, not None.
+
+        This RED test ensures that when compute_cost results in zero cost,
+        the estimated_cost_usd field is 0 (numeric) not None.
+        """
+        # Case 1: Zero duration
+        result1 = compute_cost(
+            audio_duration_seconds=0.0,
+            mistral_usage=None,
+            rate_usd_per_minute=0.5,
+        )
+        assert result1.estimated_cost_usd == 0.0
+        assert result1.estimated_cost_usd is not None
+
+        # Case 2: Mistral usage with zero duration
+        result2 = compute_cost(
+            audio_duration_seconds=0.0,
+            mistral_usage={"prompt_audio_seconds": 0},
+            rate_usd_per_minute=0.5,
+        )
+        assert result2.estimated_cost_usd == 0.0
+        assert result2.estimated_cost_usd is not None
 
 
 class TestCostBreakdown:
@@ -193,7 +221,7 @@ class TestCostBreakdown:
             estimated_cost_usd=0.5,
             source="mistral_usage",
         )
-        
+
         assert breakdown.audio_duration_seconds == 60.0
         assert breakdown.usage == {"prompt_audio_seconds": 60}
         assert breakdown.estimated_cost_usd == 0.5
@@ -209,5 +237,5 @@ class TestCostBreakdown:
             source="mistral_usage",
             token_cost_usd=1.0,
         )
-        
+
         assert breakdown.token_cost_usd == 1.0

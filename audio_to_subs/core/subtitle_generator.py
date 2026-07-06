@@ -8,7 +8,7 @@ Supported formats:
 """
 
 from pathlib import Path
-from typing import Any, List, Optional
+from typing import Any, Optional
 
 
 class SubtitleFormatError(Exception):
@@ -17,7 +17,39 @@ class SubtitleFormatError(Exception):
     pass
 
 
-def segment_text(text: str, max_chars: int = 42) -> List[str]:
+def _fit_words_to_lines(words: list[str], max_chars: int) -> list[str]:
+    """Helper to fit words into lines respecting max_chars limit.
+
+    Args:
+        words: List of words to fit
+        max_chars: Maximum characters per line
+
+    Returns:
+        List of lines with words fitted to max_chars
+    """
+    lines = []
+    current_line = ""
+
+    for word in words:
+        # Check if adding this word would exceed max_chars
+        if (
+            current_line and len(current_line) + len(word) + 1 > max_chars
+        ):  # +1 for space
+            lines.append(current_line)
+            current_line = word
+        else:
+            if current_line:
+                current_line += " " + word
+            else:
+                current_line = word
+
+    if current_line:
+        lines.append(current_line)
+
+    return lines
+
+
+def segment_text(text: str, max_chars: int = 42) -> list[str]:
     """Segment text into lines with maximum character length.
 
     Args:
@@ -37,65 +69,27 @@ def segment_text(text: str, max_chars: int = 42) -> List[str]:
         return [text]
 
     lines = []
-    current_line = ""
+    current_paragraph_words = []
 
     # Split by existing newlines first
     paragraphs = text.split("\n")
 
     for paragraph in paragraphs:
         if not paragraph.strip():
-            if current_line:
-                lines.append(current_line)
-                current_line = ""
+            # Empty paragraph: flush current words and add separator
+            if current_paragraph_words:
+                lines.extend(_fit_words_to_lines(current_paragraph_words, max_chars))
+                current_paragraph_words = []
             continue
 
-        words = paragraph.split(" ")
+        # Add words from this paragraph
+        current_paragraph_words.extend(paragraph.split(" "))
 
-        for word in words:
-            # Check if adding this word would exceed max_chars
-            if (
-                current_line and len(current_line) + len(word) + 1 > max_chars
-            ):  # +1 for space
-                lines.append(current_line)
-                current_line = word
-            else:
-                if current_line:
-                    current_line += " " + word
-                else:
-                    current_line = word
+    # Flush any remaining words
+    if current_paragraph_words:
+        lines.extend(_fit_words_to_lines(current_paragraph_words, max_chars))
 
-        # If we have content and this isn't the last paragraph, add current line
-        if current_line and paragraph != paragraphs[-1]:
-            lines.append(current_line)
-            current_line = ""
-
-    # Add any remaining content
-    if current_line:
-        lines.append(current_line)
-
-    # Ensure all lines are within the max_chars limit
-    # This handles cases where the initial segmentation created lines > max_chars
-    final_lines = []
-    for line in lines:
-        if len(line) <= max_chars:
-            final_lines.append(line)
-        else:
-            # Re-segment this line if it exceeds max_chars
-            words = line.split(" ")
-            current = ""
-            for word in words:
-                if current and len(current) + len(word) + 1 > max_chars:
-                    final_lines.append(current)
-                    current = word
-                else:
-                    if current:
-                        current += " " + word
-                    else:
-                        current = word
-            if current:
-                final_lines.append(current)
-
-    return final_lines
+    return lines
 
 
 def format_timestamp_srt(seconds: float) -> str:

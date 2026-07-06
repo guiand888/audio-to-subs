@@ -60,7 +60,7 @@ def extract_usage(mistral_response: Any) -> dict[str, Any] | None:
     """
     # Try direct .usage attribute
     if hasattr(mistral_response, "usage"):
-        usage = getattr(mistral_response, "usage")
+        usage = mistral_response.usage
         if usage is not None:
             # If usage is a dict-like object, return it
             if hasattr(usage, "model_dump"):
