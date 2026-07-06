@@ -1,29 +1,24 @@
 """Job routes for managing transcription jobs."""
 
+import logging
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated, Any
-from uuid import UUID, uuid4
+from typing import TYPE_CHECKING, Annotated
+from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import select, and_, or_, desc, func
-from sqlalchemy.orm import joinedload
+from sqlalchemy import and_, desc, func, select, text
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.routes._helpers import get_job_or_404, publish_job_event
-from audio_to_subs.bazarr.pathmap import PathMap
-from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
+from audio_to_subs.api.services.jobs import create_job_service
 from audio_to_subs.db.models import (
-    BazarrCache,
     Job,
-    JobStatus,
     JobSource,
-    JobLog,
+    JobStatus,
     OutputFormat,
-    LogLevel,
-    Setting,
 )
-from audio_to_subs.queue_.events import publish_new, publish_cancel
+from audio_to_subs.queue_.events import publish_cancel, publish_new
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -140,8 +135,6 @@ async def list_jobs(
         query = query.where(and_(*conditions))
 
     # Count total matching jobs (respecting filters)
-    from sqlalchemy import case, cast, Integer
-
     count_query = select(func.count(Job.id)).select_from(Job)
     if conditions:
         count_query = count_query.where(and_(*conditions))
@@ -181,82 +174,6 @@ async def list_jobs(
     )
 
 
-async def _get_path_map(db: "AsyncSession") -> PathMap:
-    """Get PathMap from database settings."""
-    return await PathMap.load_from_db(db)
-
-
-async def _resolve_bazarr_source(
-    db: "AsyncSession",
-    source: JobSource,
-    source_ref: str | None,
-    requested_media_path: str | None,
-    path_map: PathMap,
-) -> tuple[str, str | None]:
-    """Resolve Bazarr source to media path.
-
-    Args:
-        db: Database session
-        source: Job source
-        source_ref: Reference ID (e.g., Radarr or Sonarr ID)
-        requested_media_path: Optional requested media path (for manual override)
-        path_map: PathMap for path translation
-
-    Returns:
-        Tuple of (media_path, source_ref)
-
-    Raises:
-        HTTPException: If source is bazarr but source_ref not found in cache
-    """
-    logger = logging.getLogger(__name__)
-
-    if source in (JobSource.BAZARR_MOVIE, JobSource.BAZARR_EPISODE):
-        if source_ref is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"source_ref is required for source={source.value}",
-            )
-
-        # Look up in bazarr_cache
-        cache_id = BazarrCache.make_id(
-            "movie" if source == JobSource.BAZARR_MOVIE else "episode",
-            int(source_ref),
-        )
-
-        result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
-        cache_entry = result.scalar_one_or_none()
-
-        if cache_entry is None:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Bazarr item {cache_id} not found in cache. "
-                "Please ensure Bazarr poller has run and the item exists.",
-            )
-
-        # Use the cached media_path (already translated by poller)
-        media_path = cache_entry.media_path
-
-        # If requested_media_path is provided, use it (allows override)
-        if requested_media_path:
-            media_path = path_map.translate(requested_media_path)
-            logger.info(
-                "Using requested media_path override for %s: %s",
-                cache_id,
-                media_path,
-            )
-
-        return media_path, source_ref
-
-    else:
-        # Manual source - use provided media_path
-        if requested_media_path is None:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail="media_path is required for manual source",
-            )
-        return requested_media_path, source_ref
-
-
 @router.post("", response_model=JobResponse, status_code=status.HTTP_201_CREATED)
 async def create_job(
     request: Request,
@@ -271,120 +188,18 @@ async def create_job(
 
     For bazarr_movie/bazarr_episode sources, resolves media_path from cache.
     """
-    logger = logging.getLogger(__name__)
-
-    # Get path map for path translation
-    path_map = await _get_path_map(db)
-
-    # Resolve media_path based on source
-    try:
-        media_path, resolved_source_ref = await _resolve_bazarr_source(
-            db,
-            job_request.source,
-            job_request.source_ref,
-            job_request.media_path,
-            path_map,
-        )
-    except HTTPException:
-        raise
-    except Exception as e:
-        logger.error("Failed to resolve Bazarr source: %s", e)
-        logger.error(f"Failed to resolve source: {e}")
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail="Failed to resolve source. Please check your source configuration.",
-        )
-
-    # Validate media_path against configured root paths (handles symlinks and traversal)
-    movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
-    tv_root = getattr(settings, "TV_ROOT_PATH", None)
-
-    is_valid, error_msg = validate_media_path(media_path, movies_root, tv_root)
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media path: {error_msg}",
-        )
-
-    # Auto-generate output_path if not provided and subtitles_same_directory is enabled
-    subtitles_same_dir = getattr(settings, "SUBTITLES_SAME_DIRECTORY", True)
-    output_path = job_request.output_path
-    if not output_path and subtitles_same_dir:
-        output_path = generate_output_path(
-            media_path,
-            job_request.language_code,
-            job_request.output_format,
-            subtitles_same_dir,
-        )
-    elif output_path:
-        # Validate provided output_path is within safe directory
-        is_valid, error_msg = validate_media_path(output_path, movies_root, tv_root)
-        if not is_valid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid output path: {error_msg}",
-            )
-
-    # Use resolved source_ref
-    source_ref = resolved_source_ref or job_request.source_ref
-
-    # Apply defaults from settings if not provided
-    language_code = job_request.language_code
-    output_format = job_request.output_format
-
-    # Try to get defaults from settings
-    if language_code is None:
-        try:
-            result = await db.execute(
-                select(Setting.value_json).where(Setting.key == "default_language")
-            )
-            row = result.scalar_one_or_none()
-            if row and row.value_json:
-                import json
-
-                language_code = json.loads(row.value_json)
-        except Exception:
-            pass
-
-    # Try to get default output format from settings
-    if output_format == OutputFormat.SRT:
-        # Only override if there's a different default
-        try:
-            result = await db.execute(
-                select(Setting.value_json).where(Setting.key == "default_output_format")
-            )
-            row = result.scalar_one_or_none()
-            if row and row.value_json:
-                import json
-
-                default_format = json.loads(row.value_json)
-                if default_format and default_format != "srt":
-                    try:
-                        output_format = OutputFormat(default_format)
-                    except ValueError:
-                        pass  # Invalid format, keep default
-        except Exception:
-            pass
-
-    # Create job
-    job = Job(
-        id=uuid4(),
-        status=JobStatus.QUEUED,
+    # Create job via service
+    job = await create_job_service(
+        db=db,
+        settings=settings,
         source=job_request.source,
-        source_ref=source_ref,
-        media_path=media_path,
-        output_path=output_path,
-        language_code=language_code,
-        output_format=output_format,
+        source_ref=job_request.source_ref,
+        media_path=job_request.media_path,
+        output_path=job_request.output_path,
+        language_code=job_request.language_code,
+        output_format=job_request.output_format,
         priority=job_request.priority,
-        progress_percent=0,
-        progress_message="Job created, waiting for worker",
-        cancel_requested=False,
     )
-
-    db.add(job)
-    await db.commit()
-    await db.refresh(job)
 
     # Publish new job notification
     await publish_job_event(settings, publish_new, str(job.id), "new job")
@@ -416,8 +231,6 @@ async def cancel_job(
 
     If the job is still queued, it will be marked as cancelled immediately.
     """
-    from sqlalchemy import text
-
     # Get current job state
     job = await get_job_or_404(db, job_id)
 
@@ -487,9 +300,6 @@ async def delete_job(
     await db.commit()
 
 
-# Import logging for use in functions
-import logging
-
 logger = logging.getLogger(__name__)
 
 
@@ -512,8 +322,6 @@ async def notify_bazarr(
 
     Returns 202 Accepted in all cases - the rescan is best-effort.
     """
-    logger = logging.getLogger(__name__)
-
     # Get the job
     job = await get_job_or_404(db, job_id)
 
@@ -537,29 +345,22 @@ async def notify_bazarr(
         return {"status": "skipped", "reason": "Bazarr not configured"}
 
     # Trigger rescan for Bazarr-sourced jobs
-    if job.source == JobSource.BAZARR_MOVIE:
-        logger.info(f"Triggering Bazarr rescan for movie job {job_id}")
-        try:
+    try:
+        if job.source == JobSource.BAZARR_MOVIE:
+            logger.info(f"Triggering Bazarr rescan for movie job {job_id}")
             if job.source_ref:
                 radarr_id = int(job.source_ref)
                 await client.rescan_movie(radarr_id)
                 logger.info(f"Triggered Bazarr rescan for movie {radarr_id}")
 
-            await client.close()
             return {
                 "status": "triggered",
                 "source": "bazarr_movie",
                 "source_ref": job.source_ref,
             }
 
-        except Exception as e:
-            logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
-            await client.close()
-            return {"status": "failed", "error": str(e)}
-
-    elif job.source == JobSource.BAZARR_EPISODE:
-        logger.info(f"Triggering Bazarr rescan for episode job {job_id}")
-        try:
+        elif job.source == JobSource.BAZARR_EPISODE:
+            logger.info(f"Triggering Bazarr rescan for episode job {job_id}")
             if job.source_ref:
                 sonarr_episode_id = int(job.source_ref)
                 # Fetch series_id from Bazarr since rescan_episode requires it
@@ -573,7 +374,6 @@ async def notify_bazarr(
                         logger.warning(
                             f"Bazarr rescan failed for episode {sonarr_episode_id}"
                         )
-                        await client.close()
                         return {"status": "failed", "error": "Bazarr rescan failed"}
                     logger.info(
                         f"Triggered Bazarr rescan for episode {sonarr_episode_id}"
@@ -583,23 +383,22 @@ async def notify_bazarr(
                         f"Cannot trigger Bazarr rescan for episode {sonarr_episode_id}: "
                         "episode not found in Bazarr"
                     )
-                    await client.close()
                     return {"status": "failed", "error": "episode not found in Bazarr"}
 
-            await client.close()
             return {
                 "status": "triggered",
                 "source": "bazarr_episode",
                 "source_ref": job.source_ref,
             }
 
-        except Exception as e:
-            logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
-            await client.close()
-            return {"status": "failed", "error": str(e)}
+        else:
+            # Unknown Bazarr source type — shouldn't happen given the enum, but guard it
+            logger.warning(f"Unhandled source {job.source!r} for job {job_id}")
+            return {"status": "skipped", "reason": f"Unhandled source: {job.source}"}
 
-    else:
-        # Unknown Bazarr source type — shouldn't happen given the enum, but guard it
-        logger.warning(f"Unhandled source {job.source!r} for job {job_id}")
+    except Exception as e:
+        logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
+        return {"status": "failed", "error": str(e)}
+
+    finally:
         await client.close()
-        return {"status": "skipped", "reason": f"Unhandled source: {job.source}"}
