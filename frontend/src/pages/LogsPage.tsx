@@ -1,13 +1,12 @@
 // Logs page: global log viewer with filters and auto-refresh.
 // Fetches from GET /api/logs.
 
-import { useState, useMemo } from "react"
-import { useQuery } from "@tanstack/react-query"
+import { useState } from "react"
 import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react"
 import { format } from "date-fns"
 
-import { api } from "@/lib/api"
-import type { GlobalLogsResponse, LogsFilters, LogLevel } from "@/lib/types"
+import { useLogs } from "@/hooks/useLogs"
+import type { LogsFilters, LogLevel } from "@/lib/types"
 
 // Import from shadcn/ui
 import { Button } from "@/components/ui/button"
@@ -149,23 +148,10 @@ export function LogsPage() {
   const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshInterval] = useState(10000) // 10 seconds
 
-  // Build query string from filters
-  const params = useMemo(() => {
-    const p = new URLSearchParams()
-    if (filters.level_filter) p.set("level_filter", filters.level_filter)
-    if (filters.job_id) p.set("job_id", filters.job_id)
-    if (filters.since) p.set("since", filters.since)
-    if (filters.until) p.set("until", filters.until)
-    p.set("limit", String(filters.limit || 50))
-    p.set("offset", String(filters.offset || 0))
-    return p.toString()
-  }, [filters])
-
-  const { data, isLoading, isError, refetch } = useQuery({
-    queryKey: ["logs", filters],
-    queryFn: () => api.get<GlobalLogsResponse>(`/api/logs?${params}`),
-    staleTime: 5000, // Shorter stale time for logs
-    refetchInterval: autoRefresh ? refreshInterval : undefined,
+  const { data, isLoading, isError, refetch } = useLogs({
+    filters,
+    autoRefresh,
+    refreshInterval,
   })
 
   const handleFiltersChange = (newFilters: LogsFilters) => {
