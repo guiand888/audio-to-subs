@@ -399,9 +399,9 @@ export function WantedPage() {
             <TableHeader>
               <TableRow>
                 <TableHead className="min-w-[200px]">Title</TableHead>
-                <TableHead>Type</TableHead>
-                <TableHead>Missing</TableHead>
-                <TableHead className="text-right">Action</TableHead>
+                <TableHead className="w-[100px]">Type</TableHead>
+                <TableHead className="w-[280px]">Missing</TableHead>
+                <TableHead className="w-[110px] text-right">Action</TableHead>
               </TableRow>
             </TableHeader>
             <TableBody>

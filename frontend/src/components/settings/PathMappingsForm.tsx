@@ -97,7 +97,7 @@ export function PathMappingsForm({
           </TableBody>
         </Table>
       ) : (
-        <p className="text-muted-foreground text-center py-4">
+        <p className="text-sm text-muted-foreground text-center py-4">
           No path mappings configured. Add mappings to translate Bazarr paths to
           paths accessible by the worker.
         </p>
