@@ -2,7 +2,7 @@
 
 import json
 import logging
-from typing import TYPE_CHECKING, Annotated, Any
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
 from pydantic import BaseModel, Field, ValidationError, field_validator
@@ -390,7 +390,19 @@ class BazarrConnectionTestResponse(BaseModel):
     message: str | None = Field(
         default=None, description="Success message or detailed error description"
     )
-    error: str | None = Field(default=None, description="Error type or category")
+    error: (
+        Literal[
+            "bazarr_not_configured",
+            "authentication_failed",
+            "resource_not_found",
+            "rate_limited",
+            "server_error",
+            "unexpected_response",
+            "connection_failed",
+            "internal_error",
+        ]
+        | None
+    ) = Field(default=None, description="Error type or category")
 
 
 @router.post(

@@ -5,7 +5,10 @@ import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api } from "@/lib/api"
 import { SettingsPage } from "./SettingsPage"
-import { BAZARR_ERROR_MESSAGES } from "@/components/settings/BazarrSettingsForm"
+import {
+  BAZARR_ERROR_CODES,
+  BAZARR_ERROR_MESSAGES,
+} from "@/components/settings/BazarrSettingsForm"
 
 // vi.mock calls are hoisted to the top of the file by vitest, so they must be
 // declared once at module scope (not inside individual `it` blocks) - the
@@ -333,61 +336,34 @@ describe("SettingsPage - Test Connection error UX", () => {
     vi.mocked(api.patch).mockResolvedValue(MOCK_SETTINGS)
   })
 
-  const allErrorCodes = Object.keys(BAZARR_ERROR_MESSAGES) as string[]
-
-  it.each(allErrorCodes)(
-    "maps error code '%s' to a friendly toast message",
-    async (errorCode) => {
-      vi.mocked(api.post).mockResolvedValue({
-        success: false,
-        message: null,
-        error: errorCode,
-      })
-
-      const user = userEvent.setup()
-      render(<SettingsPage />, { wrapper })
-
-      await waitFor(() => {
-        expect(screen.getByText("Test Connection")).toBeInTheDocument()
-      })
-
-      await user.click(screen.getByText("Test Connection"))
-
-      await waitFor(() => {
-        expect(toast.error).toHaveBeenCalledWith(
-          BAZARR_ERROR_MESSAGES[errorCode],
-        )
-      })
-    },
-  )
-
-  it("falls back to response.message when the error code is unknown", async () => {
-    vi.mocked(api.post).mockResolvedValue({
-      success: false,
+  // BAZARR_ERROR_CODES (not Object.keys(BAZARR_ERROR_MESSAGES)) is the
+  // source of truth for which codes to exercise here, so a typo'd/renamed
+  // key in the map can't silently satisfy this table - it fails to compile
+  // against BAZARR_ERROR_MESSAGES's Record<BazarrErrorCode, string> type
+  // instead.
+  const errorScenarios = [
+    ...BAZARR_ERROR_CODES.map((errorCode) => ({
+      name: `maps error code '${errorCode}' to its friendly message`,
+      error: errorCode as string,
+      message: null as string | null,
+      expectedToast: BAZARR_ERROR_MESSAGES[errorCode],
+    })),
+    {
+      name: "falls back to response.message when the error code is unknown",
+      error: "future_error_code_not_yet_in_map",
       message: "Something specific went wrong",
+      expectedToast: "Something specific went wrong",
+    },
+    {
+      name: "falls back to 'Unknown error' when error code is unknown and message is null",
       error: "future_error_code_not_yet_in_map",
-    })
-
-    const user = userEvent.setup()
-    render(<SettingsPage />, { wrapper })
-
-    await waitFor(() => {
-      expect(screen.getByText("Test Connection")).toBeInTheDocument()
-    })
-
-    await user.click(screen.getByText("Test Connection"))
-
-    await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Something specific went wrong")
-    })
-  })
-
-  it("falls back to 'Unknown error' when both error code is unknown and message is null", async () => {
-    vi.mocked(api.post).mockResolvedValue({
-      success: false,
       message: null,
-      error: "future_error_code_not_yet_in_map",
-    })
+      expectedToast: "Unknown error",
+    },
+  ]
+
+  it.each(errorScenarios)("$name", async ({ error, message, expectedToast }) => {
+    vi.mocked(api.post).mockResolvedValue({ success: false, message, error })
 
     const user = userEvent.setup()
     render(<SettingsPage />, { wrapper })
@@ -399,7 +375,7 @@ describe("SettingsPage - Test Connection error UX", () => {
     await user.click(screen.getByText("Test Connection"))
 
     await waitFor(() => {
-      expect(toast.error).toHaveBeenCalledWith("Unknown error")
+      expect(toast.error).toHaveBeenCalledWith(expectedToast)
     })
   })
 })

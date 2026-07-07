@@ -6,13 +6,20 @@ import { Label } from "@/components/ui/label"
 import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
-import type { SettingsPatch } from "@/lib/types"
+import type {
+  BazarrConnectionTestResponse,
+  BazarrErrorCode,
+  SettingsPatch,
+} from "@/lib/types"
 
-export const BAZARR_ERROR_MESSAGES: Record<string, string> = {
+export const BAZARR_ERROR_MESSAGES: Record<BazarrErrorCode, string> = {
   bazarr_not_configured: "Bazarr is not configured on the server",
   authentication_failed: "Authentication failed - check your API key",
   resource_not_found: "Bazarr endpoint not found - check the API URL",
-  rate_limited: "Bazarr rate-limited the request - try again shortly",
+  // Verified against Bazarr's own source (../bazarr): Bazarr has no rate
+  // limiter on its own API. A 429 here can only come from an intermediary
+  // (reverse proxy/WAF) in front of Bazarr, so don't blame Bazarr itself.
+  rate_limited: "Rate-limited while contacting Bazarr - try again shortly",
   server_error: "Bazarr returned a server error - check its logs",
   unexpected_response:
     "Connected, but Bazarr returned an unexpected response - see server logs",
@@ -20,6 +27,20 @@ export const BAZARR_ERROR_MESSAGES: Record<string, string> = {
     "Could not connect to Bazarr - check the URL and network",
   internal_error: "Internal server error - see server logs",
 }
+
+// Independent from BAZARR_ERROR_MESSAGES's own keys (not Object.keys(...))
+// so a typo'd/renamed key in the map above can't silently satisfy a test
+// that iterates this list - see SettingsPage.test.tsx.
+export const BAZARR_ERROR_CODES = [
+  "bazarr_not_configured",
+  "authentication_failed",
+  "resource_not_found",
+  "rate_limited",
+  "server_error",
+  "unexpected_response",
+  "connection_failed",
+  "internal_error",
+] as const satisfies readonly BazarrErrorCode[]
 
 export interface BazarrSettingsFormProps {
   formData: Partial<SettingsPatch>
@@ -65,7 +86,7 @@ export function BazarrSettingsForm({
       // fixed timeout for this probe rather than the configured/edited
       // Bazarr Timeout setting (which is for real sync/poll requests and
       // can be much longer than we want to wait for a quick test).
-      const response = await api.post<{ success: boolean; message: string | null; error: string | null }>(
+      const response = await api.post<BazarrConnectionTestResponse>(
         "/api/settings/test-bazarr-connection",
         {
           bazarr_url: formData.bazarr_url,
@@ -77,15 +98,26 @@ export function BazarrSettingsForm({
         toast.success(response.message || "Connected to Bazarr successfully")
         setTimeout(() => setTestConnectionStatus("idle"), 3000)
       } else {
+        // response.message wins when present - it's more specific than the
+        // generic per-code text below. Today every failure branch of
+        // test_bazarr_connection() sets message=None (see settings.py), so
+        // this is currently dead code in practice; it exists for forward
+        // compatibility if the backend later adds detail to a specific
+        // failure.
         const friendly =
-          (response.error && BAZARR_ERROR_MESSAGES[response.error]) ||
           response.message ||
+          (response.error && BAZARR_ERROR_MESSAGES[response.error]) ||
           "Unknown error"
         failTestConnection(friendly)
       }
     } catch (error) {
+      // Unlike the branch above, we never reached a structured Bazarr
+      // response here - api.post() itself threw, meaning our own request to
+      // our own backend failed (network issue reaching us, or an unrelated
+      // middleware error). Don't frame this as a Bazarr failure; it may not
+      // involve Bazarr at all.
       const errorMessage = error instanceof Error ? error.message : "Unknown error"
-      failTestConnection(errorMessage)
+      failTestConnection(`Connection test request failed: ${errorMessage}`)
     }
   }
 

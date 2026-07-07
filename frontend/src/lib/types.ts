@@ -218,10 +218,23 @@ export type SseEventData =
 
 // --------------- Bazarr Connection Test ---------------
 
+// Mirrors the Literal[...] error field on the backend's
+// BazarrConnectionTestResponse (audio_to_subs/api/routes/settings.py).
+// Keep these two lists in sync.
+export type BazarrErrorCode =
+  | "bazarr_not_configured"
+  | "authentication_failed"
+  | "resource_not_found"
+  | "rate_limited"
+  | "server_error"
+  | "unexpected_response"
+  | "connection_failed"
+  | "internal_error"
+
 export interface BazarrConnectionTestResponse {
   success: boolean
   message: string | null
-  error: string | null
+  error: BazarrErrorCode | null
 }
 
 // --------------- Wanted Refresh ---------------
