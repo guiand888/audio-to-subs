@@ -8,6 +8,19 @@ import { api } from "@/lib/api"
 import { toast } from "sonner"
 import type { SettingsPatch } from "@/lib/types"
 
+export const BAZARR_ERROR_MESSAGES: Record<string, string> = {
+  bazarr_not_configured: "Bazarr is not configured on the server",
+  authentication_failed: "Authentication failed - check your API key",
+  resource_not_found: "Bazarr endpoint not found - check the API URL",
+  rate_limited: "Bazarr rate-limited the request - try again shortly",
+  server_error: "Bazarr returned a server error - check its logs",
+  unexpected_response:
+    "Connected, but Bazarr returned an unexpected response - see server logs",
+  connection_failed:
+    "Could not connect to Bazarr - check the URL and network",
+  internal_error: "Internal server error - see server logs",
+}
+
 export interface BazarrSettingsFormProps {
   formData: Partial<SettingsPatch>
   onChange: (updates: Partial<SettingsPatch>) => void
@@ -41,7 +54,7 @@ export function BazarrSettingsForm({
 
   const failTestConnection = (message: string) => {
     setTestConnectionStatus("error")
-    toast.error("Failed to connect to Bazarr: " + message)
+    toast.error(message)
     setTimeout(() => setTestConnectionStatus("idle"), 5000)
   }
 
@@ -64,7 +77,11 @@ export function BazarrSettingsForm({
         toast.success(response.message || "Connected to Bazarr successfully")
         setTimeout(() => setTestConnectionStatus("idle"), 3000)
       } else {
-        failTestConnection(response.error || "Unknown error")
+        const friendly =
+          (response.error && BAZARR_ERROR_MESSAGES[response.error]) ||
+          response.message ||
+          "Unknown error"
+        failTestConnection(friendly)
       }
     } catch (error) {
       const errorMessage = error instanceof Error ? error.message : "Unknown error"

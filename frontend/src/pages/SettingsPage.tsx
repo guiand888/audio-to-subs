@@ -91,7 +91,10 @@ export function SettingsPage() {
       // equal to what's already cached (e.g. bazarr_api_key masked -> masked,
       // when the key was the only saved change) keeps the same object
       // reference, so useSettingsForm's resync effect would never fire and
-      // the "unsaved changes" indicator would stay stuck.
+      // the "unsaved changes" indicator would stay stuck. We intentionally do
+      // NOT invalidateQueries(["settings"]) afterwards - settings is a
+      // low-concurrency resource and the response is authoritative, so a
+      // background refetch would race with this update for no benefit.
       queryClient.setQueryData(["settings"], response)
       resetFromSettings(response)
       // Also invalidate other queries that might depend on settings
