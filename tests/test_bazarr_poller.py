@@ -485,6 +485,35 @@ class TestProcessEpisode:
         assert entry.ext_id == 456
         assert "Test Show - Pilot" in entry.title
 
+    @pytest.mark.asyncio
+    async def test_process_episode_has_any_subs_empty_missing(self, mock_db_session):
+        """Test that empty missing_subtitles means has_any_subs=True (regression test for ed20d79)."""
+        # Regression: _process_episode used to incorrectly compute has_any_subs
+        # with the inverted formula `len(...) > 0` instead of `== 0`.
+        # This test ensures that when missing_subtitles is empty (all subs present),
+        # has_any_subs is correctly set to True, matching _process_movie's logic.
+
+        class MockWantedEpisode:
+            seriesTitle = "Test Show"
+            episodeTitle = "Complete"
+            sonarrEpisodeId = 999
+            sceneName = "/bazarr/tv/Test Show/Complete.mkv"
+            missing_subtitles = []  # Empty = has all subtitles
+
+        mock_episode = MockWantedEpisode()
+        path_map = PathMap([])
+        started_at = datetime.now(timezone.utc)
+
+        await _process_episode(mock_db_session, mock_episode, path_map, started_at)
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "episode:999")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.has_any_subs is True  # Must be True when missing_subtitles is empty
+
 
 class TestDeleteStale:
     """Test _delete_stale function."""

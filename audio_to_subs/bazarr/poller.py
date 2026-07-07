@@ -410,8 +410,8 @@ async def _process_episode(
     if media_path:
         media_path = path_map.translate(media_path)
 
-    # Check if this episode has any subtitles at all
-    has_any_subs = len(wanted_episode.missing_subtitles or []) > 0
+    # Check if this episode has any subtitles at all (no missing subtitles = has all)
+    has_any_subs = len(wanted_episode.missing_subtitles or []) == 0
 
     cache_id = BazarrCache.make_id("episode", wanted_episode.sonarrEpisodeId)
 
