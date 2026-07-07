@@ -805,7 +805,6 @@ class TestPollAllEpisodes:
         )
         mock_client.list_episodes.return_value = EpisodesPage(
             data=[mock_episode_no_subs, mock_episode_with_subs],
-            total=2,
         )
 
         path_map = PathMap([("/bazarr/tv", "/local/tv")])
@@ -847,7 +846,8 @@ class TestPollAllEpisodesRealisticWireFormat:
 
         respx_mock.get("http://poller-wire-test:6767/api/series").mock(
             return_value=httpx.Response(
-                200, json={"data": [realistic_series_item(sonarrSeriesId=789)], "total": 1}
+                200,
+                json={"data": [realistic_series_item(sonarrSeriesId=789)], "total": 1},
             )
         )
         respx_mock.get("http://poller-wire-test:6767/api/episodes").mock(
@@ -1116,9 +1116,7 @@ class TestManualPolling:
         mock_client.list_all_series.return_value = SeriesPage(
             data=[series_no_subs], total=1
         )
-        mock_client.list_episodes.return_value = EpisodesPage(
-            data=[episode_no_subs], total=1
-        )
+        mock_client.list_episodes.return_value = EpisodesPage(data=[episode_no_subs])
 
         path_map = PathMap()
 

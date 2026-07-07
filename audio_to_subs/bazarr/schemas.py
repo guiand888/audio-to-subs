@@ -94,13 +94,29 @@ class MoviesPage(BaseModel):
 
 
 class Episode(BaseModel):
-    """Episode item from Bazarr episodes endpoint."""
+    """Episode item from Bazarr episodes endpoint.
+
+    `audio_language` and `missing_subtitles` share Bazarr's
+    `*_language_model` family with `Series.audio_language` and the wanted
+    endpoints - same shape, same null-code gotcha for unresolved tracks.
+    Modelled here (rather than relying on pydantic's default ignore-extras)
+    so schema validation actually covers them; `_poll_all_episodes` does not
+    currently read them, but future callers should not have to discover the
+    null-code failure mode the hard way.
+    """
 
     sonarrEpisodeId: int = Field(description="Sonarr episode ID")
     sonarrSeriesId: int = Field(description="Sonarr series ID")
     title: str = Field(description="Episode title")
     subtitles: list[SubtitleLanguage] = Field(
         default_factory=list, description="List of existing subtitles"
+    )
+    audio_language: list[SubtitleLanguage] = Field(
+        default_factory=list,
+        description="Audio languages; code2/code3 may be null for unresolved tracks",
+    )
+    missing_subtitles: list[SubtitleLanguage] = Field(
+        default_factory=list, description="List of missing subtitle languages"
     )
     season: int | None = Field(default=None, description="Season number")
     episode: int | None = Field(default=None, description="Episode number")
@@ -116,13 +132,11 @@ class EpisodesPage(BaseModel):
     Unlike /api/series, /api/movies/wanted, and /api/episodes/wanted,
     Bazarr's /api/episodes resource (bazarr/api/episodes/episodes.py)
     marshals with `envelope='data'` only - it never sends a top-level
-    `total` at all. Confirmed against a real Bazarr instance.
+    `total` at all, so this wrapper carries just `data`. Confirmed against
+    a real Bazarr instance.
     """
 
     data: list[Episode] = Field(description="List of episodes")
-    total: int | None = Field(
-        default=None, description="Total count of episodes (not sent by Bazarr)"
-    )
 
 
 class Series(BaseModel):
@@ -150,9 +164,9 @@ class Series(BaseModel):
     poster: str | None = Field(default=None, description="Poster URL")
     overview: str | None = Field(default=None, description="Series overview")
     year: str | None = Field(default=None, description="Series year")
-    audio_language: list[dict[str, Any]] = Field(
+    audio_language: list[SubtitleLanguage] = Field(
         default_factory=list,
-        description="Audio languages: list of {name, code2, code3}; codes may be null",
+        description="Audio languages; code2/code3 may be null for unresolved tracks",
     )
 
     @field_validator("monitored", "ended", mode="before")

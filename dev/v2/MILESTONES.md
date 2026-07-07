@@ -18,7 +18,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.3 — Structural refactor batch (Phases 5–8) | ✅ Done | 2026-07-05 | Depends on M5.2; see `REFACTOR.md` |
 | M5.4 — Refactor cleanup & configurable limits | ✅ Done | 2026-07-06 | Depends on M5.3 |
 | M5.5 — Settings save-counter regression + Bazarr connection-test fix | ✅ Done | 2026-07-07 | Depends on M5.4 |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.5 |
+| M5.6 — M5.5 code-review follow-up (schema tightening, dead-field removal, error UX) | ⏳ Not Started | - | Depends on M5.5 |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6 |
 
 Every milestone ends with the same quality bar:
 
@@ -316,6 +317,45 @@ Live E2E testing against a real Bazarr instance surfaced a second, previously-un
 - Bazarr's real `GET /api/episodes` (as opposed to `/api/episodes/wanted`) marshals with `envelope='data'` only and **never sends a top-level `total`** — our `EpisodesPage.total` was required, so every call raised a `ValidationError`, silently swallowed by `_poll_all_episodes`'s catch-all (same failure mode as the `/api/series` bug, different endpoint).
 - The same "*_language_model" family shared by `audio_language`/`subtitles`/`missing_subtitles` allows null `code2`/`code3` (an unresolved/"Unknown" language track) — our `SubtitleLanguage.code2`/`code3` were required non-null strings.
 - Fixed: `EpisodesPage.total` is now optional (nothing in the codebase reads it); `SubtitleLanguage.code2`/`code3` are now optional. Regression tests added to `tests/test_bazarr_client.py` reverse-engineered from the real Bazarr source and a live instance's actual response.
+
+## M5.6 — M5.5 code-review follow-up
+
+**Goal**: address the minor observations surfaced in the post-merge code review of M5.5 (commits `6ab1884` and `a696f38`), delivered as two independently-shippable commits split on a backend / frontend boundary. No behaviour change beyond the frontend toast copy; the backend changes only tighten validation on fields that nothing currently consumes.
+
+**Depends on**: M5.5
+
+Observations addressed (per commit):
+
+1. **`Series.audio_language` declared too loosely.** Typed as `list[dict[str, Any]]`, but its own docstring promised "list of {name, code2, code3}; codes may be null" — a validation contract the type never enforced. Inner-shape drift (e.g. an entry missing `name`) was silently accepted, contradicting M5.5's stated goal of surfacing genuine drift distinctly.
+2. **`EpisodesPage.total` was dead weight.** Declared `int | None` but never read at runtime and never sent by Bazarr's `/api/episodes` resource (marshals with `envelope='data'` only). M5.5's note "nothing reads it" was accurate — the field can simply go.
+3. **`test_list_episodes_real_wire_format` didn't deliver its stated intent.** The test's docstring claimed to verify null `code2`/`code3` parsing on episodes, but the `Episode` schema didn't model `audio_language`/`missing_subtitles`, so pydantic silently dropped those fields — the test only proved extras were tolerated, not that null codes parsed. The same family of `*_language_model` fields that drove the M5.5 `Series` fix applies here.
+4. **Frontend error UX gap surfaced by M5.5.** `BazarrSettingsForm.tsx` passed the raw backend `error` string into the toast, so M5.5's new `unexpected_response` code rendered verbatim as `"Failed to connect to Bazarr: unexpected_response"` — meaningless to end users. Same problem affected every pre-existing code (`connection_failed`, `server_error`, …); M5.5 just made it newly visible.
+5. **`setQueryData` vs `invalidateQueries` choice undocumented.** M5.5 swapped `invalidateQueries(["settings"])` for `setQueryData(...)` in the save mutation — a deliberate behaviour change (no background refetch after save) that deserved an explicit note.
+
+Tasks (split as two commits):
+
+**Commit 1 — Backend schema/test cleanup** (`fix(bazarr): ...`):
+- Tighten `Series.audio_language: list[dict[str, Any]]` → `list[SubtitleLanguage]`. The existing `_normalize_audio_language` validator (mode="before") stays — it still collapses the null-column dict-of-nulls shape to `[]` before pydantic validates each entry against `SubtitleLanguage`. No runtime change: the poller doesn't read `audio_language`.
+- Add `Episode.audio_language` and `Episode.missing_subtitles` (both `list[SubtitleLanguage]`, default empty) so the schema actually models the fields the wire-format test exercises.
+- Remove `EpisodesPage.total` entirely; update the docstring. Update all `EpisodesPage(...)` construction sites in `tests/test_bazarr_poller.py` and the assertion + mock in `tests/test_bazarr_client.py::test_list_episodes`.
+- Update `test_list_episodes_real_wire_format` to assert null-code parsing on the now-modelled `Episode.audio_language`/`missing_subtitles` fields (instead of the apologetic "silently dropped" framing).
+
+**Commit 2 — Frontend error UX + doc note** (`fix(settings): ...`):
+- Add a `BAZARR_ERROR_MESSAGES` map in `frontend/src/components/settings/BazarrSettingsForm.tsx` covering every code the backend can return (`bazarr_not_configured`, `authentication_failed`, `resource_not_found`, `rate_limited`, `server_error`, `unexpected_response`, `connection_failed`), with friendly human text. Use it in `handleTestConnection`, keeping `response.message` then `"Unknown error"` as fallbacks for forward compatibility with future server-supplied detail or unknown codes.
+- Document the intentional `setQueryData`-instead-of-`invalidateQueries` choice next to the call in `frontend/src/pages/SettingsPage.tsx`: settings is a low-concurrency resource and the PATCH response is authoritative; a background refetch would race with this update for no benefit.
+- Add `frontend/src/pages/SettingsPage.test.tsx` cases asserting each error code renders the friendly message via `toast.error`, plus an unknown-code fallback test.
+
+Acceptance:
+- `Series.audio_language` parses to `SubtitleLanguage` entries; the realistic fixture validates, the null-column case normalizes to `[]`, the populated-dict drift case still fails distinctly as `unexpected_response`.
+- `Episode` parses `audio_language`/`missing_subtitles` with null codes; `test_list_episodes_real_wire_format` positively asserts `code2 is None`/`code3 is None` on the parsed entries.
+- `EpisodesPage` has only the `data` field; no test in the suite references `EpisodesPage.total`.
+- Each backend error code renders as a friendly toast; an unknown code falls back to `response.message` then `"Unknown error"`.
+- Full `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+- Full frontend `vitest` and `tsc --noEmit` clean.
+- All commits conventional + `Signed-off-by`.
+
+Out of scope:
+- The `path_mappings as any` cast in `settingsToFormData` — pre-existing (not introduced by either reviewed commit); fixing it requires touching the `SettingsPatch` type and is a separate concern.
 
 ## M6 — Polish, docs, coverage, security pass
 

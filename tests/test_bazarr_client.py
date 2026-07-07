@@ -13,6 +13,7 @@ from audio_to_subs.bazarr.client import (
     BazarrRateLimited,
     BazarrServerError,
 )
+from audio_to_subs.bazarr.schemas import SubtitleLanguage
 from tests.bazarr_fixtures import null_heavy_series_item, realistic_series_item
 
 
@@ -527,7 +528,7 @@ class TestSeries:
             assert result.data[0].sonarrSeriesId == 123
             assert result.data[0].title == "Test Series"
             assert result.data[0].audio_language == [
-                {"name": "English", "code2": "en", "code3": "eng"}
+                SubtitleLanguage(name="English", code2="en", code3="eng")
             ]
 
     @pytest.mark.asyncio
@@ -620,7 +621,12 @@ class TestSeries:
 
     @pytest.mark.asyncio
     async def test_list_episodes(self, respx_mock):
-        """Test list_episodes uses seriesid[] parameter."""
+        """Test list_episodes uses seriesid[] parameter.
+
+        Bazarr's /api/episodes marshals with envelope='data' only - no
+        top-level `total` (unlike /api/series and the /wanted endpoints),
+        so the mock omits it.
+        """
         mock_response = {
             "data": [
                 {
@@ -634,7 +640,6 @@ class TestSeries:
                     "sceneName": "/tv/Test Series/Season 01/Episode 01.mkv",
                 }
             ],
-            "total": 1,
         }
 
         respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
@@ -648,7 +653,6 @@ class TestSeries:
             result = await client.list_episodes(seriesid=123)
 
             assert len(result.data) == 1
-            assert result.total == 1
             assert result.data[0].sonarrEpisodeId == 100
             assert result.data[0].sonarrSeriesId == 123
             # Verify the request was made with correct parameter name
@@ -667,7 +671,10 @@ class TestSeries:
         against a real running Bazarr instance during E2E verification of
         this fix. Also: audio_language items can have null code2/code3
         (same audio_language_model shared across audio_language/subtitles/
-        missing_subtitles - the null-code gotcha isn't series-specific).
+        missing_subtitles - the null-code gotcha isn't series-specific) - the
+        Episode schema models both fields so this test positively verifies
+        they parse, rather than relying on pydantic's default ignore-extras
+        to silently drop them.
         """
         mock_response = {
             "data": [
@@ -680,7 +687,9 @@ class TestSeries:
                     "episode": 1,
                     "path": "/tv/Better Call Saul/Season 1/test_video.mp4",
                     "sceneName": None,
-                    "audio_language": [{"name": "Unknown", "code2": None, "code3": None}],
+                    "audio_language": [
+                        {"name": "Unknown", "code2": None, "code3": None}
+                    ],
                     "missing_subtitles": [
                         {
                             "name": "French",
@@ -705,8 +714,17 @@ class TestSeries:
         ) as client:
             result = await client.list_episodes(seriesid=1)
             assert len(result.data) == 1
-            assert result.data[0].sonarrEpisodeId == 211
-            assert result.data[0].title == "Uno"
+            episode = result.data[0]
+            assert episode.sonarrEpisodeId == 211
+            assert episode.title == "Uno"
+            # Null-code audio track parses to SubtitleLanguage with None codes.
+            assert len(episode.audio_language) == 1
+            assert episode.audio_language[0].name == "Unknown"
+            assert episode.audio_language[0].code2 is None
+            assert episode.audio_language[0].code3 is None
+            # Populated missing_subtitles entry parses cleanly.
+            assert len(episode.missing_subtitles) == 1
+            assert episode.missing_subtitles[0].code3 == "fra"
 
     @pytest.mark.asyncio
     async def test_get_episode(self, respx_mock):
