@@ -6,15 +6,26 @@ and the actual Bazarr source code in /home/guillaume/Development/bazarr.
 
 from typing import Any
 
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 
 
 class SubtitleLanguage(BaseModel):
-    """Language info from Bazarr."""
+    """Language info from Bazarr.
+
+    code2/code3 are declared as plain (non-required) fields.String() in
+    Bazarr's own swaggerui models (subtitles_model, subtitles_language_model,
+    audio_language_model all share this shape) with no guarantee of a
+    non-null value - an unresolved/"Unknown" language track marshals with
+    both null. Confirmed against a real Bazarr instance.
+    """
 
     name: str = Field(description="Language name")
-    code2: str = Field(description="ISO 639-1 two-letter language code")
-    code3: str = Field(description="ISO 639-2/3 three-letter language code")
+    code2: str | None = Field(
+        default=None, description="ISO 639-1 two-letter language code"
+    )
+    code3: str | None = Field(
+        default=None, description="ISO 639-2/3 three-letter language code"
+    )
     forced: bool = Field(default=False, description="Forced subtitles flag")
     hi: bool = Field(default=False, description="Hearing impaired flag")
 
@@ -100,36 +111,75 @@ class Episode(BaseModel):
 
 
 class EpisodesPage(BaseModel):
-    """Response wrapper for episodes endpoint."""
+    """Response wrapper for episodes endpoint.
+
+    Unlike /api/series, /api/movies/wanted, and /api/episodes/wanted,
+    Bazarr's /api/episodes resource (bazarr/api/episodes/episodes.py)
+    marshals with `envelope='data'` only - it never sends a top-level
+    `total` at all. Confirmed against a real Bazarr instance.
+    """
 
     data: list[Episode] = Field(description="List of episodes")
-    total: int = Field(description="Total count of episodes")
+    total: int | None = Field(
+        default=None, description="Total count of episodes (not sent by Bazarr)"
+    )
 
 
 class Series(BaseModel):
     """Series item from Bazarr series endpoint."""
 
+    # Only path/title/sonarrSeriesId are reliably non-null in Bazarr's DB
+    # (verified against bazarr/app/database.py's TableShows) - every other
+    # field below tolerates null/absent since Bazarr's marshal always emits
+    # the key but the underlying column can legitimately be empty.
     sonarrSeriesId: int = Field(description="Sonarr series ID")
     title: str = Field(description="Series title")
     path: str = Field(description="File path for the series")
     tvdbId: int | None = Field(default=None, description="TVDB ID")
     imdbId: str | None = Field(default=None, description="IMDB ID")
-    monitored: bool = Field(description="Whether series is monitored")
+    monitored: bool = Field(default=False, description="Whether series is monitored")
     profileId: int | None = Field(default=None, description="Languages profile ID")
     seriesType: str | None = Field(default=None, description="Series type")
     tags: list[str] = Field(default_factory=list, description="Series tags")
     alternativeTitles: list[str] = Field(
         default_factory=list, description="Alternative titles"
     )
-    ended: bool = Field(description="Whether series has ended")
+    ended: bool = Field(default=False, description="Whether series has ended")
     lastAired: str | None = Field(default=None, description="Last aired date")
     fanart: str | None = Field(default=None, description="Fanart URL")
     poster: str | None = Field(default=None, description="Poster URL")
     overview: str | None = Field(default=None, description="Series overview")
     year: str | None = Field(default=None, description="Series year")
-    audio_language: dict[str, Any] | None = Field(
-        default=None, description="Audio language"
+    audio_language: list[dict[str, Any]] = Field(
+        default_factory=list,
+        description="Audio languages: list of {name, code2, code3}; codes may be null",
     )
+
+    @field_validator("monitored", "ended", mode="before")
+    @classmethod
+    def _null_bool_is_false(cls, v: Any) -> Any:
+        """Bazarr can marshal these DB-nullable booleans as null."""
+        return False if v is None else v
+
+    @field_validator("audio_language", mode="before")
+    @classmethod
+    def _normalize_audio_language(cls, v: Any) -> Any:
+        """Bazarr marshals audio_language inconsistently depending on the
+        underlying column's state:
+          - populated column -> a JSON array of {name, code2, code3}
+          - NULL column -> flask-restx's fields.Nested(None) emits a dict
+            with every key null, not an array
+
+        Both must normalize to []. Any OTHER dict (i.e. one with real
+        values) is not a shape Bazarr actually sends - leave it as-is so
+        validation fails and genuine drift surfaces instead of being
+        silently accepted.
+        """
+        if v is None:
+            return []
+        if isinstance(v, dict) and not any(v.values()):
+            return []
+        return v
 
 
 class SeriesPage(BaseModel):

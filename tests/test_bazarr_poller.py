@@ -826,6 +826,70 @@ class TestPollAllEpisodes:
         assert "/local/tv" in cached[0].media_path  # Path was translated
 
 
+class TestPollAllEpisodesRealisticWireFormat:
+    """`bazarr_track_no_subs` polling against Bazarr's real /api/series wire format.
+
+    Unlike TestPollAllEpisodes above (which mocks list_all_series at the
+    client-method level, bypassing schema validation entirely), this drives
+    a REAL BazarrClient through respx so the actual /api/series response
+    Bazarr sends is parsed - proving the opt-in "track items with no
+    subtitles" feature survives it instead of silently logging a warning
+    and skipping every series (the schema bug this test guards against).
+    """
+
+    @pytest.mark.asyncio
+    async def test_poll_all_episodes_survives_realistic_series_payload(
+        self, mock_db_session, respx_mock
+    ):
+        import httpx
+
+        from tests.bazarr_fixtures import realistic_series_item
+
+        respx_mock.get("http://poller-wire-test:6767/api/series").mock(
+            return_value=httpx.Response(
+                200, json={"data": [realistic_series_item(sonarrSeriesId=789)], "total": 1}
+            )
+        )
+        respx_mock.get("http://poller-wire-test:6767/api/episodes").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "sonarrEpisodeId": 100,
+                            "sonarrSeriesId": 789,
+                            "title": "Test Episode",
+                            "subtitles": [],
+                            "season": 1,
+                            "episode": 1,
+                            "path": "/bazarr/tv/Test Series/Season 01/Episode 01.mkv",
+                            "sceneName": "/bazarr/tv/Test Series/Season 01/Episode 01.mkv",
+                        }
+                    ],
+                    "total": 1,
+                },
+            )
+        )
+
+        path_map = PathMap([("/bazarr/tv", "/local/tv")])
+        started_at = datetime.now(timezone.utc)
+
+        async with BazarrClient(
+            base_url="http://poller-wire-test:6767",
+            api_key="wire-test-key",
+        ) as client:
+            await _poll_all_episodes(mock_db_session, client, path_map, started_at)
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.kind == "episode")
+        )
+        cached = result.scalars().all()
+
+        assert len(cached) == 1
+        assert cached[0].ext_id == 100
+        assert cached[0].has_any_subs is False
+
+
 class TestManualPolling:
     """Test manual polling functionality with type filtering."""
 

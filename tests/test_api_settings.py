@@ -328,3 +328,159 @@ class TestBazarrConnectionTestEndpoint:
         assert response.status_code == 200
         data = response.json()
         assert data["error"] != "bazarr_not_configured"
+
+
+class TestBazarrConnectionTestWireBehavior:
+    """Drive test-bazarr-connection against Bazarr's REAL wire format.
+
+    Unlike the tests above (which never mock Bazarr at the HTTP level and so
+    can't tell a genuine connectivity failure from a schema mismatch), these
+    use respx to intercept the outbound BazarrClient request and return
+    exactly what a real Bazarr instance sends - reverse-engineered from
+    Bazarr's source (see tests/bazarr_fixtures.py). Body overrides are used
+    so each test is hermetic (skips DB/env resolution entirely).
+    """
+
+    def test_success_with_realistic_payload(self, authenticated_client, respx_mock):
+        """A valid key against a real Bazarr response must report success."""
+        import httpx
+
+        from tests.bazarr_fixtures import realistic_series_item
+
+        route = respx_mock.get("http://bazarr-wire-test:6767/api/series").mock(
+            return_value=httpx.Response(
+                200, json={"data": [realistic_series_item()], "total": 458}
+            )
+        )
+
+        response = authenticated_client.post(
+            "/api/settings/test-bazarr-connection",
+            json={
+                "bazarr_url": "http://bazarr-wire-test:6767",
+                "bazarr_api_key": "wire-test-key",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+        assert data["error"] is None
+
+        assert route.called
+        sent = route.calls[0].request
+        assert sent.headers["X-API-Key"] == "wire-test-key"
+        assert "length=1" in str(sent.url.query)
+
+    def test_wrong_key_401_html_body(self, authenticated_client, respx_mock):
+        """A real Bazarr 401 is an HTML (Werkzeug) body, not JSON."""
+        import httpx
+
+        respx_mock.get("http://bazarr-wire-test:6767/api/series").mock(
+            return_value=httpx.Response(
+                401,
+                text="<!doctype html><title>401 Unauthorized</title>",
+                headers={"content-type": "text/html; charset=utf-8"},
+            )
+        )
+
+        response = authenticated_client.post(
+            "/api/settings/test-bazarr-connection",
+            json={
+                "bazarr_url": "http://bazarr-wire-test:6767",
+                "bazarr_api_key": "wrong-key",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert data["error"] == "authentication_failed"
+
+    def test_bad_path_302_redirect_to_frontend(self, authenticated_client, respx_mock):
+        """An unmatched path (e.g. wrong base_url) 302s to Bazarr's HTML index.
+
+        Bazarr's global 404 handler redirects to `base_url` instead of
+        returning a JSON 404 (see bazarr/app/app.py). BazarrClient doesn't
+        follow redirects, so `raise_for_status()` raises for the unfollowed
+        3xx and the endpoint reports a generic connection failure.
+        """
+        import httpx
+
+        respx_mock.get("http://bazarr-wire-test:6767/api/series").mock(
+            return_value=httpx.Response(
+                302,
+                headers={
+                    "location": "http://bazarr-wire-test:6767/",
+                    "content-type": "text/html; charset=utf-8",
+                },
+                text="<!doctype html><title>Redirecting...</title>",
+            )
+        )
+
+        response = authenticated_client.post(
+            "/api/settings/test-bazarr-connection",
+            json={
+                "bazarr_url": "http://bazarr-wire-test:6767",
+                "bazarr_api_key": "wire-test-key",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert data["error"] == "connection_failed"
+
+    def test_success_with_empty_library(self, authenticated_client, respx_mock):
+        """An empty Bazarr library is a valid, successful response."""
+        import httpx
+
+        respx_mock.get("http://bazarr-wire-test:6767/api/series").mock(
+            return_value=httpx.Response(200, json={"data": [], "total": 0})
+        )
+
+        response = authenticated_client.post(
+            "/api/settings/test-bazarr-connection",
+            json={
+                "bazarr_url": "http://bazarr-wire-test:6767",
+                "bazarr_api_key": "wire-test-key",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is True
+
+    def test_schema_drift_maps_to_unexpected_response(
+        self, authenticated_client, respx_mock
+    ):
+        """Genuine schema drift must be distinguishable from connectivity failure.
+
+        This uses the OLD (wrong) wire assumption - audio_language as a
+        populated dict, never seen from a real Bazarr - to prove drift is
+        still caught and reported distinctly, not silently accepted.
+        """
+        import httpx
+
+        from tests.bazarr_fixtures import realistic_series_item
+
+        drifted_item = realistic_series_item(
+            audio_language={"name": "English", "code2": "en", "code3": "eng"}
+        )
+        respx_mock.get("http://bazarr-wire-test:6767/api/series").mock(
+            return_value=httpx.Response(
+                200, json={"data": [drifted_item], "total": 1}
+            )
+        )
+
+        response = authenticated_client.post(
+            "/api/settings/test-bazarr-connection",
+            json={
+                "bazarr_url": "http://bazarr-wire-test:6767",
+                "bazarr_api_key": "wire-test-key",
+            },
+        )
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["success"] is False
+        assert data["error"] == "unexpected_response"

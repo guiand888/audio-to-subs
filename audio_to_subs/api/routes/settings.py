@@ -5,7 +5,7 @@ import logging
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Body, Depends, HTTPException, status
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, ValidationError, field_validator
 from sqlalchemy import func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
@@ -521,6 +521,25 @@ async def test_bazarr_connection(
                     success=False,
                     message=None,
                     error="server_error",
+                )
+            elif isinstance(e, ValidationError):
+                # Reached Bazarr and got a response, but it didn't match our
+                # schema - this is schema drift, not a connectivity problem.
+                # Log field locations only, never payload values (may
+                # contain user media paths/titles).
+                locs = sorted(
+                    {".".join(str(p) for p in err["loc"]) for err in e.errors()}
+                )
+                logger.warning(
+                    "Bazarr connection test: unexpected response shape "
+                    "(%d validation error(s) at: %s)",
+                    e.error_count(),
+                    ", ".join(locs),
+                )
+                return BazarrConnectionTestResponse(
+                    success=False,
+                    message=None,
+                    error="unexpected_response",
                 )
             else:
                 # Generic error - log it but don't expose details to user

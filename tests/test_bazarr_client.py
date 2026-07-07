@@ -13,6 +13,7 @@ from audio_to_subs.bazarr.client import (
     BazarrRateLimited,
     BazarrServerError,
 )
+from tests.bazarr_fixtures import null_heavy_series_item, realistic_series_item
 
 
 @pytest.fixture
@@ -204,6 +205,52 @@ class TestBazarrClientRequests:
             assert len(result.data) == 1
             assert result.data[0].seriesTitle == "Test Show"
             assert result.data[0].sonarrEpisodeId == 789
+
+    @pytest.mark.asyncio
+    async def test_list_wanted_episodes_null_language_codes(self, respx_mock):
+        """A language entry's code2/code3 can be null (unresolved language).
+
+        Bazarr's audio_language_model/subtitles_language_model (shared by
+        audio_language, subtitles, and missing_subtitles alike) declare
+        code2/code3 as plain fields.String() with no non-null guarantee -
+        seen in practice on an episode's audio_language ("Unknown" track).
+        """
+        mock_response = {
+            "data": [
+                {
+                    "seriesTitle": "Test Show",
+                    "episode_number": "1x01",
+                    "episodeTitle": "Pilot",
+                    "missing_subtitles": [
+                        {
+                            "name": "Unknown",
+                            "code2": None,
+                            "code3": None,
+                            "forced": False,
+                            "hi": False,
+                        }
+                    ],
+                    "sonarrSeriesId": 456,
+                    "sonarrEpisodeId": 789,
+                    "sceneName": None,
+                    "tags": [],
+                    "seriesType": "standard",
+                }
+            ],
+            "total": 1,
+        }
+
+        respx_mock.get("http://test-bazarr:6767/api/episodes/wanted").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_wanted_episodes()
+            assert result.data[0].missing_subtitles[0].code2 is None
+            assert result.data[0].missing_subtitles[0].code3 is None
 
     @pytest.mark.asyncio
     async def test_auth_error(self, respx_mock):
@@ -459,31 +506,13 @@ class TestSeries:
 
     @pytest.mark.asyncio
     async def test_list_all_series(self, respx_mock):
-        """Test list_all_series returns SeriesPage."""
-        mock_response = {
-            "data": [
-                {
-                    "sonarrSeriesId": 123,
-                    "title": "Test Series",
-                    "path": "/tv/Test Series",
-                    "tvdbId": 456,
-                    "imdbId": "tt1234567",
-                    "monitored": True,
-                    "profileId": 1,
-                    "seriesType": "standard",
-                    "tags": [],
-                    "alternativeTitles": [],
-                    "ended": False,
-                    "lastAired": None,
-                    "fanart": None,
-                    "poster": None,
-                    "overview": "Test overview",
-                    "year": "2024",
-                    "audio_language": {},
-                }
-            ],
-            "total": 1,
-        }
+        """Test list_all_series returns SeriesPage from a realistic payload.
+
+        Bazarr marshals `audio_language` as a JSON array (never the bare dict
+        our schema previously expected) - this fixture is the actual wire
+        shape, reverse-engineered from Bazarr's source, not our own guess.
+        """
+        mock_response = {"data": [realistic_series_item()], "total": 1}
         respx_mock.get("http://test-bazarr:6767/api/series").mock(
             return_value=httpx.Response(200, json=mock_response)
         )
@@ -497,6 +526,97 @@ class TestSeries:
             assert result.total == 1
             assert result.data[0].sonarrSeriesId == 123
             assert result.data[0].title == "Test Series"
+            assert result.data[0].audio_language == [
+                {"name": "English", "code2": "en", "code3": "eng"}
+            ]
+
+    @pytest.mark.asyncio
+    async def test_list_all_series_null_heavy_item(self, respx_mock):
+        """Only path/title/sonarrSeriesId are non-nullable in Bazarr's DB.
+
+        A freshly-added series can have every other field null - the schema
+        must tolerate that instead of requiring values Bazarr never promises.
+        """
+        mock_response = {"data": [null_heavy_series_item()], "total": 1}
+        respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_series()
+            series = result.data[0]
+            assert series.path == "/tv/Minimal Series"
+            assert series.monitored is False
+            assert series.ended is False
+            assert series.audio_language == []
+
+    @pytest.mark.asyncio
+    async def test_list_all_series_audio_language_null_column(self, respx_mock):
+        """A NULL audio_language column marshals as a dict of nulls.
+
+        flask-restx's `fields.Nested` over a `None` value emits a dict with
+        every key null - not the populated dict our old schema expected, and
+        not the array shape either. Must normalize to an empty list.
+        """
+        mock_response = {
+            "data": [
+                realistic_series_item(
+                    audio_language={"name": None, "code2": None, "code3": None}
+                )
+            ],
+            "total": 1,
+        }
+        respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_series()
+            assert result.data[0].audio_language == []
+
+    @pytest.mark.asyncio
+    async def test_list_all_series_empty_library(self, respx_mock):
+        """An empty Bazarr library returns {"data": [], "total": 0}."""
+        respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json={"data": [], "total": 0})
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_series()
+            assert result.data == []
+            assert result.total == 0
+
+    @pytest.mark.asyncio
+    async def test_list_all_series_paged_total_is_unfiltered_count(self, respx_mock):
+        """`total` is the whole library's count, not len(data), when paged.
+
+        A length=1 probe against a large library returns total >> len(data);
+        callers must not assume total reflects the page size.
+        """
+        mock_response = {"data": [realistic_series_item()], "total": 458}
+        route = respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_series(start=0, length=1)
+            assert len(result.data) == 1
+            assert result.total == 458
+            assert len(respx_mock.calls) == 1
+            query_string = str(route.calls[0].request.url.query)
+            assert "length=1" in query_string
 
     @pytest.mark.asyncio
     async def test_list_episodes(self, respx_mock):
@@ -536,6 +656,57 @@ class TestSeries:
             query_string = str(respx_mock.calls[0].request.url.query)
             # seriesid[] is URL-encoded as seriesid%5B%5D
             assert "seriesid%5B%5D" in query_string or "seriesid[]" in query_string
+
+    @pytest.mark.asyncio
+    async def test_list_episodes_real_wire_format(self, respx_mock):
+        """Bazarr's real /api/episodes has NO top-level `total` at all.
+
+        Unlike /api/series, /api/movies/wanted, and /api/episodes/wanted,
+        this endpoint's resource (bazarr/api/episodes/episodes.py) marshals
+        with `envelope='data'` only - it never emits `total`. Confirmed
+        against a real running Bazarr instance during E2E verification of
+        this fix. Also: audio_language items can have null code2/code3
+        (same audio_language_model shared across audio_language/subtitles/
+        missing_subtitles - the null-code gotcha isn't series-specific).
+        """
+        mock_response = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 211,
+                    "sonarrSeriesId": 1,
+                    "title": "Uno",
+                    "subtitles": [],
+                    "season": 1,
+                    "episode": 1,
+                    "path": "/tv/Better Call Saul/Season 1/test_video.mp4",
+                    "sceneName": None,
+                    "audio_language": [{"name": "Unknown", "code2": None, "code3": None}],
+                    "missing_subtitles": [
+                        {
+                            "name": "French",
+                            "code2": "fr",
+                            "code3": "fra",
+                            "forced": False,
+                            "hi": False,
+                        }
+                    ],
+                    "monitored": True,
+                }
+            ]
+        }
+
+        respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_episodes(seriesid=1)
+            assert len(result.data) == 1
+            assert result.data[0].sonarrEpisodeId == 211
+            assert result.data[0].title == "Uno"
 
     @pytest.mark.asyncio
     async def test_get_episode(self, respx_mock):

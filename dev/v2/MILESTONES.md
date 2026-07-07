@@ -17,7 +17,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.2 — Volume mount alignment with Sonarr/Radarr/Bazarr | ✅ Done | 2026-07-01 | Depends on M5.1 |
 | M5.3 — Structural refactor batch (Phases 5–8) | ✅ Done | 2026-07-05 | Depends on M5.2; see `REFACTOR.md` |
 | M5.4 — Refactor cleanup & configurable limits | ✅ Done | 2026-07-06 | Depends on M5.3 |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.4 |
+| M5.5 — Settings save-counter regression + Bazarr connection-test fix | ✅ Done | 2026-07-07 | Depends on M5.4 |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.5 |
 
 Every milestone ends with the same quality bar:
 
@@ -278,6 +279,43 @@ Acceptance:
 - Full test suite green (523 passed, 3 skipped, 1 xfailed)
 - Default model unified to `voxtral-mini-2602` across all layers
 - Branch `m5.4-refactor-cleanup` ready to merge into `dev`
+
+## M5.5 — Settings save-counter regression + Bazarr connection-test fix
+
+**Goal**: fix two user-reported regressions surfaced after M5.4, plus the test-quality gap that let both slip through: the Settings page's unsaved-changes counter never clears when modifying an already-set Bazarr API key, and "Test Connection" always reports failure even with a valid, working key.
+
+**Depends on**: M5.4
+
+Root causes (both confirmed against the running code and against Bazarr's actual source at `../bazarr`, v1.5.6+57):
+
+1. **Save-counter stuck on API-key edits.** The server always masks `bazarr_api_key` to a fixed sentinel (`***MASKED***`) in every response. `useSettingsForm.ts` resyncs its form baseline via a `useEffect` keyed on the `settings` object from React Query. When the only saved change is the API key, the post-save refetch payload is deeply equal to the cached one (masked → masked), so React Query's structural sharing keeps the same object reference and the effect never re-fires — the form keeps the raw typed key, and the diff against the (unfired) baseline never reaches zero. Empty↔set transitions change the payload and so appear to "work", masking the bug for those two cases.
+2. **Bazarr "Test Connection" always fails.** Bazarr's real `GET /api/series` marshals `audio_language` as a JSON array (or a dict of nulls when the DB column is empty) — never as the populated object our `Series` pydantic schema expects. Every real response fails schema validation, the endpoint's generic exception handler swallows the `ValidationError` and reports it as a generic connection failure, even though the same API key works fine on the Wanted-refresh path (which validates a different, leaner schema). The same broken schema also silently degrades the opt-in `bazarr_track_no_subs` polling path.
+3. **Test gap.** Existing unit tests encode our own (wrong) assumptions about Bazarr's wire format instead of the real API, and the connection-test endpoint has no test that mocks Bazarr at the HTTP level — so a universally-failing endpoint still passes CI.
+
+Tasks (TDD order — failing tests first):
+- Add reverse-engineered wire-format tests for `/api/series` (`tests/test_bazarr_client.py`, new shared fixture module) covering the realistic populated item, null-heavy items, the null-column `audio_language` marshal shape, empty library, and paginated/unfiltered `total` — fix the existing `test_list_all_series` fixture, which encoded the wrong shape.
+- Add endpoint-level wire tests (`tests/test_api_settings.py`) driving `test_bazarr_connection` against realistic Bazarr responses via `respx`: success, 401 (HTML body), 302 redirect, empty library, and schema-drift.
+- Add a regression test for the `bazarr_track_no_subs` polling path (`tests/test_bazarr_poller.py`) proving it survives a realistic `/api/series` payload.
+- Fix `audio_to_subs/bazarr/schemas.py`'s `Series` model to accept Bazarr's real wire shape (`audio_language` as a list, nullable `monitored`/`ended`) without weakening required fields (`sonarrSeriesId`/`title`/`path`).
+- Fix `audio_to_subs/api/routes/settings.py`'s `test_bazarr_connection` to catch `pydantic.ValidationError` distinctly (as `error="unexpected_response"`, logged with field locations only — never payload values) instead of misreporting schema drift as a generic connection failure.
+- Add a frontend regression test (`SettingsPage.test.tsx`) covering the masked-to-masked refetch case (modifying an already-set key), which the existing empty→set test doesn't exercise.
+- Fix `frontend/src/hooks/useSettingsForm.ts` / `frontend/src/pages/SettingsPage.tsx` to rebuild the form baseline explicitly from the PATCH response (`resetFromSettings`) instead of relying on the `useEffect`/query-cache resync that structural sharing can starve.
+
+Acceptance:
+- Saving an edit to an already-configured Bazarr API key clears the unsaved-changes counter (not just empty→set or set→empty). ✅ verified live against a real browser session.
+- "Test Connection" succeeds against a real, reachable Bazarr instance with a valid key. ✅ verified live against a real Bazarr container.
+- `bazarr_track_no_subs` polling no longer logs schema-validation warnings against a real Bazarr instance. ✅ verified — a manual refresh populated the wanted-episode cache with no validation warnings in the backend log.
+- New tests fail against the pre-fix code and pass after (verified, not just asserted).
+- Full backend (`pytest`, 520 passed) and frontend (`vitest`, 45 passed; `tsc --noEmit` clean) suites pass.
+- No weakening of the API-key masking/hardening introduced in the previous auth/settings fix round.
+
+### Additional finding during live verification: `/api/episodes` schema mismatch
+
+Live E2E testing against a real Bazarr instance surfaced a second, previously-undetected schema bug in the same feature area (opt-in `bazarr_track_no_subs` polling), fixed as part of this milestone since it blocked the polling acceptance criterion above:
+
+- Bazarr's real `GET /api/episodes` (as opposed to `/api/episodes/wanted`) marshals with `envelope='data'` only and **never sends a top-level `total`** — our `EpisodesPage.total` was required, so every call raised a `ValidationError`, silently swallowed by `_poll_all_episodes`'s catch-all (same failure mode as the `/api/series` bug, different endpoint).
+- The same "*_language_model" family shared by `audio_language`/`subtitles`/`missing_subtitles` allows null `code2`/`code3` (an unresolved/"Unknown" language track) — our `SubtitleLanguage.code2`/`code3` were required non-null strings.
+- Fixed: `EpisodesPage.total` is now optional (nothing in the codebase reads it); `SubtitleLanguage.code2`/`code3` are now optional. Regression tests added to `tests/test_bazarr_client.py` reverse-engineered from the real Bazarr source and a live instance's actual response.
 
 ## M6 — Polish, docs, coverage, security pass
 
