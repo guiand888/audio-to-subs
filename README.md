@@ -16,9 +16,9 @@
 - Automatic filename generation (video.en.srt)
 
 ## Requirements
-- Podman/Docker **or** Python 3.9+
+- Podman/Docker (production) **or** Nix (local development, via `nix develop`)
 - Mistral AI API key
-- FFmpeg (included in containers)
+- FFmpeg (included in containers, and in the Nix dev shell)
 
 ## Quick Start
 
@@ -36,13 +36,11 @@
      audio-to-subs:latest -i /input/video.mp4 -o /output/video.srt
    ```
 
-### Python venv
+### Local development (`nix develop`)
 ```bash
 git clone https://github.com/guiand888/audio-to-subs.git
 cd audio-to-subs
-python3 -m venv venv
-source venv/bin/activate
-pip install -e .
+nix develop   # bootstraps a .venv and installs deps automatically
 export MISTRAL_API_KEY=your_api_key
 audio-to-subs -i video.mp4 -o subtitles.srt
 ```

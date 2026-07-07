@@ -1,43 +1,40 @@
-# Container Development Guide
+# Development & Container Guide
 
 ## Overview
 
-This project uses **container-first development** with Podman. Nothing is installed on the host workstation—all development happens inside containers.
+Local development uses **Nix** (`nix develop`) for a reproducible toolchain — nothing is hand-installed on the host. Production deployment is **container-first** with Podman.
 
 ## Prerequisites
 
-- **Podman**: Container runtime (Docker-compatible)
+- **Nix** (with flakes enabled): local development toolchain
+- **Podman**: Container runtime (Docker-compatible), for production builds/deployment
 - **Podman Compose**: Multi-container orchestration
 - **Mistral AI API Key**: For transcription service
 
 ## Quick Start
 
-### 1. Build Development Container
+### 1. Enter the Dev Shell
 
 ```bash
-make build-dev
-# or
-podman build -t audio-to-subs:dev -f Dockerfile.dev .
+nix develop
+# bootstraps .venv and installs Python + frontend deps automatically
 ```
 
-### 2. Verify Container
+### 2. Verify the Shell
 
 ```bash
-# Open shell in container
-make shell
-
-# Inside container, verify tools:
-python --version   # Should be 3.11
+python --version   # Should be 3.11.x
 ffmpeg -version    # Should be installed
 pytest --version   # Should be installed
+node --version     # Should be 24.x
 ```
 
 ### 3. Run Tests
 
 ```bash
 make test
-# or
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest
+# or, from inside `nix develop`:
+pytest
 ```
 
 ## Common Commands
@@ -45,10 +42,7 @@ podman run --rm -v .:/app:Z audio-to-subs:dev pytest
 ### Development
 
 ```bash
-# Build development container
-make build-dev
-
-# Open interactive shell
+# Open the nix dev shell (backend + frontend toolchain)
 make shell
 
 # Run tests
@@ -103,15 +97,14 @@ make secret-rm
 
 ## Container Architecture
 
-### Development Container (`Dockerfile.dev`)
+### Local Development (`nix develop`)
 
-- **Base**: `python:3.11-alpine`
-- **Includes**: All dev tools (pytest, black, ruff, mypy)
-- **User**: `developer` (UID 1000)
-- **Working Dir**: `/app`
-- **Volume Mount**: Host directory mounted at `/app`
+- **Defined in**: `flake.nix`
+- **`default` shell**: Python 3.11 + build toolchain, `ffmpeg`, `redis`, Node 24 — full backend + frontend dev tools (pytest, black, ruff, mypy, npm)
+- **`frontend` shell** (`nix develop .#frontend`): lean, Node-only shell for frontend-only work
+- **State**: bootstraps `.venv` in the repo root on first entry, gated on a hash of `requirements.txt`/`requirements-dev.txt`/`pyproject.toml` so it only reinstalls when they change
 
-**Usage**: Development, testing, code quality checks
+**Usage**: Development, testing, code quality checks (also what CI runs, via `nix develop`)
 
 ### Production Container (`Dockerfile`)
 
@@ -175,8 +168,8 @@ podman-compose down
 
 ### Initial Setup
 
-1. **Build dev container**: `make build-dev`
-2. **Verify installation**: `make shell` then check tools
+1. **Enter dev shell**: `nix develop` (or `make shell`)
+2. **Verify installation**: check tools (see Quick Start above)
 3. **Create API secret**: `make secret-create`
 
 ### Development Cycle (TDD)
@@ -196,7 +189,18 @@ podman-compose down
 
 ## Troubleshooting
 
-### Container Won't Build
+### Dev Shell Won't Build / Deps Out of Date
+
+```bash
+# Force a clean rebuild of the venv
+rm -rf .venv
+nix develop
+
+# Check nix itself is healthy
+nix flake check
+```
+
+### Production Container Won't Build
 
 ```bash
 # Check Podman is running
@@ -206,20 +210,17 @@ podman info
 make clean
 
 # Rebuild from scratch
-podman build --no-cache -t audio-to-subs:dev -f Dockerfile.dev .
+podman build --no-cache -t audio-to-subs:latest .
 ```
 
-### Tests Fail in Container
+### Tests Fail
 
 ```bash
-# Get interactive shell
-make shell
+# Enter the dev shell
+nix develop
 
-# Inside container, run tests with verbose output
+# Run tests with verbose output
 pytest -vv
-
-# Check file permissions
-ls -la /app
 ```
 
 ### Volume Mount Issues (SELinux)
@@ -269,7 +270,7 @@ deploy:
 
 ```bash
 # Run tests in parallel (future enhancement)
-podman run --rm -v .:/app:Z audio-to-subs:dev pytest -n auto
+nix develop --command pytest -n auto
 ```
 
 ## Security Best Practices
@@ -323,4 +324,4 @@ podman-compose --help
 
 ---
 
-**Remember**: All development happens in containers. Never install Python packages on the host!
+**Remember**: Local development happens inside the Nix dev shell (`nix develop`) — never install Python/Node packages directly on the host. Production always runs in containers.

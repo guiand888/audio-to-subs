@@ -1,10 +1,12 @@
-.PHONY: help build build-dev test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell
+.PHONY: help build test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell
 
 # Variables
 IMAGE_NAME := audio-to-subs
 IMAGE_TAG := latest
-DEV_IMAGE := $(IMAGE_NAME):dev
 PROD_IMAGE := $(IMAGE_NAME):$(IMAGE_TAG)
+
+# Backend dev tooling runs via `nix develop`; see flake.nix.
+NIX_RUN := nix develop --command
 
 help:  ## Show this help message
 	@echo "Usage: make [target]"
@@ -15,38 +17,35 @@ help:  ## Show this help message
 build:  ## Build production container
 	podman build -t $(PROD_IMAGE) .
 
-build-dev:  ## Build development container
-	podman build -t $(DEV_IMAGE) -f Dockerfile.dev .
+test:  ## Run tests (nix develop)
+	$(NIX_RUN) pytest
 
-test:  ## Run tests in container
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pytest
+test-watch:  ## Run tests in watch mode (nix develop)
+	$(NIX_RUN) pytest -f
 
-test-watch:  ## Run tests in watch mode
-	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) pytest -f
-
-test-cov:  ## Run tests with coverage report
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pytest --cov-report=html
+test-cov:  ## Run tests with coverage report (nix develop)
+	$(NIX_RUN) pytest --cov-report=html
 	@echo "Coverage report: htmlcov/index.html"
 
-lint:  ## Run linter
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) ruff check audio_to_subs/ tests/
+lint:  ## Run linter (nix develop)
+	$(NIX_RUN) ruff check audio_to_subs/ tests/
 
-format:  ## Format code with black
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black audio_to_subs/ tests/
+format:  ## Format code with black (nix develop)
+	$(NIX_RUN) black audio_to_subs/ tests/
 
-format-check:  ## Check code formatting
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black --check audio_to_subs/ tests/
+format-check:  ## Check code formatting (nix develop)
+	$(NIX_RUN) black --check audio_to_subs/ tests/
 
-typecheck:  ## Run type checker
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) mypy audio_to_subs/
+typecheck:  ## Run type checker (nix develop)
+	$(NIX_RUN) mypy audio_to_subs/
 
 quality: format-check lint typecheck test  ## Run all quality checks
 
-pre-commit-install:  ## Install pre-commit hooks in container
-	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) pre-commit install
+pre-commit-install:  ## Install pre-commit hooks (nix develop)
+	$(NIX_RUN) pre-commit install
 
-pre-commit-run:  ## Run pre-commit hooks on all files
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pre-commit run --all-files
+pre-commit-run:  ## Run pre-commit hooks on all files (nix develop)
+	$(NIX_RUN) pre-commit run --all-files
 
 clean:  ## Clean up containers and images
 	podman container prune -f
@@ -60,8 +59,8 @@ run:  ## Run production container (requires videos/ directory and Podman secret)
 		-v ./subtitles:/output:Z \
 		$(PROD_IMAGE) -i /input/sample.mp4 -o /output
 
-shell:  ## Open shell in development container
-	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) /bin/sh
+shell:  ## Open a nix develop shell (backend + frontend toolchain)
+	nix develop
 
 compose-up:  ## Start services with Podman Compose
 	podman-compose up
@@ -82,23 +81,24 @@ secret-list:  ## List Podman secrets
 secret-rm:  ## Remove Mistral API key secret
 	podman secret rm mistral_api_key
 
-# Frontend targets — Node runs inside an ephemeral container; never on the host.
-FRONTEND_RUN := podman run --rm -v ./frontend:/app:Z -w /app node:24-alpine
+# Frontend targets — Node comes from the `frontend` nix devShell (flake.nix),
+# never a host-installed toolchain.
+FRONTEND_RUN := nix develop .#frontend --command bash -c
 
-frontend-test:  ## Run frontend tests (vitest) in container
-	$(FRONTEND_RUN) sh -c "npm install && npm run test"
+frontend-test:  ## Run frontend tests (vitest)
+	$(FRONTEND_RUN) "cd frontend && npm install && npm run test"
 
 frontend-install:  ## Install frontend dependencies (generates package-lock.json)
-	$(FRONTEND_RUN) sh -c "npm install"
+	$(FRONTEND_RUN) "cd frontend && npm install"
 
 frontend-build:  ## Build frontend for production (tsc + vite build)
-	$(FRONTEND_RUN) sh -c "npm run build"
+	$(FRONTEND_RUN) "cd frontend && npm run build"
 
 frontend-dev:  ## Start Vite dev server (proxies /api to localhost:8000)
-	podman run --rm -it -p 5173:5173 -v ./frontend:/app:Z -w /app node:24-alpine sh -c "npm run dev -- --host"
+	$(FRONTEND_RUN) "cd frontend && npm run dev -- --host"
 
-frontend-shell:  ## Open a shell in the Node container (for debugging npm issues)
-	podman run --rm -it -v ./frontend:/app:Z -w /app node:24-alpine sh
+frontend-shell:  ## Open a shell in the frontend nix devShell (for debugging npm issues)
+	nix develop .#frontend
 
 # WARNING: frontend-preview stubs auth and serves fake data.
 # It is confined to dev by frontend/.dockerignore and must never
