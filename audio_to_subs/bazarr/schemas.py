@@ -9,6 +9,26 @@ from typing import Any
 from pydantic import BaseModel, Field, field_validator
 
 
+def _normalize_language_model_list(v: Any) -> Any:
+    """Collapse Bazarr's null-column dict-of-nulls to [].
+
+    Bazarr marshals a `*_language_model` field inconsistently depending on
+    the underlying column's state:
+      - populated column -> a JSON array of {name, code2, code3}
+      - NULL column -> flask-restx's fields.Nested(None) emits a dict with
+        every key null, not an array
+
+    Both must normalize to []. Any OTHER dict (i.e. one with real values) is
+    not a shape Bazarr actually sends - leave it as-is so validation fails
+    and genuine drift surfaces instead of being silently accepted.
+    """
+    if v is None:
+        return []
+    if isinstance(v, dict) and not any(v.values()):
+        return []
+    return v
+
+
 class SubtitleLanguage(BaseModel):
     """Language info from Bazarr.
 
@@ -98,11 +118,18 @@ class Episode(BaseModel):
 
     `audio_language` and `missing_subtitles` share Bazarr's
     `*_language_model` family with `Series.audio_language` and the wanted
-    endpoints - same shape, same null-code gotcha for unresolved tracks.
-    Modelled here (rather than relying on pydantic's default ignore-extras)
-    so schema validation actually covers them; `_poll_all_episodes` does not
-    currently read them, but future callers should not have to discover the
-    null-code failure mode the hard way.
+    endpoints - same {name, code2, code3} shape, and code2/code3 may be
+    null for unresolved tracks. Modelled here (rather than relying on
+    pydantic's default ignore-extras) so schema validation actually covers
+    them.
+
+    Only `audio_language` needs null-column normalization: Bazarr's
+    `postprocess()` helper (bazarr/api/utils.py) has no `else` fallback for
+    a NULL audio_language column, so it can reach marshal as None and come
+    back as flask-restx's dict-of-nulls shape (see
+    `_normalize_language_model_list`). `missing_subtitles` and `subtitles`
+    both have an `else: [] ` fallback in the same helper, so they always
+    marshal as a real (possibly empty) array and never need normalizing.
     """
 
     sonarrEpisodeId: int = Field(description="Sonarr episode ID")
@@ -124,6 +151,11 @@ class Episode(BaseModel):
     sceneName: str | None = Field(
         default=None, description="Scene name for the episode"
     )
+
+    @field_validator("audio_language", mode="before")
+    @classmethod
+    def _normalize_audio_language(cls, v: Any) -> Any:
+        return _normalize_language_model_list(v)
 
 
 class EpisodesPage(BaseModel):
@@ -178,22 +210,7 @@ class Series(BaseModel):
     @field_validator("audio_language", mode="before")
     @classmethod
     def _normalize_audio_language(cls, v: Any) -> Any:
-        """Bazarr marshals audio_language inconsistently depending on the
-        underlying column's state:
-          - populated column -> a JSON array of {name, code2, code3}
-          - NULL column -> flask-restx's fields.Nested(None) emits a dict
-            with every key null, not an array
-
-        Both must normalize to []. Any OTHER dict (i.e. one with real
-        values) is not a shape Bazarr actually sends - leave it as-is so
-        validation fails and genuine drift surfaces instead of being
-        silently accepted.
-        """
-        if v is None:
-            return []
-        if isinstance(v, dict) and not any(v.values()):
-            return []
-        return v
+        return _normalize_language_model_list(v)
 
 
 class SeriesPage(BaseModel):

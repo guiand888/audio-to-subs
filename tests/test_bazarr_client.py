@@ -727,6 +727,45 @@ class TestSeries:
             assert episode.missing_subtitles[0].code3 == "fra"
 
     @pytest.mark.asyncio
+    async def test_list_episodes_audio_language_null_column(self, respx_mock):
+        """A NULL audio_language column marshals as a dict of nulls.
+
+        Same flask-restx `fields.Nested` quirk as
+        test_list_all_series_audio_language_null_column, but for episodes:
+        Bazarr's postprocess() has no `else` fallback for audio_language, so
+        a NULL column reaches marshal as None and comes back as a dict with
+        every key null instead of an array. Must normalize to an empty list.
+        """
+        mock_response = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 211,
+                    "sonarrSeriesId": 1,
+                    "title": "Uno",
+                    "subtitles": [],
+                    "season": 1,
+                    "episode": 1,
+                    "path": "/tv/Better Call Saul/Season 1/test_video.mp4",
+                    "sceneName": None,
+                    "audio_language": {"name": None, "code2": None, "code3": None},
+                    "missing_subtitles": [],
+                    "monitored": True,
+                }
+            ]
+        }
+
+        respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_episodes(seriesid=1)
+            assert result.data[0].audio_language == []
+
+    @pytest.mark.asyncio
     async def test_get_episode(self, respx_mock):
         """Test get_episode fetches specific episode by ID."""
         mock_response = {
