@@ -274,4 +274,53 @@ describe("SettingsPage - Save Settings change tracking", () => {
       expect(screen.queryByText(/^\d+ changes?$/)).not.toBeInTheDocument()
     })
   })
+
+  it("clears the indicator when modifying an already-set API key (masked-to-masked refetch)", async () => {
+    // The case the previous test doesn't cover: the key is ALREADY set
+    // (masked) before this edit, so the post-save refetch payload is
+    // masked -> masked - deeply equal to what's already cached. React
+    // Query's structural sharing keeps the same object reference in that
+    // case, so a form that resyncs its baseline only via a useEffect keyed
+    // on the settings object (and never fires because the reference never
+    // changes) leaves the counter stuck forever, even though the save
+    // itself succeeded.
+    let persisted: Record<string, unknown> = {
+      ...MOCK_SETTINGS,
+      bazarr_api_key: "old-secret-key",
+    }
+    const sanitize = (s: Record<string, unknown>) => ({
+      ...s,
+      bazarr_api_key: s.bazarr_api_key ? "***MASKED***" : null,
+    })
+    vi.mocked(api.get).mockImplementation(() => Promise.resolve(sanitize(persisted)))
+    vi.mocked(api.patch).mockImplementation((_url: unknown, body: unknown) => {
+      persisted = { ...persisted, ...(body as object) }
+      return Promise.resolve(sanitize(persisted))
+    })
+
+    const user = userEvent.setup()
+    render(<SettingsPage />, { wrapper })
+
+    const apiKeyInput = await screen.findByLabelText(/^API Key$/i)
+    await waitFor(() => {
+      expect(apiKeyInput).toHaveValue("***MASKED***")
+    })
+
+    await user.clear(apiKeyInput)
+    await user.type(apiKeyInput, "sk-new-secret-key")
+
+    await waitFor(() => {
+      expect(screen.getByText("1 change")).toBeInTheDocument()
+    })
+
+    await user.click(screen.getByText("Save Settings"))
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Settings saved")
+    })
+
+    await waitFor(() => {
+      expect(screen.queryByText(/^\d+ changes?$/)).not.toBeInTheDocument()
+    })
+  })
 })

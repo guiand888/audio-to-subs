@@ -1,5 +1,26 @@
-import { useState, useEffect, useMemo } from "react"
+import { useState, useEffect, useCallback, useMemo } from "react"
 import type { SettingsOut, SettingsPatch } from "@/lib/types"
+
+function settingsToFormData(settings: SettingsOut): Partial<SettingsPatch> {
+  return {
+    mistral_model: settings.mistral_model,
+    mistral_rate_usd_per_minute: settings.mistral_rate_usd_per_minute,
+    mistral_input_token_rate_usd: settings.mistral_input_token_rate_usd,
+    mistral_output_token_rate_usd: settings.mistral_output_token_rate_usd,
+    bazarr_poll_interval: settings.bazarr_poll_interval,
+    bazarr_track_no_subs: settings.bazarr_track_no_subs,
+    bazarr_url: settings.bazarr_url || "",
+    bazarr_api_key: settings.bazarr_api_key || "",
+    bazarr_timeout: settings.bazarr_timeout,
+    path_mappings: settings.path_mappings as any,
+    default_language: settings.default_language,
+    default_output_format: settings.default_output_format,
+    movies_root_path: settings.movies_root_path || "",
+    tv_root_path: settings.tv_root_path || "",
+    subtitles_same_directory: settings.subtitles_same_directory ?? true,
+    max_audio_length: settings.max_audio_length || 900,
+  }
+}
 
 /**
  * Hook to manage settings form state with generic dirty field tracking.
@@ -8,34 +29,23 @@ import type { SettingsOut, SettingsPatch } from "@/lib/types"
 export function useSettingsForm(settings: SettingsOut | undefined) {
   const [formData, setFormData] = useState<Partial<SettingsPatch>>({})
 
-  // Sync form data with fetched settings whenever settings changes (mount,
-  // and after a save invalidates+refetches the query). Fields like
-  // bazarr_api_key come back masked by the server once set, so the form's
-  // baseline must be resynced from every fresh fetch - not just the first -
-  // or the "unsaved changes" indicator never clears once the raw value the
-  // user typed stops matching the masked placeholder echoed back.
+  // Sync form data with fetched settings on mount (and on any later refetch
+  // that returns a genuinely different object). This does NOT reliably fire
+  // after a save: React Query's structural sharing keeps the same object
+  // reference when a refetch returns data deeply equal to what's cached
+  // (e.g. bazarr_api_key masked -> masked, if the key was the only saved
+  // change), so the effect can silently no-op post-save. The caller must
+  // call `resetFromSettings` explicitly with the PATCH response instead of
+  // relying on this effect for that case.
   useEffect(() => {
     if (settings) {
-      setFormData({
-        mistral_model: settings.mistral_model,
-        mistral_rate_usd_per_minute: settings.mistral_rate_usd_per_minute,
-        mistral_input_token_rate_usd: settings.mistral_input_token_rate_usd,
-        mistral_output_token_rate_usd: settings.mistral_output_token_rate_usd,
-        bazarr_poll_interval: settings.bazarr_poll_interval,
-        bazarr_track_no_subs: settings.bazarr_track_no_subs,
-        bazarr_url: settings.bazarr_url || "",
-        bazarr_api_key: settings.bazarr_api_key || "",
-        bazarr_timeout: settings.bazarr_timeout,
-        path_mappings: settings.path_mappings as any,
-        default_language: settings.default_language,
-        default_output_format: settings.default_output_format,
-        movies_root_path: settings.movies_root_path || "",
-        tv_root_path: settings.tv_root_path || "",
-        subtitles_same_directory: settings.subtitles_same_directory ?? true,
-        max_audio_length: settings.max_audio_length || 900,
-      })
+      setFormData(settingsToFormData(settings))
     }
   }, [settings])
+
+  const resetFromSettings = useCallback((next: SettingsOut) => {
+    setFormData(settingsToFormData(next))
+  }, [])
 
   const isInitialized = Boolean(settings)
 
@@ -101,5 +111,6 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
     updateFormData,
     changeCount,
     isInitialized,
+    resetFromSettings,
   }
 }

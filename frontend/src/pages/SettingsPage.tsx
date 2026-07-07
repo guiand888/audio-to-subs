@@ -77,11 +77,23 @@ export function SettingsPage() {
     staleTime: 60_000, // Don't auto-refetch too often
   })
 
+  // Use the form state hook (declared before the mutation so its onSuccess
+  // closure can call resetFromSettings)
+  const { formData, updateFormData, changeCount, resetFromSettings } = useSettingsForm(settings)
+
   const mutation = useMutation({
     mutationFn: (patch: SettingsPatch) => api.patch<SettingsOut>("/api/settings", patch),
-    onSuccess: () => {
+    onSuccess: (response) => {
       toast.success("Settings saved")
-      void queryClient.invalidateQueries({ queryKey: ["settings"] })
+      // The PATCH response is the authoritative sanitized settings. Write it
+      // into the cache AND rebuild the form baseline explicitly: React
+      // Query's structural sharing means a refetch/cache-write that's deeply
+      // equal to what's already cached (e.g. bazarr_api_key masked -> masked,
+      // when the key was the only saved change) keeps the same object
+      // reference, so useSettingsForm's resync effect would never fire and
+      // the "unsaved changes" indicator would stay stuck.
+      queryClient.setQueryData(["settings"], response)
+      resetFromSettings(response)
       // Also invalidate other queries that might depend on settings
       void queryClient.invalidateQueries({ queryKey: ["wanted"] })
       void queryClient.invalidateQueries({ queryKey: ["jobs"] })
@@ -94,9 +106,6 @@ export function SettingsPage() {
       }
     },
   })
-
-  // Use the form state hook
-  const { formData, updateFormData, changeCount } = useSettingsForm(settings)
 
   const blocker = useBlocker({
     shouldBlockFn: () => changeCount > 0,
