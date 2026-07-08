@@ -69,48 +69,11 @@ describe("WantedPage - Refresh Wanted List", () => {
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_SUCCESS)
   })
 
-  it("renders Refresh button with dropdown", async () => {
+  it("renders Refresh button", async () => {
     render(<WantedPage />, { wrapper })
 
     await waitFor(() => {
       expect(screen.getByText("Refresh")).toBeInTheDocument()
-    })
-  })
-
-  it("dropdown has All Items option", async () => {
-    render(<WantedPage />, { wrapper })
-
-    await waitFor(() => {
-      const dropdown = screen.getByRole("combobox")
-      expect(dropdown).toBeInTheDocument()
-    })
-
-    // "All Items" is already the default selection (shown in the trigger);
-    // opening the dropdown adds a second match in the option list.
-    const user = userEvent.setup()
-    await user.click(screen.getByRole("combobox"))
-    await waitFor(() => {
-      expect(screen.getAllByText("All Items").length).toBeGreaterThan(0)
-    })
-  })
-
-  it("dropdown has Movies Only option", async () => {
-    render(<WantedPage />, { wrapper })
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole("combobox"))
-    await waitFor(() => {
-      expect(screen.getByText("Movies Only")).toBeInTheDocument()
-    })
-  })
-
-  it("dropdown has TV Series Only option", async () => {
-    render(<WantedPage />, { wrapper })
-
-    const user = userEvent.setup()
-    await user.click(screen.getByRole("combobox"))
-    await waitFor(() => {
-      expect(screen.getByText("TV Series Only")).toBeInTheDocument()
     })
   })
 
@@ -177,9 +140,9 @@ describe("WantedPage - Refresh Wanted List", () => {
     })
     await user.click(screen.getByText("Refresh"))
 
-    // Wait for the refresh to complete and success to be processed
+    // Default tab is "All" - toast should mention both movies and episodes
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalled()
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies and 3 episodes")
     })
   })
 
@@ -201,36 +164,66 @@ describe("WantedPage - Refresh Wanted List", () => {
   })
 })
 
-describe("WantedPage - Dropdown Selection", () => {
+describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_SUCCESS)
   })
 
-  it("can select different refresh scopes from dropdown", async () => {
+  it("refreshes only movies when the Movies tab is selected", async () => {
     const user = userEvent.setup()
 
     render(<WantedPage />, { wrapper })
 
-    // Open dropdown
     await waitFor(() => {
-      expect(screen.getByRole("combobox")).toBeInTheDocument()
+      expect(screen.getByRole("tab", { name: "Movies" })).toBeInTheDocument()
     })
-    await user.click(screen.getByRole("combobox"))
-
-    // Select Movies Only
-    await waitFor(() => {
-      expect(screen.getByText("Movies Only")).toBeInTheDocument()
-    })
-    await user.click(screen.getByText("Movies Only"))
-
-    // Should now be able to click refresh with movies only scope
+    await user.click(screen.getByRole("tab", { name: "Movies" }))
     await user.click(screen.getByText("Refresh"))
 
-    // Verify the API was called with the correct scope
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "movie" })
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies")
+    })
+  })
+
+  it("refreshes only episodes when the Series tab is selected", async () => {
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByRole("tab", { name: "Series" })).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole("tab", { name: "Series" }))
+    await user.click(screen.getByText("Refresh"))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "episode" })
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 3 episodes")
+    })
+  })
+
+  it("refreshes both when the All tab is selected", async () => {
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Refresh")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Refresh"))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "all" })
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies and 3 episodes")
     })
   })
 })

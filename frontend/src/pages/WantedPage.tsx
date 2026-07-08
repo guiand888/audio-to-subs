@@ -187,7 +187,6 @@ export function WantedPage() {
   const [transcribeItem, setTranscribeItem] = useState<WantedItem | null>(null)
 
   // Refresh state
-  const [refreshScope, setRefreshScope] = useState<ItemType>("all")
   const [refreshStatus, setRefreshStatus] = useState<
     "idle" | "refreshing" | "success" | "error"
   >("idle")
@@ -207,14 +206,20 @@ export function WantedPage() {
   const handleRefresh = () => {
     setRefreshStatus("refreshing")
     refreshMutation.mutate(
-      { item_type: refreshScope },
+      { item_type: itemType },
       {
         onSuccess: (data) => {
           if (data.status === "completed") {
             setRefreshStatus("success")
-            toast.success(
-              `Refreshed ${data.movies_processed} movies and ${data.episodes_processed} episodes`
-            )
+            if (itemType === "movie") {
+              toast.success(`Refreshed ${data.movies_processed} movies`)
+            } else if (itemType === "episode") {
+              toast.success(`Refreshed ${data.episodes_processed} episodes`)
+            } else {
+              toast.success(
+                `Refreshed ${data.movies_processed} movies and ${data.episodes_processed} episodes`
+              )
+            }
             // Invalidate the wanted query to refresh the UI
             void queryClient.invalidateQueries({ queryKey: ["wanted"] })
           } else {
@@ -347,22 +352,8 @@ export function WantedPage() {
           </Select>
         )}
 
-        {/* Refresh button with scope dropdown */}
+        {/* Refresh button — scoped to the current Movies/Series tab selection */}
         <div className="flex items-center gap-2">
-          <Select
-            value={refreshScope}
-            onValueChange={(v) => setRefreshScope(v as ItemType)}
-            disabled={refreshStatus === "refreshing"}
-          >
-            <SelectTrigger className="w-[120px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectItem value="all">All Items</SelectItem>
-              <SelectItem value="movie">Movies Only</SelectItem>
-              <SelectItem value="episode">TV Series Only</SelectItem>
-            </SelectContent>
-          </Select>
           <Button
             variant="outline"
             size="sm"
