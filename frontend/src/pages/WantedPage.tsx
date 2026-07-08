@@ -204,6 +204,7 @@ export function WantedPage() {
   const [onlyNoSubs, setOnlyNoSubs] = useState(false)
   const [langFilter, setLangFilter] = useState<string>("")
   const [page, setPage] = useState(1)
+  const [pageSize, setPageSize] = useState(50)
   const [transcribeItem, setTranscribeItem] = useState<WantedItem | null>(null)
 
   // Refresh state
@@ -267,7 +268,7 @@ export function WantedPage() {
   const { data, isLoading } = useWanted({
     item_type: itemType,
     page,
-    page_size: 50,
+    page_size: pageSize,
   })
 
   // Client-side search + filter (simple approach for now)
@@ -299,7 +300,7 @@ export function WantedPage() {
     return [...codes].sort()
   }, [data?.items])
 
-  const totalPages = data ? Math.ceil(data.total / 50) : 1
+  const totalPages = data ? Math.ceil(data.total / pageSize) : 1
 
   return (
     <div className="flex flex-col h-full">
@@ -429,28 +430,51 @@ export function WantedPage() {
       </div>
 
       {/* Pagination */}
-      {totalPages > 1 && (
+      {data && data.total > 0 && (
         <div className="flex items-center justify-between border-t px-4 py-2 text-sm text-muted-foreground">
           <span>
             Page {page} of {totalPages} — {data?.total ?? 0} items
           </span>
-          <div className="flex gap-2">
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page <= 1}
-              onClick={() => setPage((p) => p - 1)}
-            >
-              Previous
-            </Button>
-            <Button
-              variant="outline"
-              size="sm"
-              disabled={page >= totalPages}
-              onClick={() => setPage((p) => p + 1)}
-            >
-              Next
-            </Button>
+          <div className="flex items-center gap-4">
+            <div className="flex items-center gap-2">
+              <Label htmlFor="page-size" className="text-sm">
+                Rows per page
+              </Label>
+              <Select
+                value={String(pageSize)}
+                onValueChange={(v) => {
+                  setPageSize(Number(v))
+                  setPage(1)
+                }}
+              >
+                <SelectTrigger id="page-size" className="w-[80px]">
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="10">10</SelectItem>
+                  <SelectItem value="50">50</SelectItem>
+                  <SelectItem value="100">100</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="flex gap-2">
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page <= 1}
+                onClick={() => setPage((p) => p - 1)}
+              >
+                Previous
+              </Button>
+              <Button
+                variant="outline"
+                size="sm"
+                disabled={page >= totalPages}
+                onClick={() => setPage((p) => p + 1)}
+              >
+                Next
+              </Button>
+            </div>
           </div>
         </div>
       )}
