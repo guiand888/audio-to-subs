@@ -27,6 +27,7 @@ def make_claimed_job(**overrides) -> ClaimedJob:
         "media_path": "/test/video.mp4",
         "output_path": "/test/output.srt",
         "language_code": "en",
+        "language_mode": "explicit",
         "output_format": "srt",
         "source": JobSource.MANUAL.value,
         "source_ref": None,
@@ -133,6 +134,113 @@ class TestPersistResult:
         result = JobResult(status=JobStatus.DONE)
         await persist_result(mock_db_session, uuid4(), result)
 
+    @pytest.mark.asyncio
+    async def test_persist_result_auto_mode_uses_detected_language(
+        self, mock_db_session
+    ):
+        """Auto mode overwrites language_code with Mistral's detected language
+        and does NOT flag the job for review."""
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+            language_mode="auto",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(
+            status=JobStatus.DONE,
+            detected_language="fr",
+            language_mode="auto",
+        )
+
+        await persist_result(mock_db_session, job_id, result)
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.language_code == "fr"
+        assert refreshed.mistral_detected_language == "fr"
+        assert refreshed.needs_language_review is False
+
+    @pytest.mark.asyncio
+    async def test_persist_result_auto_mode_falls_back_to_und_and_flags_review(
+        self, mock_db_session
+    ):
+        """When Mistral reports no language in auto mode, the job falls back
+        to the "und" sentinel and is flagged for review."""
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+            language_mode="auto",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(
+            status=JobStatus.DONE,
+            detected_language=None,
+            language_mode="auto",
+        )
+
+        await persist_result(mock_db_session, job_id, result)
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.language_code == "und"
+        assert refreshed.mistral_detected_language is None
+        assert refreshed.needs_language_review is True
+
+    @pytest.mark.asyncio
+    async def test_persist_result_explicit_mode_does_not_overwrite_language_code(
+        self, mock_db_session
+    ):
+        """Explicit mode keeps the user's selection - only the raw detected
+        language is captured (for the passive mismatch flag), never used to
+        override the filename/DB language_code."""
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+            language_code="en",
+            language_mode="explicit",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(
+            status=JobStatus.DONE,
+            detected_language="fr",
+            language_mode="explicit",
+        )
+
+        await persist_result(mock_db_session, job_id, result)
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.language_code == "en"
+        assert refreshed.mistral_detected_language == "fr"
+        assert refreshed.needs_language_review is False
+
 
 class TestPersistLog:
     """Test persist_log writes a JobLog row."""
@@ -231,6 +339,38 @@ class TestRunJob:
         assert result.status == JobStatus.DONE
         assert result.audio_duration_seconds == 30.0
         deps.redis.publish.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_run_job_auto_mode_threads_detected_language_into_result(
+        self, mock_db_session
+    ):
+        """run_job passes claimed.language_mode to Pipeline and carries the
+        pipeline's detected_language + the job's language_mode into JobResult
+        so persist_result can resolve the final language."""
+        claimed = make_claimed_job(language_code=None, language_mode="auto")
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/test/output.fr.srt",
+            audio_duration_seconds=30.0,
+            mistral_usage=None,
+            segments_count=1,
+            detected_language="fr",
+        )
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.DONE
+        assert result.detected_language == "fr"
+        assert result.language_mode == "auto"
+        # Pipeline must be constructed in auto mode, not silently defaulted.
+        _, pipeline_kwargs = mock_pipeline_class.call_args
+        assert pipeline_kwargs["language_mode"] == "auto"
 
     @pytest.mark.asyncio
     async def test_run_job_cancelled_returns_cancelled_status(self, mock_db_session):

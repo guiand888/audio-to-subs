@@ -95,15 +95,31 @@ class WantedEpisodesPage(BaseModel):
 
 
 class Movie(BaseModel):
-    """Movie item from Bazarr all movies endpoint."""
+    """Movie item from Bazarr all movies endpoint.
+
+    `audio_language` shares Bazarr's `*_language_model` family with
+    `Episode.audio_language`/`Series.audio_language` - same {name, code2,
+    code3} shape, code2/code3 may be null for unresolved tracks, and it
+    needs the same null-column normalization (see `Episode`'s docstring
+    for why only `audio_language`, not `subtitles`, needs this).
+    """
 
     title: str = Field(description="Movie title")
     radarrId: int = Field(description="Radarr ID for the movie")
     subtitles: list[SubtitleLanguage] = Field(
         default_factory=list, description="List of existing subtitles"
     )
+    audio_language: list[SubtitleLanguage] = Field(
+        default_factory=list,
+        description="Audio languages; code2/code3 may be null for unresolved tracks",
+    )
     sceneName: str | None = Field(default=None, description="Scene name for the movie")
     tags: list[str] = Field(default_factory=list, description="Movie tags")
+
+    @field_validator("audio_language", mode="before")
+    @classmethod
+    def _normalize_audio_language(cls, v: Any) -> Any:
+        return _normalize_language_model_list(v)
 
 
 class MoviesPage(BaseModel):

@@ -47,6 +47,25 @@ def realistic_series_item(**overrides: Any) -> dict[str, Any]:
     return item
 
 
+def realistic_movie_item(**overrides: Any) -> dict[str, Any]:
+    """A fully-populated `/api/movies` item, exactly as Bazarr marshals it.
+
+    `audio_language` follows the same wire-shape rules as
+    `realistic_series_item` - a JSON array of {name, code2, code3} when the
+    DB column is set, a dict-of-nulls when it's NULL.
+    """
+    item: dict[str, Any] = {
+        "title": "Test Movie",
+        "radarrId": 1,
+        "subtitles": [],
+        "audio_language": [{"name": "French", "code2": "fr", "code3": "fre"}],
+        "sceneName": "Test.Movie.2024.1080p",
+        "tags": [],
+    }
+    item.update(overrides)
+    return item
+
+
 def null_heavy_series_item(**overrides: Any) -> dict[str, Any]:
     """A minimal item: only the non-nullable columns populated.
 

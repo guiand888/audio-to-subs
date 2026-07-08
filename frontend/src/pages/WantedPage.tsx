@@ -59,30 +59,44 @@ interface TranscribeDialogProps {
 
 const FORMAT_OPTIONS: OutputFormat[] = ["srt", "vtt", "webvtt", "sbv"]
 
+// Sentinels for the language Select (Radix disallows empty-string values,
+// same reason the "_all" sentinel exists in the language filter below).
+const AUTO_LANGUAGE = "_auto"
+const OTHER_LANGUAGE = "_other"
+
 function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
   const createJob = useCreateJob()
-  const [language, setLanguage] = useState<string>("")
+  const [language, setLanguage] = useState<string>(AUTO_LANGUAGE)
+  const [manualCode, setManualCode] = useState<string>("")
   const [format, setFormat] = useState<OutputFormat>("srt")
 
-  // Pre-select first missing language when item changes
+  // Default to the item's first reported audio language if Bazarr knows it;
+  // otherwise only Auto-detect makes sense (missing_subtitles is not used
+  // here - it describes what's missing, not what's spoken).
   useEffect(() => {
-    if (item?.missing_subtitles.length) {
-      setLanguage(item.missing_subtitles[0].code2)
-    } else {
-      setLanguage("")
-    }
+    const firstAudioLang = item?.audio_language.find((al) => al.code2)
+    setLanguage(firstAudioLang ? firstAudioLang.code2 : AUTO_LANGUAGE)
+    setManualCode("")
     setFormat("srt")
   }, [item])
 
   if (!item) return null
 
   const handleSubmit = () => {
+    const isAuto = language === AUTO_LANGUAGE
+    const resolvedCode = isAuto
+      ? null
+      : language === OTHER_LANGUAGE
+        ? manualCode.trim()
+        : language
+
     createJob.mutate(
       {
         source: item.kind === "movie" ? "bazarr_movie" : "bazarr_episode",
         source_ref: String(item.ext_id),
         media_path: item.media_path,
-        language_code: language || null,
+        language_mode: isAuto ? "auto" : "explicit",
+        language_code: resolvedCode,
         output_format: format,
       },
       {
@@ -116,24 +130,27 @@ function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
           {/* Language */}
           <div className="space-y-1.5">
             <Label>Language</Label>
-            {item.missing_subtitles.length > 0 ? (
-              <Select value={language} onValueChange={setLanguage}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select language" />
-                </SelectTrigger>
-                <SelectContent>
-                  {item.missing_subtitles.map((ms) => (
-                    <SelectItem key={ms.code2} value={ms.code2}>
-                      {langLabel(ms)}
+            <Select value={language} onValueChange={setLanguage}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select language" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value={AUTO_LANGUAGE}>Auto-detect</SelectItem>
+                {item.audio_language
+                  .filter((al) => al.code2)
+                  .map((al) => (
+                    <SelectItem key={al.code2} value={al.code2}>
+                      {langLabel(al)}
                     </SelectItem>
                   ))}
-                </SelectContent>
-              </Select>
-            ) : (
+                <SelectItem value={OTHER_LANGUAGE}>Other (manual code)</SelectItem>
+              </SelectContent>
+            </Select>
+            {language === OTHER_LANGUAGE && (
               <Input
                 placeholder="e.g. en"
-                value={language}
-                onChange={(e) => setLanguage(e.target.value)}
+                value={manualCode}
+                onChange={(e) => setManualCode(e.target.value)}
               />
             )}
           </div>
@@ -165,7 +182,10 @@ function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
           </Button>
           <Button
             onClick={handleSubmit}
-            disabled={createJob.isPending}
+            disabled={
+              createJob.isPending ||
+              (language === OTHER_LANGUAGE && !manualCode.trim())
+            }
           >
             {createJob.isPending ? "Queuing…" : "Queue job"}
           </Button>

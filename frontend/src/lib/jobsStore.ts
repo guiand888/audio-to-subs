@@ -5,7 +5,7 @@
 // "progress" / "done"). The JSON payload carries the event type in the `event` field.
 
 import { create } from "zustand"
-import type { JobResponse, SseEventData } from "./types"
+import type { JobResponse, LanguageMode, SseEventData } from "./types"
 
 export interface LiveJob {
   id: string
@@ -18,6 +18,7 @@ export interface LiveJob {
   source_ref: string | null
   media_path: string
   language_code: string | null
+  language_mode: LanguageMode
   output_format: string
   created_at: string
   started_at: string | null
@@ -105,6 +106,7 @@ export const useJobsStore = create<JobsState>()((set) => ({
           source_ref: j.source_ref,
           media_path: j.media_path,
           language_code: j.language_code,
+          language_mode: j.language_mode,
           output_format: j.output_format,
           created_at: j.created_at,
           started_at: j.started_at,

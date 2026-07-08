@@ -2,7 +2,7 @@
 
 import logging
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
@@ -12,6 +12,7 @@ from sqlalchemy import and_, desc, func, select
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.routes._helpers import get_job_or_404, publish_job_event
 from audio_to_subs.api.services.jobs import create_job_service
+from audio_to_subs.core.file_rename import rename_subtitle_language
 from audio_to_subs.db.models import (
     Job,
     JobSource,
@@ -46,6 +47,13 @@ class JobCreateRequest(BaseModel):
         default=None,
         description="Language code for transcription (e.g., 'en', 'fr')",
     )
+    language_mode: Literal["auto", "explicit"] = Field(
+        default="explicit",
+        description=(
+            "'auto' lets Mistral auto-detect the audio language and ignores "
+            "language_code; 'explicit' uses language_code as given"
+        ),
+    )
     output_format: OutputFormat = Field(
         default=OutputFormat.SRT,
         description="Output subtitle format",
@@ -69,6 +77,9 @@ class JobResponse(BaseModel):
     media_path: str
     output_path: str | None
     language_code: str | None
+    language_mode: str
+    mistral_detected_language: str | None
+    needs_language_review: bool
     output_format: OutputFormat
     priority: int
     progress_percent: int
@@ -197,6 +208,7 @@ async def create_job(
         media_path=job_request.media_path,
         output_path=job_request.output_path,
         language_code=job_request.language_code,
+        language_mode=job_request.language_mode,
         output_format=job_request.output_format,
         priority=job_request.priority,
     )
@@ -268,6 +280,57 @@ async def cancel_job(
         await db.commit()
         await db.refresh(job)
         return JobResponse.model_validate(job)
+
+
+class JobLanguagePatchRequest(BaseModel):
+    """Request body for correcting a completed job's language."""
+
+    language_code: str = Field(
+        ..., min_length=2, max_length=3, description="New ISO 639-1/2 language code"
+    )
+
+
+@router.patch("/{job_id}/language", response_model=JobResponse)
+async def update_job_language(
+    job_id: UUID,
+    db: Annotated["AsyncSession", Depends(get_db)],
+    patch: JobLanguagePatchRequest,
+) -> JobResponse:
+    """Correct a completed job's language after the fact.
+
+    Renames the on-disk output file to the new language suffix and clears
+    needs_language_review. Only valid for DONE jobs that have an output_path.
+    """
+    job = await get_job_or_404(db, job_id)
+
+    if job.status != JobStatus.DONE:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Can only correct language for completed jobs",
+        )
+    if not job.output_path:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Job has no output file to rename",
+        )
+
+    new_code = patch.language_code.lower().strip()
+    if not (2 <= len(new_code) <= 3 and new_code.isalpha()):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid language code",
+        )
+
+    new_path = rename_subtitle_language(job.output_path, job.language_code, new_code)
+
+    job.output_path = new_path
+    job.language_code = new_code
+    job.needs_language_review = False
+    job.updated_at = datetime.now(timezone.utc)
+    await db.commit()
+    await db.refresh(job)
+
+    return JobResponse.model_validate(job)
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

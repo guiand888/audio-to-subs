@@ -63,6 +63,7 @@ class PipelineResult:
     audio_duration_seconds: float
     mistral_usage: dict[str, Any] | None
     segments_count: int
+    detected_language: str | None = None
 
     def __fspath__(self) -> str:
         """Return the output path for filesystem operations."""
@@ -108,6 +109,7 @@ class Pipeline:
         structured_progress_callback: Optional[StructuredProgressCallback] = None,
         cancel_token: Optional[CancelToken] = None,
         max_audio_length: int = DEFAULT_MAX_AUDIO_LENGTH,
+        language_mode: Literal["auto", "explicit"] = "explicit",
     ) -> None:
         """Initialize pipeline.
 
@@ -121,6 +123,10 @@ class Pipeline:
             structured_progress_callback: Optional v2 callback receiving ProgressEvent dicts
             cancel_token: Optional v2 cancellation token for cooperative cancellation
             max_audio_length: Maximum audio segment length in seconds before splitting
+            language_mode: "explicit" uses `language` as the output filename's
+                language code as-is. "auto" ignores `language` for naming and
+                instead uses whatever language Mistral's response reports it
+                detected (falling back to "und" if it reports none).
 
         Raises:
             ValueError: If API key is not provided
@@ -148,6 +154,7 @@ class Pipeline:
         )
         self.subtitle_generator = SubtitleGenerator()
         self._language = language
+        self._language_mode = language_mode
 
     def _check_cancel(self) -> None:
         """Check if cancellation has been requested and raise Cancelled if so."""
@@ -273,7 +280,9 @@ class Pipeline:
             self._check_cancel()
 
             # Stage 3: Transcribe audio segments (30-75%)
-            all_segments, mistral_usage = self._perform_transcription(audio_segments)
+            all_segments, mistral_usage, detected_language = (
+                self._perform_transcription(audio_segments)
+            )
             segments_count = len(all_segments)
             logger.debug(f"Transcription complete: {segments_count} segments")
             self._emit_progress(
@@ -284,6 +293,15 @@ class Pipeline:
             )
             self._check_cancel()
 
+            # Resolve the language code that drives the output filename: in
+            # auto mode this is whatever Mistral actually detected (or "und"
+            # if it reported nothing), never the originally requested code.
+            effective_language: str | None
+            if self._language_mode == "auto":
+                effective_language = detected_language or "und"
+            else:
+                effective_language = self._language
+
             # Stage 4: Generate subtitles and finalize (75-100%)
             result_path = self._finalize_subtitles(
                 all_segments,
@@ -291,6 +309,7 @@ class Pipeline:
                 output_format,
                 audio_duration_seconds,
                 mistral_usage,
+                effective_language,
             )
 
             return PipelineResult(
@@ -298,6 +317,7 @@ class Pipeline:
                 audio_duration_seconds=audio_duration_seconds,
                 mistral_usage=mistral_usage,
                 segments_count=segments_count,
+                detected_language=detected_language,
             )
 
         except Cancelled:
@@ -469,14 +489,14 @@ class Pipeline:
 
     def _perform_transcription(
         self, audio_segments: list[str]
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str | None]:
         """Transcribe audio segments.
 
         Args:
             audio_segments: List of audio segment paths to transcribe
 
         Returns:
-            Tuple of (all_segments, mistral_usage)
+            Tuple of (all_segments, mistral_usage, detected_language)
 
         Raises:
             PipelineError: If transcription fails
@@ -497,6 +517,7 @@ class Pipeline:
         output_format: str,
         audio_duration_seconds: float,
         mistral_usage: dict[str, Any] | None,
+        effective_language: str | None,
     ) -> str:
         """Generate subtitles and emit final progress event.
 
@@ -506,6 +527,9 @@ class Pipeline:
             output_format: Output subtitle format
             audio_duration_seconds: Total audio duration
             mistral_usage: Usage metrics from transcription
+            effective_language: Resolved language code to use for the output
+                filename (the explicit selection, or the auto-detected/"und"
+                code in auto mode)
 
         Returns:
             Path to generated subtitle file
@@ -526,7 +550,7 @@ class Pipeline:
             all_segments,
             output_path,
             output_format,
-            self.transcription_client.language,
+            effective_language,
         )
         logger.debug(f"Subtitles generated: {result_path}")
 
@@ -550,14 +574,15 @@ class Pipeline:
 
     def _transcribe_audio_segments(
         self, audio_segments: list[str]
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str | None]:
         """Transcribe multiple audio segments and merge timestamps.
 
         Args:
             audio_segments: List of audio file paths to transcribe
 
         Returns:
-            Tuple of (all merged segments, mistral_usage dict or None)
+            Tuple of (all merged segments, mistral_usage dict or None,
+            detected_language or None)
 
         Raises:
             PipelineError: If transcription fails
@@ -568,18 +593,21 @@ class Pipeline:
             time_offset = 0.0
             total_segments = len(audio_segments)
             mistral_usage: dict[str, Any] | None = None
+            detected_language: str | None = None
 
             for idx, segment_path in enumerate(audio_segments, 1):
                 self._check_cancel()
 
                 # Transcribe this segment
-                segments, usage = self._transcribe_single_segment(
+                segments, usage, lang = self._transcribe_single_segment(
                     segment_path, idx, total_segments
                 )
 
-                # Extract usage from the last segment's response
-                if idx == len(audio_segments) and usage:
-                    mistral_usage = usage
+                # Extract usage/detected language from the last segment's response
+                if idx == len(audio_segments):
+                    if usage:
+                        mistral_usage = usage
+                    detected_language = lang
 
                 # Reject if no timestamped segments
                 if not segments:
@@ -602,7 +630,7 @@ class Pipeline:
                     segment_count=total_segments,
                 )
 
-            return all_segments, mistral_usage
+            return all_segments, mistral_usage, detected_language
 
         except TranscriptionError as e:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
@@ -614,7 +642,7 @@ class Pipeline:
 
     def _transcribe_single_segment(
         self, segment_path: str, segment_index: int, total_segments: int
-    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None]:
+    ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str | None]:
         """Transcribe a single audio segment.
 
         Args:
@@ -623,7 +651,8 @@ class Pipeline:
             total_segments: Total number of segments
 
         Returns:
-            Tuple of (transcribed_segments, mistral_usage or None)
+            Tuple of (transcribed_segments, mistral_usage or None,
+            detected_language or None)
 
         Raises:
             TranscriptionError: If transcription fails
@@ -646,11 +675,14 @@ class Pipeline:
             total_segments=total_segments if self.verbose_progress else None,
         )
 
-        # Extract usage from the transcription response
+        # Extract usage/detected language from the transcription response
         # The Mistral response is on the transcription client
         usage = getattr(self.transcription_client, "_last_usage", None)
+        detected_language = getattr(
+            self.transcription_client, "_last_detected_language", None
+        )
 
-        return segments, usage
+        return segments, usage, detected_language
 
     def _adjust_segment_timestamps(
         self,

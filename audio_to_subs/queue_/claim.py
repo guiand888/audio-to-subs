@@ -24,6 +24,8 @@ class ClaimedJob:
         media_path: Path to the media file to process
         output_path: Path where output subtitles should be written
         language_code: Optional language code for transcription
+        language_mode: "auto" or "explicit" - governs how the worker resolves
+            the language for the output filename
         output_format: Output subtitle format
         source: Job source (manual, bazarr_movie, bazarr_episode)
         source_ref: Optional reference to external source (e.g., Bazarr ID)
@@ -33,6 +35,7 @@ class ClaimedJob:
     media_path: str
     output_path: str
     language_code: Optional[str]
+    language_mode: str
     output_format: str
     source: str
     source_ref: Optional[str]
@@ -51,7 +54,7 @@ async def claim_one(
     The claim is performed as a single atomic statement:
     - UPDATE jobs SET status='running', worker_id=:worker_id, started_at=NOW
       WHERE id = (SELECT id FROM jobs WHERE status='queued' ORDER BY priority DESC, created_at ASC LIMIT 1)
-      RETURNING id, media_path, output_path, language_code, output_format, source, source_ref
+      RETURNING id, media_path, output_path, language_code, language_mode, output_format, source, source_ref
 
     Args:
         session: SQLAlchemy session for database operations
@@ -81,7 +84,7 @@ async def claim_one(
                 ORDER BY priority DESC, created_at ASC
                 LIMIT 1
             )
-            RETURNING id, media_path, output_path, language_code, output_format, source, source_ref
+            RETURNING id, media_path, output_path, language_code, language_mode, output_format, source, source_ref
         """
         )
 
@@ -106,9 +109,10 @@ async def claim_one(
             media_path=row[1],
             output_path=row[2] if row[2] else "",
             language_code=row[3],
-            output_format=row[4],
-            source=row[5],
-            source_ref=row[6],
+            language_mode=row[4],
+            output_format=row[5],
+            source=row[6],
+            source_ref=row[7],
         )
 
     except IntegrityError:

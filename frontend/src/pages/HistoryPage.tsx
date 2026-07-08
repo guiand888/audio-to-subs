@@ -2,11 +2,19 @@
 // Fetches from GET /api/history with pagination and filters.
 
 import { useState, useEffect } from "react"
-import { ChevronLeft, ChevronRight, Filter } from "lucide-react"
+import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Info } from "lucide-react"
+import { toast } from "sonner"
 
 import { useHistory } from "@/hooks/useHistory"
+import { useUpdateJobLanguage } from "@/hooks/useJobs"
 import { formatCost, formatDuration } from "@/lib/utils"
-import type { HistoryFilters, HistoryResponse, JobStatus, JobSource } from "@/lib/types"
+import type {
+  HistoryFilters,
+  HistoryResponse,
+  JobResponse,
+  JobStatus,
+  JobSource,
+} from "@/lib/types"
 
 // Import from shadcn/ui
 import { Button } from "@/components/ui/button"
@@ -29,6 +37,13 @@ import {
   SelectValue,
 } from "@/components/ui/select"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Dialog,
+  DialogContent,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
 import { JobStatusIcon } from "@/components/JobStatusIcon"
 
 const STATUS_OPTIONS: { value: JobStatus; label: string }[] = [
@@ -207,10 +222,78 @@ function HistoryStatsDisplay({ stats }: HistoryStatsProps) {
   )
 }
 
+// Correction dialog for a job's language, reachable via the review/mismatch
+// icons in the Language column. Same field works for both cases: fixing an
+// "und" auto-mode fallback, or overriding an explicit pick that Mistral's
+// detection disagreed with.
+interface LanguageReviewDialogProps {
+  job: JobResponse | null
+  onClose: () => void
+}
+
+function LanguageReviewDialog({ job, onClose }: LanguageReviewDialogProps) {
+  const updateLanguage = useUpdateJobLanguage()
+  const [code, setCode] = useState("")
+
+  useEffect(() => {
+    setCode(job?.mistral_detected_language || job?.language_code || "")
+  }, [job])
+
+  if (!job) return null
+
+  const handleSave = () => {
+    const trimmed = code.trim()
+    if (!trimmed) return
+    updateLanguage.mutate(
+      { jobId: job.id, language_code: trimmed },
+      {
+        onSuccess: () => {
+          toast.success("Language updated")
+          onClose()
+        },
+        onError: () => {
+          toast.error("Failed to update language")
+        },
+      },
+    )
+  }
+
+  return (
+    <Dialog open={!!job} onOpenChange={(open) => !open && onClose()}>
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Set language</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-1.5">
+          <Label htmlFor="review-language-code">Language code</Label>
+          <Input
+            id="review-language-code"
+            placeholder="e.g. en, fr"
+            value={code}
+            onChange={(e) => setCode(e.target.value)}
+          />
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button
+            onClick={handleSave}
+            disabled={updateLanguage.isPending || !code.trim()}
+          >
+            {updateLanguage.isPending ? "Saving…" : "Save"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 // Main HistoryPage component
 export function HistoryPage() {
   const [filters, setFilters] = useState<HistoryFilters>({ offset: 0, limit: 20 })
   const [page, setPage] = useState(0)
+  const [reviewJob, setReviewJob] = useState<JobResponse | null>(null)
 
   const { data, isLoading, isError } = useHistory(filters)
 
@@ -320,7 +403,36 @@ export function HistoryPage() {
                             {truncatePath(job.media_path, 60)}
                           </span>
                         </TableCell>
-                        <TableCell className="p-3">{job.language_code || "—"}</TableCell>
+                        <TableCell className="p-3">
+                          <div className="flex items-center gap-1.5">
+                            <span>{job.language_code || "—"}</span>
+                            {job.needs_language_review && (
+                              <Button
+                                size="icon"
+                                variant="ghost"
+                                className="h-5 w-5"
+                                title="Mistral couldn't detect a language; click to set it"
+                                onClick={() => setReviewJob(job)}
+                              >
+                                <AlertTriangle className="h-3.5 w-3.5 text-amber-500" />
+                              </Button>
+                            )}
+                            {!job.needs_language_review &&
+                              job.language_mode === "explicit" &&
+                              job.mistral_detected_language &&
+                              job.mistral_detected_language !== job.language_code && (
+                                <Button
+                                  size="icon"
+                                  variant="ghost"
+                                  className="h-5 w-5"
+                                  title={`Selected "${job.language_code}", but Mistral detected "${job.mistral_detected_language}"`}
+                                  onClick={() => setReviewJob(job)}
+                                >
+                                  <Info className="h-3.5 w-3.5 text-muted-foreground" />
+                                </Button>
+                              )}
+                          </div>
+                        </TableCell>
                         <TableCell className="p-3">{formatDuration(job.audio_duration_seconds)}</TableCell>
                         <TableCell className="p-3">{formatCost(job.estimated_cost_usd)}</TableCell>
                         <TableCell className="p-3 whitespace-nowrap">
@@ -371,6 +483,8 @@ export function HistoryPage() {
           </Card>
         </div>
       </div>
+
+      <LanguageReviewDialog job={reviewJob} onClose={() => setReviewJob(null)} />
     </div>
   )
 }

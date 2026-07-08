@@ -122,9 +122,9 @@ async def get_default_language_code(db: "AsyncSession") -> str | None:
         result = await db.execute(
             select(Setting.value_json).where(Setting.key == "default_language")
         )
-        row = result.scalar_one_or_none()
-        if row and row.value_json:
-            return json.loads(row.value_json)
+        value_json = result.scalar_one_or_none()
+        if value_json:
+            return json.loads(value_json)
     except Exception:
         pass
 
@@ -145,9 +145,9 @@ async def get_default_output_format(db: "AsyncSession") -> OutputFormat | None:
         result = await db.execute(
             select(Setting.value_json).where(Setting.key == "default_output_format")
         )
-        row = result.scalar_one_or_none()
-        if row and row.value_json:
-            default_format = json.loads(row.value_json)
+        value_json = result.scalar_one_or_none()
+        if value_json:
+            default_format = json.loads(value_json)
             if default_format and default_format != "srt":
                 try:
                     return OutputFormat(default_format)
@@ -157,6 +157,30 @@ async def get_default_output_format(db: "AsyncSession") -> OutputFormat | None:
         pass
 
     return None
+
+
+async def _apply_language_and_format_defaults(
+    db: "AsyncSession",
+    language_code: str | None,
+    output_format: OutputFormat,
+    language_mode: str,
+) -> tuple[str | None, OutputFormat]:
+    """Resolve the final language code and output format from settings defaults.
+
+    Auto mode must never pick up the default-language setting - the real
+    language isn't known until the worker finishes transcribing.
+    """
+    final_language_code = language_code
+    if final_language_code is None and language_mode != "auto":
+        final_language_code = await get_default_language_code(db)
+
+    final_output_format = output_format
+    if final_output_format == OutputFormat.SRT:
+        default_format = await get_default_output_format(db)
+        if default_format:
+            final_output_format = default_format
+
+    return final_language_code, final_output_format
 
 
 async def create_job_service(
@@ -169,6 +193,7 @@ async def create_job_service(
     language_code: str | None,
     output_format: OutputFormat,
     priority: int,
+    language_mode: str = "explicit",
 ) -> Job:
     """Create a new transcription job.
 
@@ -185,6 +210,10 @@ async def create_job_service(
         language_code: Language code for transcription
         output_format: Output subtitle format
         priority: Job priority
+        language_mode: "auto" or "explicit". When "auto", language_code is
+            ignored (forced to None) - the real language isn't known until
+            the worker finishes transcribing, and auto mode must never pick
+            up the default-language setting.
 
     Returns:
         Created Job object
@@ -192,6 +221,9 @@ async def create_job_service(
     Raises:
         HTTPException: If validation fails or source resolution fails
     """
+    if language_mode == "auto":
+        language_code = None
+
     # Get path map for path translation
     path_map = await get_path_map(db)
 
@@ -224,14 +256,24 @@ async def create_job_service(
             detail=f"Invalid media path: {error_msg}",
         )
 
-    # Auto-generate output_path if not provided and subtitles_same_directory is enabled
+    # Apply defaults from settings if not provided.
+    final_language_code, final_output_format = (
+        await _apply_language_and_format_defaults(
+            db, language_code, output_format, language_mode
+        )
+    )
+
+    # Auto-generate output_path if not provided and subtitles_same_directory is
+    # enabled. Uses final_language_code (post-defaulting), not the raw
+    # parameter, so a job relying on the default-language setting gets a path
+    # with the right language suffix instead of none.
     subtitles_same_dir = getattr(settings, "SUBTITLES_SAME_DIRECTORY", True)
     final_output_path = output_path
     if not final_output_path and subtitles_same_dir:
         final_output_path = generate_output_path(
             resolved_media_path,
-            language_code,
-            output_format,
+            final_language_code,
+            final_output_format.value,
             subtitles_same_dir,
         )
     elif final_output_path:
@@ -245,28 +287,16 @@ async def create_job_service(
                 detail=f"Invalid output path: {error_msg}",
             )
 
-    # Apply defaults from settings if not provided
-    final_language_code = language_code
-    final_output_format = output_format
-
-    if final_language_code is None:
-        final_language_code = await get_default_language_code(db)
-
-    # Try to get default output format from settings
-    if final_output_format == OutputFormat.SRT:
-        default_format = await get_default_output_format(db)
-        if default_format:
-            final_output_format = default_format
-
     # Create job
     job = Job(
-        id=uuid4(),
+        id=str(uuid4()),
         status=JobStatus.QUEUED,
         source=source,
         source_ref=resolved_source_ref or source_ref,
         media_path=resolved_media_path,
         output_path=final_output_path,
         language_code=final_language_code,
+        language_mode=language_mode,
         output_format=final_output_format,
         priority=priority,
         progress_percent=0,

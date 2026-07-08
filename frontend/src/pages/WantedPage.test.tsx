@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -160,6 +160,246 @@ describe("WantedPage - Refresh Wanted List", () => {
     // Wait for the refresh to fail and error to be processed
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled()
+    })
+  })
+})
+
+const MOCK_ITEM_WITH_AUDIO_LANG = {
+  id: "movie:1",
+  kind: "movie",
+  ext_id: 1,
+  title: "French Movie",
+  media_path: "/movies/french.mkv",
+  has_any_subs: false,
+  missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+  audio_language: [{ code2: "fr", code3: "fre", name: "French", hi: false, forced: false }],
+  last_polled: "2024-01-01T00:00:00Z",
+  active_job_id: null,
+  active_job_status: null,
+  active_job_progress: null,
+}
+
+const MOCK_ITEM_NO_AUDIO_LANG = {
+  ...MOCK_ITEM_WITH_AUDIO_LANG,
+  id: "movie:2",
+  ext_id: 2,
+  title: "Unknown Audio Movie",
+  audio_language: [],
+}
+
+const MOCK_JOB_RESPONSE = {
+  id: "job-1",
+  status: "queued",
+  source: "bazarr_movie",
+  source_ref: "1",
+  media_path: "/movies/french.mkv",
+  output_path: null,
+  language_code: null,
+  language_mode: "auto",
+  mistral_detected_language: null,
+  needs_language_review: false,
+  output_format: "srt",
+  priority: 0,
+  progress_percent: 0,
+  progress_message: null,
+  cancel_requested: false,
+  worker_id: null,
+  audio_duration_seconds: null,
+  mistral_usage_json: null,
+  estimated_cost_usd: null,
+  error_message: null,
+  created_at: "2024-01-01T00:00:00Z",
+  started_at: null,
+  finished_at: null,
+  updated_at: "2024-01-01T00:00:00Z",
+}
+
+// The dialog's Language select has no explicit accessible name (its <Label>
+// isn't wired via htmlFor), and other comboboxes (language filter, refresh
+// scope) can coexist on the page once items are loaded - so scope to the
+// dialog and take the first combobox (Language precedes Format in markup).
+function dialogLanguageCombobox() {
+  return within(screen.getByRole("dialog")).getAllByRole("combobox")[0]
+}
+
+describe("WantedPage - Transcribe Dialog language selection", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.post).mockResolvedValue(MOCK_JOB_RESPONSE)
+  })
+
+  it("offers Auto-detect and the item's Bazarr audio language, not missing_subtitles", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_WITH_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(dialogLanguageCombobox()).toBeInTheDocument()
+    })
+    await user.click(dialogLanguageCombobox())
+
+    await waitFor(() => {
+      expect(screen.getByRole("option", { name: "Auto-detect" })).toBeInTheDocument()
+      expect(screen.getByRole("option", { name: "French" })).toBeInTheDocument()
+      expect(
+        screen.getByRole("option", { name: "Other (manual code)" }),
+      ).toBeInTheDocument()
+      // The missing-subtitle language ("English") must not appear as a
+      // language option - only as the unrelated "Missing" badge.
+      expect(screen.queryByRole("option", { name: "English" })).not.toBeInTheDocument()
+    })
+  })
+
+  it("defaults to the item's audio language when Bazarr reports one", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_WITH_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(dialogLanguageCombobox()).toHaveTextContent("French")
+    })
+  })
+
+  it("defaults to Auto-detect and offers no language option when Bazarr has none", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_NO_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown Audio Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(dialogLanguageCombobox()).toHaveTextContent("Auto-detect")
+      expect(screen.queryByText("French")).not.toBeInTheDocument()
+    })
+  })
+
+  it("submits language_mode 'auto' and a null language_code in Auto-detect mode", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_NO_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Unknown Audio Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Queue job")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Queue job"))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/jobs",
+        expect.objectContaining({
+          language_mode: "auto",
+          language_code: null,
+        }),
+      )
+    })
+  })
+
+  it("submits language_mode 'explicit' with the selected Bazarr audio language code", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_WITH_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Queue job")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Queue job"))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/jobs",
+        expect.objectContaining({
+          language_mode: "explicit",
+          language_code: "fr",
+        }),
+      )
+    })
+  })
+
+  it("reveals a manual code input for 'Other' and disables Queue job until filled", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_WITH_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(dialogLanguageCombobox()).toBeInTheDocument()
+    })
+    await user.click(dialogLanguageCombobox())
+    await user.click(screen.getByText("Other (manual code)"))
+
+    const queueButton = screen.getByText("Queue job")
+    expect(queueButton.closest("button")).toBeDisabled()
+
+    await user.type(screen.getByPlaceholderText("e.g. en"), "de")
+    expect(queueButton.closest("button")).not.toBeDisabled()
+
+    await user.click(queueButton)
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/jobs",
+        expect.objectContaining({
+          language_mode: "explicit",
+          language_code: "de",
+        }),
+      )
     })
   })
 })

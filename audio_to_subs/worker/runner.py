@@ -9,7 +9,7 @@ import json
 import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Any, Optional
+from typing import TYPE_CHECKING, Any, Literal, Optional, cast
 from uuid import UUID
 
 from sqlalchemy import select
@@ -65,6 +65,8 @@ class JobResult:
     audio_duration_seconds: Optional[float] = None
     mistral_usage_json: Optional[str] = None
     estimated_cost_usd: Optional[float] = None
+    detected_language: Optional[str] = None
+    language_mode: Optional[str] = None
 
 
 async def persist_result(
@@ -87,6 +89,12 @@ async def persist_result(
                 job.mistral_usage_json = result.mistral_usage_json
             if result.estimated_cost_usd is not None:
                 job.estimated_cost_usd = result.estimated_cost_usd
+            if result.detected_language is not None:
+                job.mistral_detected_language = result.detected_language
+            if result.language_mode == "auto":
+                resolved = result.detected_language or "und"
+                job.language_code = resolved
+                job.needs_language_review = result.detected_language is None
 
             await session.commit()
         else:
@@ -245,6 +253,10 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         language=claimed.language_code,
         verbose_progress=False,  # We use structured callback
         max_audio_length=effective_max_audio_length,
+        # ClaimedJob.language_mode is a raw DB column typed as str, but the
+        # API layer (JobCreateRequest.language_mode: Literal) guarantees it's
+        # always one of these two values.
+        language_mode=cast(Literal["auto", "explicit"], claimed.language_mode),
     )
 
     try:
@@ -302,6 +314,8 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
                 json.dumps(result.mistral_usage) if result.mistral_usage else None
             ),
             estimated_cost_usd=cost_breakdown.estimated_cost_usd,
+            detected_language=result.detected_language,
+            language_mode=claimed.language_mode,
         )
 
     except Cancelled:

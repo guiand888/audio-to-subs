@@ -18,6 +18,7 @@ export interface LoginResponse {
 export type JobStatus = "queued" | "running" | "done" | "failed" | "cancelled"
 export type JobSource = "bazarr_movie" | "bazarr_episode" | "manual"
 export type OutputFormat = "srt" | "vtt" | "webvtt" | "sbv"
+export type LanguageMode = "auto" | "explicit"
 
 export interface JobResponse {
   id: string
@@ -27,6 +28,9 @@ export interface JobResponse {
   media_path: string
   output_path: string | null
   language_code: string | null
+  language_mode: LanguageMode
+  mistral_detected_language: string | null
+  needs_language_review: boolean
   output_format: OutputFormat
   priority: number
   progress_percent: number
@@ -62,8 +66,13 @@ export interface JobCreate {
   media_path: string // required even for bazarr sources
   output_path?: string | null
   language_code?: string | null
+  language_mode?: LanguageMode
   output_format?: OutputFormat
   priority?: number
+}
+
+export interface JobLanguagePatch {
+  language_code: string
 }
 
 // --------------- Wanted ---------------
@@ -86,6 +95,7 @@ export interface WantedItem {
   media_path: string
   has_any_subs: boolean
   missing_subtitles: MissingSubtitle[]
+  audio_language: MissingSubtitle[]
   last_polled: string
   active_job_id: string | null
   active_job_status: string | null

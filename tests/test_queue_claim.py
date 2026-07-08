@@ -19,6 +19,7 @@ class TestClaimedJob:
             media_path="/input/video.mp4",
             output_path="/output/video.srt",
             language_code="en",
+            language_mode="explicit",
             output_format="srt",
             source="manual",
             source_ref=None,
@@ -28,6 +29,7 @@ class TestClaimedJob:
         assert claimed.media_path == "/input/video.mp4"
         assert claimed.output_path == "/output/video.srt"
         assert claimed.language_code == "en"
+        assert claimed.language_mode == "explicit"
         assert claimed.output_format == "srt"
         assert claimed.source == "manual"
         assert claimed.source_ref is None
@@ -47,6 +49,7 @@ class TestClaimOne:
             "/input/video.mp4",
             "/output/video.srt",
             "en",
+            "explicit",
             "srt",
             "manual",
             None,
@@ -61,6 +64,7 @@ class TestClaimOne:
         assert isinstance(result.id, UUID)
         assert str(result.id) == job_id
         assert result.media_path == "/input/video.mp4"
+        assert result.language_mode == "explicit"
         assert mock_session.commit.called
 
     async def test_claim_one_no_job(self, mock_session) -> None:

@@ -1,6 +1,11 @@
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import type { JobCreate, JobListResponse, JobResponse } from "@/lib/types"
+import type {
+  JobCreate,
+  JobLanguagePatch,
+  JobListResponse,
+  JobResponse,
+} from "@/lib/types"
 
 interface JobsFilters {
   status_filter?: string
@@ -42,6 +47,18 @@ export function useCancelJob() {
     mutationFn: (jobId: string) => api.post<JobResponse>(`/api/jobs/${jobId}/cancel`),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] })
+    },
+  })
+}
+
+export function useUpdateJobLanguage() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ jobId, language_code }: { jobId: string } & JobLanguagePatch) =>
+      api.patch<JobResponse>(`/api/jobs/${jobId}/language`, { language_code }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: ["jobs"] })
+      void queryClient.invalidateQueries({ queryKey: ["history"] })
     },
   })
 }

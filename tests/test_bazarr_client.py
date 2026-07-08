@@ -14,7 +14,11 @@ from audio_to_subs.bazarr.client import (
     BazarrServerError,
 )
 from audio_to_subs.bazarr.schemas import SubtitleLanguage
-from tests.bazarr_fixtures import null_heavy_series_item, realistic_series_item
+from tests.bazarr_fixtures import (
+    null_heavy_series_item,
+    realistic_movie_item,
+    realistic_series_item,
+)
 
 
 @pytest.fixture
@@ -500,6 +504,81 @@ class TestRescan:
             assert result is True
             # Verify only one call was made (no outer retry loop)
             assert len(route.calls) == 1
+
+
+class TestMovies:
+    """Test /api/movies endpoint (list_all_movies) - the Movie schema's
+    audio_language field is a previously-unmodeled bug fix: Bazarr always
+    sent it, but pydantic v2 silently dropped it since the field wasn't
+    declared.
+    """
+
+    @pytest.mark.asyncio
+    async def test_list_all_movies_audio_language_round_trips(self, respx_mock):
+        """Movie.audio_language must be parsed, not silently dropped."""
+        mock_response = {"data": [realistic_movie_item()], "total": 1}
+        respx_mock.get("http://test-bazarr:6767/api/movies").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_movies()
+            assert len(result.data) == 1
+            assert result.data[0].radarrId == 1
+            assert result.data[0].audio_language == [
+                SubtitleLanguage(name="French", code2="fr", code3="fre")
+            ]
+
+    @pytest.mark.asyncio
+    async def test_list_all_movies_audio_language_null_column(self, respx_mock):
+        """A NULL audio_language column marshals as a dict of nulls.
+
+        Same quirk as Series/Episode - must normalize to an empty list.
+        """
+        mock_response = {
+            "data": [
+                realistic_movie_item(
+                    audio_language={"name": None, "code2": None, "code3": None}
+                )
+            ],
+            "total": 1,
+        }
+        respx_mock.get("http://test-bazarr:6767/api/movies").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_movies()
+            assert result.data[0].audio_language == []
+
+    @pytest.mark.asyncio
+    async def test_list_all_movies_audio_language_unknown_track(self, respx_mock):
+        """An unresolved audio track has null code2/code3 but a real entry."""
+        mock_response = {
+            "data": [
+                realistic_movie_item(
+                    audio_language=[{"name": "Unknown", "code2": None, "code3": None}]
+                )
+            ],
+            "total": 1,
+        }
+        respx_mock.get("http://test-bazarr:6767/api/movies").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_movies()
+            assert result.data[0].audio_language[0].name == "Unknown"
+            assert result.data[0].audio_language[0].code2 is None
 
 
 class TestSeries:

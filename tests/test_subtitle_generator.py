@@ -273,6 +273,22 @@ class TestLanguageCodeHandling:
                 segments, str(output_file), "srt", language_code="invalid123"
             )
 
+    def test_und_sentinel_is_a_valid_language_code(self):
+        """'und' (ISO 639-2 undetermined) is the auto-mode fallback when
+        Mistral reports no detected language - it must pass validation like
+        any other 3-letter code."""
+        generator = SubtitleGenerator()
+
+        assert generator._is_valid_language_code("und") is True
+
+    def test_generate_output_filename_with_und_sentinel(self):
+        """Auto-mode fallback names the file `movie.und.srt`."""
+        generator = SubtitleGenerator()
+
+        result = generator._generate_output_filename("movie.srt", "srt", "und")
+
+        assert result == "movie.und.srt"
+
 
 class TestSubtitleGeneratorEdgeCases:
     """Test edge cases in subtitle generation."""

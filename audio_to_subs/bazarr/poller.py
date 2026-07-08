@@ -242,15 +242,33 @@ async def poll_bazarr_manually(
         # Process wanted movies
         if poll_movies:
             movies_page = await client.list_wanted_movies(length=200)
+            audio_lang_by_movie = await _fetch_audio_language_for_movies(
+                client, [m.radarrId for m in movies_page.data]
+            )
             for movie in movies_page.data:
-                await _process_movie(db, movie, path_map, started_at)
+                await _process_movie(
+                    db,
+                    movie,
+                    path_map,
+                    started_at,
+                    audio_lang_by_movie.get(movie.radarrId),
+                )
                 movies_processed += 1
 
         # Process wanted episodes
         if poll_episodes:
             episodes_page = await client.list_wanted_episodes(length=200)
+            audio_lang_by_episode = await _fetch_audio_language_for_episodes(
+                client, {e.sonarrSeriesId for e in episodes_page.data}
+            )
             for episode in episodes_page.data:
-                await _process_episode(db, episode, path_map, started_at)
+                await _process_episode(
+                    db,
+                    episode,
+                    path_map,
+                    started_at,
+                    audio_lang_by_episode.get(episode.sonarrEpisodeId),
+                )
                 episodes_processed += 1
 
         # If tracking no-subs items, also check all items
@@ -279,11 +297,73 @@ async def poll_bazarr_manually(
     return movies_processed, episodes_processed
 
 
-def _build_missing_subtitles_list(missing_languages: list[Any] | None) -> list[dict]:
-    """Build a list of missing subtitle language dictionaries.
+async def _fetch_audio_language_for_movies(
+    client: BazarrClient, radarr_ids: list[int]
+) -> dict[int, list[Any]]:
+    """Batch-fetch audio_language for a set of movies by Radarr ID.
+
+    Bazarr's wanted-movies endpoint never carries audio_language, so it must
+    be joined in from the full-detail endpoint. One HTTP call per poll cycle
+    for exactly the movies being processed, not one per item.
 
     Args:
-        missing_languages: List of language objects from Bazarr API, or None
+        client: BazarrClient instance
+        radarr_ids: Radarr IDs to look up
+
+    Returns:
+        Dict mapping radarrId to its audio_language list (missing entries
+        mean Bazarr couldn't report a language for that movie)
+    """
+    if not radarr_ids:
+        return {}
+    try:
+        full_movies = await client.list_all_movies(radarrid=radarr_ids)
+        return {m.radarrId: m.audio_language for m in full_movies.data}
+    except Exception as e:
+        logger.warning("Failed to fetch audio_language for movies: %s", e)
+        return {}
+
+
+async def _fetch_audio_language_for_episodes(
+    client: BazarrClient, series_ids: set[int]
+) -> dict[int, list[Any]]:
+    """Batch-fetch audio_language for episodes, by their series.
+
+    Bazarr's wanted-episodes endpoint never carries audio_language, and its
+    episodes endpoint only accepts a single series ID (not a list), so this
+    batches by unique series rather than per-episode - bounded by "distinct
+    series with wanted episodes this poll", not one call per episode.
+
+    Args:
+        client: BazarrClient instance
+        series_ids: Unique Sonarr series IDs to look up
+
+    Returns:
+        Dict mapping sonarrEpisodeId to its audio_language list (missing
+        entries mean Bazarr couldn't report a language for that episode)
+    """
+    audio_lang_by_episode: dict[int, list[Any]] = {}
+    for series_id in series_ids:
+        try:
+            eps = await client.list_episodes(seriesid=series_id)
+            for ep in eps.data:
+                audio_lang_by_episode[ep.sonarrEpisodeId] = ep.audio_language
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch audio_language for series %s: %s", series_id, e
+            )
+    return audio_lang_by_episode
+
+
+def _build_language_list(languages: list[Any] | None) -> list[dict]:
+    """Build a list of language dictionaries from Bazarr SubtitleLanguage objects.
+
+    Shared by missing_subtitles and audio_language - both use Bazarr's
+    {name, code2, code3, forced, hi} shape (audio entries always have
+    forced=False, hi=False, matching SubtitleLanguage's defaults).
+
+    Args:
+        languages: List of language objects from Bazarr API, or None
 
     Returns:
         List of dictionaries with language details
@@ -296,7 +376,7 @@ def _build_missing_subtitles_list(missing_languages: list[Any] | None) -> list[d
             "forced": lang.forced,
             "hi": lang.hi,
         }
-        for lang in (missing_languages or [])
+        for lang in (languages or [])
     ]
 
 
@@ -310,6 +390,7 @@ async def _upsert_cache_entry(
     has_any_subs: bool,
     missing_subtitles: list[Any] | None,
     started_at: datetime,
+    audio_language: list[Any] | None = None,
 ) -> None:
     """Upsert a Bazarr cache entry (select-update/insert pattern).
 
@@ -323,11 +404,13 @@ async def _upsert_cache_entry(
         has_any_subs: Whether the item has any subtitles
         missing_subtitles: List of missing language objects
         started_at: Poll start time
+        audio_language: List of audio language objects, if known
     """
     result = await db.execute(select(BazarrCache).where(BazarrCache.id == cache_id))
     existing = result.scalar_one_or_none()
 
-    missing_subs_list = _build_missing_subtitles_list(missing_subtitles)
+    missing_subs_list = _build_language_list(missing_subtitles)
+    audio_lang_list = _build_language_list(audio_language)
 
     if existing:
         # Update existing record
@@ -335,6 +418,7 @@ async def _upsert_cache_entry(
         existing.media_path = media_path
         existing.has_any_subs = has_any_subs
         existing.missing_subtitles = missing_subs_list
+        existing.audio_language = audio_lang_list
         existing.last_polled = started_at
     else:
         # Insert new record
@@ -346,6 +430,7 @@ async def _upsert_cache_entry(
             media_path=media_path,
             has_any_subs=has_any_subs,
             missing_subtitles=missing_subs_list,
+            audio_language=audio_lang_list,
             last_polled=started_at,
             active_job_id=None,
         )
@@ -359,6 +444,7 @@ async def _process_movie(
     wanted_movie: Any,
     path_map: PathMap,
     started_at: datetime,
+    audio_language: list[Any] | None = None,
 ) -> None:
     """Process a single wanted movie.
 
@@ -367,6 +453,8 @@ async def _process_movie(
         wanted_movie: WantedMovie from Bazarr API
         path_map: PathMap for path translation
         started_at: Poll start time
+        audio_language: Audio languages for this movie, if known (the wanted
+            endpoint doesn't carry it; callers batch-fetch it separately)
     """
     # Translate sceneName to media_path if available
     media_path = wanted_movie.sceneName or ""
@@ -388,6 +476,7 @@ async def _process_movie(
         has_any_subs,
         wanted_movie.missing_subtitles,
         started_at,
+        audio_language,
     )
 
 
@@ -396,6 +485,7 @@ async def _process_episode(
     wanted_episode: Any,
     path_map: PathMap,
     started_at: datetime,
+    audio_language: list[Any] | None = None,
 ) -> None:
     """Process a single wanted episode.
 
@@ -404,6 +494,9 @@ async def _process_episode(
         wanted_episode: WantedEpisode from Bazarr API
         path_map: PathMap for path translation
         started_at: Poll start time
+        audio_language: Audio languages for this episode, if known (the
+            wanted endpoint doesn't carry it; callers batch-fetch it
+            separately)
     """
     # Translate sceneName to media_path if available
     media_path = wanted_episode.sceneName or ""
@@ -425,6 +518,7 @@ async def _process_episode(
         has_any_subs,
         wanted_episode.missing_subtitles,
         started_at,
+        audio_language,
     )
 
 
@@ -470,6 +564,7 @@ async def _poll_all_movies(
                         media_path=media_path,
                         has_any_subs=False,
                         missing_subtitles=[],  # Empty because we don't know what's missing
+                        audio_language=_build_language_list(movie.audio_language),
                         last_polled=started_at,
                         active_job_id=None,
                     )
@@ -522,6 +617,9 @@ async def _poll_all_episodes(
                             "ext_id": episode.sonarrEpisodeId,
                             "title": f"{series.title} - {episode.title}",
                             "media_path": media_path,
+                            "audio_language": _build_language_list(
+                                episode.audio_language
+                            ),
                         }
                     )
 
@@ -541,6 +639,7 @@ async def _poll_all_episodes(
                     media_path=entry["media_path"],
                     has_any_subs=False,
                     missing_subtitles=[],  # Empty because we don't know what's missing
+                    audio_language=entry["audio_language"],
                     last_polled=started_at,
                     active_job_id=None,
                 )

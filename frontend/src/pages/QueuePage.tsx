@@ -69,7 +69,8 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
           <div className="min-w-0">
             <p className="font-medium text-sm truncate">{jobTitle(job)}</p>
             <p className="text-xs text-muted-foreground">
-              {job.language_code ?? "—"} · {job.output_format.toUpperCase()}
+              {job.language_code ?? (job.language_mode === "auto" ? "Auto" : "—")} ·{" "}
+              {job.output_format.toUpperCase()}
             </p>
           </div>
           <div className="flex items-center gap-2 flex-none">

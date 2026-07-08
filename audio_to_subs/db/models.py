@@ -109,6 +109,15 @@ class Job(Base):
     media_path: Mapped[str] = mapped_column(Text, nullable=False)
     output_path: Mapped[str | None] = mapped_column(Text, nullable=True)
     language_code: Mapped[str | None] = mapped_column(String(10), nullable=True)
+    language_mode: Mapped[str] = mapped_column(
+        String(10), nullable=False, default="explicit"
+    )
+    mistral_detected_language: Mapped[str | None] = mapped_column(
+        String(10), nullable=True
+    )
+    needs_language_review: Mapped[bool] = mapped_column(
+        Boolean, nullable=False, default=False
+    )
     output_format: Mapped[OutputFormat] = mapped_column(
         String(20), nullable=False, default=OutputFormat.SRT
     )
@@ -234,6 +243,7 @@ class BazarrCache(Base):
     missing_subtitles: Mapped[list[dict[str, Any]]] = mapped_column(
         SQLiteJSON, default=[]
     )
+    audio_language: Mapped[list[dict[str, Any]]] = mapped_column(SQLiteJSON, default=[])
     last_polled: Mapped[datetime] = mapped_column(
         DateTime, nullable=False, default=func.now()
     )

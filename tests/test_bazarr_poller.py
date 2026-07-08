@@ -441,6 +441,80 @@ class TestProcessMovie:
         assert entry.title == "New Title"
         assert "/local/movies/NewTitle.mkv" in entry.media_path
 
+    @pytest.mark.asyncio
+    async def test_process_movie_stores_audio_language(self, mock_db_session):
+        """audio_language, when passed, is stored on the cache row - it's
+        never present on the wanted-movie object itself (Bazarr's wanted
+        endpoint doesn't carry it), so callers must fetch and pass it in."""
+
+        class MockAudioLanguage:
+            name = "French"
+            code2 = "fr"
+            code3 = "fre"
+            forced = False
+            hi = False
+
+        class MockWantedMovie:
+            title = "French Film"
+            radarrId = 321
+            sceneName = "/bazarr/movies/French Film.mkv"
+            missing_subtitles = []
+
+        mock_movie = MockWantedMovie()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(
+            mock_db_session,
+            mock_movie,
+            path_map,
+            started_at,
+            [MockAudioLanguage()],
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:321")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.audio_language == [
+            {
+                "name": "French",
+                "code2": "fr",
+                "code3": "fre",
+                "forced": False,
+                "hi": False,
+            }
+        ]
+
+    @pytest.mark.asyncio
+    async def test_process_movie_no_audio_language_defaults_to_empty(
+        self, mock_db_session
+    ):
+        """When Bazarr can't report an audio language, the cache stores []
+        (not None) - this is what drives the frontend's Auto-only dropdown."""
+
+        class MockWantedMovie:
+            title = "Unknown Audio Film"
+            radarrId = 322
+            sceneName = "/bazarr/movies/Unknown.mkv"
+            missing_subtitles = []
+
+        mock_movie = MockWantedMovie()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(mock_db_session, mock_movie, path_map, started_at)
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:322")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.audio_language == []
+
 
 class TestProcessEpisode:
     """Test _process_episode function."""
@@ -512,7 +586,56 @@ class TestProcessEpisode:
         entry = result.scalar_one_or_none()
 
         assert entry is not None
-        assert entry.has_any_subs is True  # Must be True when missing_subtitles is empty
+        assert (
+            entry.has_any_subs is True
+        )  # Must be True when missing_subtitles is empty
+
+    @pytest.mark.asyncio
+    async def test_process_episode_stores_audio_language(self, mock_db_session):
+        """audio_language, when passed, is stored on the cache row."""
+
+        class MockAudioLanguage:
+            name = "German"
+            code2 = "de"
+            code3 = "ger"
+            forced = False
+            hi = False
+
+        class MockWantedEpisode:
+            seriesTitle = "German Show"
+            episodeTitle = "Pilot"
+            sonarrEpisodeId = 1001
+            sonarrSeriesId = 2001
+            sceneName = "/bazarr/tv/German Show/Pilot.mkv"
+            missing_subtitles = []
+
+        mock_episode = MockWantedEpisode()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_episode(
+            mock_db_session,
+            mock_episode,
+            path_map,
+            started_at,
+            [MockAudioLanguage()],
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "episode:1001")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.audio_language == [
+            {
+                "name": "German",
+                "code2": "de",
+                "code3": "ger",
+                "forced": False,
+                "hi": False,
+            }
+        ]
 
 
 class TestDeleteStale:
@@ -1154,12 +1277,16 @@ class TestManualPolling:
             mock_db_session, mock_client, path_map, WantedItemType.ALL
         )
 
-        # Verify all API calls were made (wanted + all for track_no_subs)
+        # Verify all API calls were made (wanted + all for track_no_subs).
+        # list_all_movies/list_episodes are each called twice here: once to
+        # batch-fetch audio_language for the wanted items, and once more by
+        # the (independent) track_no_subs full-library scan - two distinct
+        # purposes, not a regression of the "bounded, not per-item" guarantee.
         mock_client.list_wanted_movies.assert_awaited_once()
         mock_client.list_wanted_episodes.assert_awaited_once()
-        mock_client.list_all_movies.assert_awaited_once()
+        assert mock_client.list_all_movies.await_count == 2
         mock_client.list_all_series.assert_awaited_once()
-        mock_client.list_episodes.assert_awaited_once()
+        assert mock_client.list_episodes.await_count == 2
 
         # Verify counts include both wanted and no-subs items
         assert movies_processed >= 1  # At least the wanted movie
@@ -1232,5 +1359,197 @@ class TestManualPolling:
         # Verify counts are accurate
         assert movies_processed == 3
         assert episodes_processed == 2
+
+
+class TestAudioLanguageEnrichment:
+    """Test that poll_bazarr_manually joins in audio_language from the
+    full-detail endpoints, bounded (one call per poll / per distinct series),
+    not one call per wanted item."""
+
+    @pytest.mark.asyncio
+    async def test_movies_audio_language_batched_and_joined(self, mock_db_session):
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.bazarr.schemas import (
+            Movie,
+            MoviesPage,
+            SubtitleLanguage,
+            WantedMovie,
+            WantedMoviesPage,
+        )
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=[
+                WantedMovie(title="Movie A", radarrId=1, sceneName="/a.mkv"),
+                WantedMovie(title="Movie B", radarrId=2, sceneName="/b.mkv"),
+            ],
+            total=2,
+        )
+        mock_client.list_wanted_episodes.return_value.data = []
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[
+                Movie(
+                    title="Movie A",
+                    radarrId=1,
+                    audio_language=[
+                        SubtitleLanguage(name="French", code2="fr", code3="fre")
+                    ],
+                ),
+                Movie(
+                    title="Movie B",
+                    radarrId=2,
+                    audio_language=[
+                        SubtitleLanguage(name="German", code2="de", code3="ger")
+                    ],
+                ),
+            ],
+            total=2,
+        )
+
+        path_map = PathMap()
+        await poll_bazarr_manually(mock_db_session, mock_client, path_map, "movie")
+
+        # Bounded: exactly one call for this poll, not one per movie.
+        mock_client.list_all_movies.assert_awaited_once_with(radarrid=[1, 2])
+
+        entry_a = (
+            await mock_db_session.execute(
+                select(BazarrCache).where(BazarrCache.id == "movie:1")
+            )
+        ).scalar_one()
+        entry_b = (
+            await mock_db_session.execute(
+                select(BazarrCache).where(BazarrCache.id == "movie:2")
+            )
+        ).scalar_one()
+        assert entry_a.audio_language[0]["code2"] == "fr"
+        assert entry_b.audio_language[0]["code2"] == "de"
+
+    @pytest.mark.asyncio
+    async def test_episodes_audio_language_batched_by_unique_series(
+        self, mock_db_session
+    ):
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.bazarr.schemas import (
+            Episode,
+            EpisodesPage,
+            SubtitleLanguage,
+            WantedEpisode,
+            WantedEpisodesPage,
+        )
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_wanted_movies.return_value.data = []
+        # Three wanted episodes across only two distinct series.
+        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+            data=[
+                WantedEpisode(
+                    seriesTitle="Series 1",
+                    episode_number="S01E01",
+                    episodeTitle="Ep1",
+                    sonarrSeriesId=10,
+                    sonarrEpisodeId=101,
+                ),
+                WantedEpisode(
+                    seriesTitle="Series 1",
+                    episode_number="S01E02",
+                    episodeTitle="Ep2",
+                    sonarrSeriesId=10,
+                    sonarrEpisodeId=102,
+                ),
+                WantedEpisode(
+                    seriesTitle="Series 2",
+                    episode_number="S01E01",
+                    episodeTitle="Ep1",
+                    sonarrSeriesId=20,
+                    sonarrEpisodeId=201,
+                ),
+            ],
+            total=3,
+        )
+
+        def list_episodes_side_effect(*, seriesid):
+            if seriesid == 10:
+                return EpisodesPage(
+                    data=[
+                        Episode(
+                            sonarrEpisodeId=101,
+                            sonarrSeriesId=10,
+                            title="Ep1",
+                            audio_language=[
+                                SubtitleLanguage(name="English", code2="en")
+                            ],
+                        ),
+                        Episode(
+                            sonarrEpisodeId=102,
+                            sonarrSeriesId=10,
+                            title="Ep2",
+                            audio_language=[
+                                SubtitleLanguage(name="English", code2="en")
+                            ],
+                        ),
+                    ]
+                )
+            return EpisodesPage(
+                data=[
+                    Episode(
+                        sonarrEpisodeId=201,
+                        sonarrSeriesId=20,
+                        title="Ep1",
+                        audio_language=[SubtitleLanguage(name="Spanish", code2="es")],
+                    ),
+                ]
+            )
+
+        mock_client.list_episodes.side_effect = list_episodes_side_effect
+
+        path_map = PathMap()
+        await poll_bazarr_manually(mock_db_session, mock_client, path_map, "episode")
+
+        # Bounded by distinct series (2), not by wanted-episode count (3).
+        assert mock_client.list_episodes.await_count == 2
+
+        entry_101 = (
+            await mock_db_session.execute(
+                select(BazarrCache).where(BazarrCache.id == "episode:101")
+            )
+        ).scalar_one()
+        entry_201 = (
+            await mock_db_session.execute(
+                select(BazarrCache).where(BazarrCache.id == "episode:201")
+            )
+        ).scalar_one()
+        assert entry_101.audio_language[0]["code2"] == "en"
+        assert entry_201.audio_language[0]["code2"] == "es"
+
+    @pytest.mark.asyncio
+    async def test_audio_language_fetch_failure_degrades_gracefully(
+        self, mock_db_session
+    ):
+        """If the enrichment call fails, the poll must still succeed - items
+        just end up with an empty audio_language (Auto-only in the UI)."""
+        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.bazarr.schemas import WantedMovie, WantedMoviesPage
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
+            data=[WantedMovie(title="Movie A", radarrId=1, sceneName="/a.mkv")],
+            total=1,
+        )
+        mock_client.list_wanted_episodes.return_value.data = []
+        mock_client.list_all_movies.side_effect = Exception("Bazarr unreachable")
+
+        path_map = PathMap()
+        movies_processed, _ = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, "movie"
+        )
+
+        assert movies_processed == 1
+        entry = (
+            await mock_db_session.execute(
+                select(BazarrCache).where(BazarrCache.id == "movie:1")
+            )
+        ).scalar_one()
+        assert entry.audio_language == []
 
         await mock_client.close()

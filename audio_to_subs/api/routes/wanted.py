@@ -41,6 +41,10 @@ class WantedItem(BaseModel):
     missing_subtitles: list[dict] = Field(
         default_factory=list, description="List of missing subtitles"
     )
+    audio_language: list[dict] = Field(
+        default_factory=list,
+        description="Audio languages Bazarr reports for this item",
+    )
     last_polled: datetime = Field(description="When this item was last polled")
     active_job_id: str | None = Field(
         default=None, description="ID of active job for this item"
@@ -127,6 +131,7 @@ def _to_wanted_item(
         media_path=item.media_path,
         has_any_subs=item.has_any_subs,
         missing_subtitles=item.missing_subtitles,
+        audio_language=item.audio_language,
         last_polled=item.last_polled,
         active_job_id=str(item.active_job_id) if item.active_job_id else None,
         active_job_status=active_job_status,

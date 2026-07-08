@@ -53,6 +53,7 @@ class TranscriptionClient:
         self.language = language
         self.progress_callback = progress_callback
         self._last_usage: dict[str, Any] | None = None
+        self._last_detected_language: str | None = None
         logger.debug(
             f"TranscriptionClient initialized: model={model}, language={language}"
         )
@@ -114,6 +115,10 @@ class TranscriptionClient:
                 self._last_usage = usage_obj.model_dump()
             elif isinstance(usage_obj, dict):
                 self._last_usage = usage_obj.copy()
+
+    def _capture_language(self, response: Any) -> None:
+        """Store Mistral's detected audio language, if the response reports one."""
+        self._last_detected_language = getattr(response, "language", None)
 
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(3),
@@ -275,6 +280,7 @@ class TranscriptionClient:
             )
             logger.debug(f"Transcription response type: {type(response)}")
             self._capture_usage(response)
+            self._capture_language(response)
 
             segments = []
             if hasattr(response, "segments"):
