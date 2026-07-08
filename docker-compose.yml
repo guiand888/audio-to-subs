@@ -59,7 +59,7 @@ services:
     user: "1000:1000"
 
   redis:
-    image: redis:8-alpine
+    image: docker.io/library/redis:8-alpine
     container_name: audio-to-subs-redis
     ports:
       - "6379:6379"
