@@ -107,4 +107,4 @@ frontend-preview:  ## Serve the built frontend with stubbed auth (DEV ONLY — n
 	podman run --rm -p 8080:80 \
 		-v ./frontend/dist:/usr/share/nginx/html:ro,Z \
 		-v ./frontend/nginx.preview.conf:/etc/nginx/conf.d/default.conf:ro,Z \
-		nginx:1.30-alpine
+		docker.io/library/nginx:1.30-alpine
