@@ -1,5 +1,5 @@
 import { useState } from "react"
-import { Check, Loader2 } from "lucide-react"
+import { Check, Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -54,6 +54,10 @@ export function BazarrSettingsForm({
   const [testConnectionStatus, setTestConnectionStatus] = useState<
     "idle" | "testing" | "success" | "error"
   >("idle")
+  // Toggles visibility of whatever is currently in the box (freshly typed
+  // text, or the "***MASKED***" placeholder) - it cannot recover an
+  // already-saved key, by design; see sanitized() in api/routes/settings.py.
+  const [showApiKey, setShowApiKey] = useState(false)
 
   const handleNumberChange = (field: keyof SettingsPatch) => (e: React.ChangeEvent<HTMLInputElement>) => {
     const value = e.target.value
@@ -139,13 +143,30 @@ export function BazarrSettingsForm({
 
       <div className="space-y-2">
         <Label htmlFor="bazarr-api-key">API Key</Label>
-        <Input
-          id="bazarr-api-key"
-          type="password"
-          placeholder="Enter your Bazarr API key"
-          value={formData.bazarr_api_key ?? ""}
-          onChange={(e) => onChange({ bazarr_api_key: e.target.value })}
-        />
+        <div className="relative">
+          <Input
+            id="bazarr-api-key"
+            type={showApiKey ? "text" : "password"}
+            placeholder="Enter your Bazarr API key"
+            value={formData.bazarr_api_key ?? ""}
+            onChange={(e) => onChange({ bazarr_api_key: e.target.value })}
+            className="pr-9"
+          />
+          <Button
+            type="button"
+            variant="ghost"
+            size="icon"
+            className="absolute right-0 top-0 h-9 w-9 text-muted-foreground hover:text-foreground"
+            onClick={() => setShowApiKey((v) => !v)}
+            aria-label={showApiKey ? "Hide API key" : "Show API key"}
+          >
+            {showApiKey ? (
+              <EyeOff className="h-4 w-4" />
+            ) : (
+              <Eye className="h-4 w-4" />
+            )}
+          </Button>
+        </div>
         <p className="text-sm text-muted-foreground">
           Bazarr API key for authentication
         </p>

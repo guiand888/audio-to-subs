@@ -107,7 +107,16 @@ class SettingsResponse(BaseModel):
         return self.model_dump()
 
     def sanitized(self) -> "SettingsResponse":
-        """Return a copy with sensitive fields masked for API responses."""
+        """Return a copy with sensitive fields masked for API responses.
+
+        bazarr_api_key is intentionally write-only once set: it is never
+        returned in cleartext by any endpoint (GET, PATCH, or GET /{key}),
+        so anyone with UI/API access after the fact - not just at save time -
+        cannot exfiltrate it. There is no "reveal saved key" endpoint and
+        none should be added without deliberate security sign-off; the
+        frontend reveal toggle only shows what's currently typed, not the
+        saved value.
+        """
         copy = self.model_copy()
         # Mask API keys - return only if they were not set
         if copy.bazarr_api_key:

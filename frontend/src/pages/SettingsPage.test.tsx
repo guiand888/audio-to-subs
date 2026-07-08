@@ -329,6 +329,50 @@ describe("SettingsPage - Save Settings change tracking", () => {
   })
 })
 
+describe("SettingsPage - API Key reveal toggle", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.patch).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.post).mockResolvedValue(MOCK_CONNECTION_SUCCESS)
+  })
+
+  it("starts masked and toggles to plain text and back without changing the value", async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />, { wrapper })
+
+    const apiKeyInput = await screen.findByLabelText(/^API Key$/i)
+    await waitFor(() => {
+      expect(apiKeyInput).toHaveValue("test-api-key")
+    })
+    expect(apiKeyInput).toHaveAttribute("type", "password")
+
+    await user.click(screen.getByRole("button", { name: /show api key/i }))
+
+    expect(apiKeyInput).toHaveAttribute("type", "text")
+    expect(apiKeyInput).toHaveValue("test-api-key")
+
+    await user.click(screen.getByRole("button", { name: /hide api key/i }))
+
+    expect(apiKeyInput).toHaveAttribute("type", "password")
+    expect(apiKeyInput).toHaveValue("test-api-key")
+  })
+
+  it("reveals a freshly typed value without truncating or mutating it", async () => {
+    const user = userEvent.setup()
+    render(<SettingsPage />, { wrapper })
+
+    const apiKeyInput = await screen.findByLabelText(/^API Key$/i)
+    await user.clear(apiKeyInput)
+    await user.type(apiKeyInput, "sk-freshly-typed-key")
+
+    await user.click(screen.getByRole("button", { name: /show api key/i }))
+
+    expect(apiKeyInput).toHaveAttribute("type", "text")
+    expect(apiKeyInput).toHaveValue("sk-freshly-typed-key")
+  })
+})
+
 describe("SettingsPage - Test Connection error UX", () => {
   beforeEach(() => {
     vi.clearAllMocks()
