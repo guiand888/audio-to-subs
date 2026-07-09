@@ -88,6 +88,7 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
       - REDIS_URL=redis://redis:6379/0
       - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
+      - SESSION_SECRET_FILE=/data/session_secret
       - ADMIN_USERNAME=admin
       - ADMIN_PASSWORD=admin
       - DEBUG=true
