@@ -1,7 +1,7 @@
 """Tests for queue_/claim.py module."""
 
 from unittest.mock import AsyncMock, MagicMock
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 import pytest
 
@@ -13,7 +13,7 @@ class TestClaimedJob:
 
     def test_creation(self) -> None:
         """Test creating a ClaimedJob."""
-        job_id = uuid4()
+        job_id = str(uuid4())
         claimed = ClaimedJob(
             id=job_id,
             media_path="/input/video.mp4",
@@ -60,9 +60,11 @@ class TestClaimOne:
         result = await claim_one(mock_session, "worker-1")
 
         assert result is not None
-        # claim_one wraps the raw string from the DB in UUID()
-        assert isinstance(result.id, UUID)
-        assert str(result.id) == job_id
+        # claim_one returns the job id as a plain string matching Job.id's
+        # String(36) column; passing a UUID to session.get(Job, ...) breaks
+        # aiosqlite binding, so it must stay a str.
+        assert isinstance(result.id, str)
+        assert result.id == job_id
         assert result.media_path == "/input/video.mp4"
         assert result.language_mode == "explicit"
         assert mock_session.commit.called

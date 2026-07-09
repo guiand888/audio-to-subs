@@ -10,7 +10,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -71,7 +70,7 @@ class JobResult:
 
 async def persist_result(
     session: "AsyncSession",
-    job_id: UUID,
+    job_id: str,
     result: JobResult,
 ) -> None:
     """Persist job result to database."""
@@ -110,7 +109,7 @@ async def persist_result(
 
 async def persist_log(
     session: "AsyncSession",
-    job_id: UUID,
+    job_id: str,
     level: LogLevel,
     message: str,
 ) -> None:
@@ -355,7 +354,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
 async def _rescan_bazarr_movie(
     deps: WorkerDeps,
     source_ref: str | None,
-    job_id: UUID,
+    job_id: str,
 ) -> None:
     """Trigger rescan for a Bazarr movie.
 
@@ -405,7 +404,7 @@ async def _rescan_bazarr_movie(
 async def _rescan_bazarr_episode(
     deps: WorkerDeps,
     source_ref: str | None,
-    job_id: UUID,
+    job_id: str,
 ) -> None:
     """Trigger rescan for a Bazarr episode.
 

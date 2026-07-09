@@ -6,7 +6,6 @@ transaction. This ensures safe concurrent access from multiple workers.
 
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
-from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -20,7 +19,7 @@ class ClaimedJob:
     """A job that has been claimed by a worker.
 
     Attributes:
-        id: Unique job identifier
+        id: Unique job identifier (string, matching Job.id's String(36) column)
         media_path: Path to the media file to process
         output_path: Path where output subtitles should be written
         language_code: Optional language code for transcription
@@ -31,7 +30,7 @@ class ClaimedJob:
         source_ref: Optional reference to external source (e.g., Bazarr ID)
     """
 
-    id: UUID
+    id: str
     media_path: str
     output_path: str
     language_code: Optional[str]
@@ -105,7 +104,7 @@ async def claim_one(
         await session.commit()
 
         return ClaimedJob(
-            id=UUID(row[0]),
+            id=str(row[0]),
             media_path=row[1],
             output_path=row[2] if row[2] else "",
             language_code=row[3],

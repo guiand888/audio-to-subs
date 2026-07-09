@@ -12,7 +12,6 @@ import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
-from uuid import UUID
 
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
@@ -42,14 +41,14 @@ class ProgressBridge:
     Attributes:
         database_url: Database connection URL for per-write sessions
         redis: Redis async client
-        job_id: UUID of the job being processed
+        job_id: String job id of the job being processed
         token: Cancellation token for the job
         loop: Event loop for scheduling async operations
     """
 
     database_url: str
     redis: "Redis"
-    job_id: UUID
+    job_id: str
     token: CancelToken
     loop: "asyncio.AbstractEventLoop"
 

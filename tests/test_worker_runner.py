@@ -132,7 +132,7 @@ class TestPersistResult:
     async def test_persist_result_nonexistent_job_does_not_raise(self, mock_db_session):
         """Updating a job id that doesn't exist should be a no-op, not an error."""
         result = JobResult(status=JobStatus.DONE)
-        await persist_result(mock_db_session, uuid4(), result)
+        await persist_result(mock_db_session, str(uuid4()), result)
 
     @pytest.mark.asyncio
     async def test_persist_result_auto_mode_uses_detected_language(
