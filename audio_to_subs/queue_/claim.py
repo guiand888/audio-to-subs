@@ -4,6 +4,7 @@ Provides atomic job claiming using SQLite RETURNING clause with BEGIN IMMEDIATE
 transaction. This ensures safe concurrent access from multiple workers.
 """
 
+import logging
 from dataclasses import dataclass
 from typing import TYPE_CHECKING, Optional
 from uuid import UUID
@@ -13,6 +14,8 @@ from sqlalchemy.exc import IntegrityError
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
+
+logger = logging.getLogger(__name__)
 
 
 @dataclass
@@ -115,10 +118,12 @@ async def claim_one(
             source_ref=row[7],
         )
 
-    except IntegrityError:
+    except IntegrityError as e:
         # Handle any integrity errors
+        logger.warning("Job claim conflict for worker %s: %s", worker_id, e)
         await session.rollback()
         return None
     except Exception:
+        logger.exception("Unexpected error claiming job for worker %s", worker_id)
         await session.rollback()
         raise

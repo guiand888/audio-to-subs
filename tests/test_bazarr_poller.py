@@ -1295,10 +1295,15 @@ class TestManualPolling:
         await mock_client.close()
 
     @pytest.mark.asyncio
-    async def test_manual_poll_handles_client_error(self, mock_db_session):
+    async def test_manual_poll_handles_client_error(
+        self, mock_db_session, sync_session
+    ):
         """Test manual polling propagates Bazarr client errors instead of masking them as success."""
+        from sqlalchemy import select
+
         from audio_to_subs.bazarr.client import BazarrServerError
         from audio_to_subs.bazarr.poller import poll_bazarr_manually
+        from audio_to_subs.db.models import JobLog, LogLevel
 
         # Create mock client that raises error
         mock_client = AsyncMock(spec=BazarrClient)
@@ -1313,9 +1318,18 @@ class TestManualPolling:
 
         await mock_client.close()
 
+        # The failure must also be visible in the UI's activity log, not just
+        # propagated as an exception.
+        log = sync_session.execute(select(JobLog)).scalar_one()
+        assert log.job_id is None
+        assert log.level == LogLevel.ERROR
+        assert "Bazarr sync failed" in log.message
+
     @pytest.mark.asyncio
-    async def test_manual_poll_returns_counts(self, mock_db_session):
+    async def test_manual_poll_returns_counts(self, mock_db_session, sync_session):
         """Test manual polling returns accurate counts."""
+        from sqlalchemy import select
+
         from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.schemas import (
             WantedEpisode,
@@ -1323,6 +1337,7 @@ class TestManualPolling:
             WantedMovie,
             WantedMoviesPage,
         )
+        from audio_to_subs.db.models import JobLog, LogLevel
 
         # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
@@ -1359,6 +1374,14 @@ class TestManualPolling:
         # Verify counts are accurate
         assert movies_processed == 3
         assert episodes_processed == 2
+
+        # A successful sync must also be visible in the UI's activity log,
+        # with the counts in the message.
+        log = sync_session.execute(select(JobLog)).scalar_one()
+        assert log.job_id is None
+        assert log.level == LogLevel.INFO
+        assert "3 movies" in log.message
+        assert "2 episodes" in log.message
 
 
 class TestAudioLanguageEnrichment:

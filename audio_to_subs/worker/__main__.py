@@ -26,6 +26,7 @@ from typing import Any
 from redis.asyncio import Redis
 
 from audio_to_subs.api.settings import Settings, get_settings
+from audio_to_subs.core.logging_config import configure_logging_from_env
 from audio_to_subs.db.session import get_async_session
 from audio_to_subs.queue_.claim import ClaimedJob, claim_one
 from audio_to_subs.queue_.reaper import reap_stale_running
@@ -134,7 +135,7 @@ class Worker:
                 )
 
             except Exception as e:
-                logger.error(f"Worker {self._worker_id} error: {e}")
+                logger.exception(f"Worker {self._worker_id} error")
                 # If we claimed a job but it failed during setup or execution,
                 # mark it as failed (D15 fix: don't let the outer loop die).
                 if claimed is not None:
@@ -188,11 +189,7 @@ def handle_shutdown(worker: Worker) -> None:
 
 async def main() -> None:
     """Worker entry point."""
-    # Configure logging
-    logging.basicConfig(
-        level=logging.INFO,
-        format="%(asctime)s - %(name)s - %(levelname)s - %(message)s",
-    )
+    configure_logging_from_env()
 
     worker = Worker()
     handle_shutdown(worker)
@@ -201,8 +198,8 @@ async def main() -> None:
         await worker.run()
     except KeyboardInterrupt:
         pass
-    except Exception as e:
-        logger.error(f"Fatal error: {e}")
+    except Exception:
+        logger.exception("Fatal error")
         raise
 
 

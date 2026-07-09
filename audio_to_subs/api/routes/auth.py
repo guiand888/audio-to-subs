@@ -1,5 +1,6 @@
 """Authentication routes."""
 
+import logging
 from datetime import datetime, timezone
 from typing import Annotated, Any
 
@@ -14,7 +15,10 @@ from audio_to_subs.auth.sessions import (
     SessionManager,
     set_session_cookie,
 )
-from audio_to_subs.db.models import User
+from audio_to_subs.db.job_logs import write_job_log
+from audio_to_subs.db.models import LogLevel, User
+
+logger = logging.getLogger(__name__)
 
 # Precomputed hash for a password that will never match, used to keep the
 # login endpoint's timing constant when the username doesn't exist — otherwise
@@ -73,6 +77,12 @@ async def login(
     password_ok = verify_password(login_request.password, password_hash)
 
     if user is None or not password_ok:
+        logger.warning("Failed login attempt for username %r", login_request.username)
+        await write_job_log(
+            db,
+            LogLevel.WARNING,
+            f"Failed login attempt for username '{login_request.username}'",
+        )
         raise HTTPException(
             status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid username or password",
@@ -85,6 +95,9 @@ async def login(
     # Create session
     token = session_manager.create_session(user.id)
     set_session_cookie(response, token, secure=settings.BEHIND_TLS)
+
+    logger.info("User '%s' logged in", user.username)
+    await write_job_log(db, LogLevel.INFO, f"User '{user.username}' logged in")
 
     return LoginResponse(user=UserOut(id=user.id, username=user.username))
 

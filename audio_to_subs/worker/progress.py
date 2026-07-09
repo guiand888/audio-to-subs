@@ -117,8 +117,8 @@ class ProgressBridge:
                 await self._write_job_log(stage, message)
                 self._last_stage = stage
 
-        except Exception as e:
-            logger.error(f"Error handling progress event for job {self.job_id}: {e}")
+        except Exception:
+            logger.exception(f"Error handling progress event for job {self.job_id}")
             # Don't raise - progress updates should never break the job
 
     async def _update_job_progress(
@@ -151,8 +151,8 @@ class ProgressBridge:
                 logger.warning(
                     f"Integrity error updating progress for job {self.job_id}"
                 )
-            except Exception as e:
-                logger.error(f"Failed to update progress for job {self.job_id}: {e}")
+            except Exception:
+                logger.exception(f"Failed to update progress for job {self.job_id}")
 
     async def _write_job_log(self, stage: str, message: str) -> None:
         """Write a log entry for stage transition using a per-write session."""
@@ -167,8 +167,8 @@ class ProgressBridge:
                     )
                     session.add(log_entry)
                     await session.commit()
-            except Exception as e:
-                logger.error(f"Failed to write job log for job {self.job_id}: {e}")
+            except Exception:
+                logger.exception(f"Failed to write job log for job {self.job_id}")
 
     async def close(self) -> None:
         """Clean up resources."""

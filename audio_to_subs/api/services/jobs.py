@@ -10,11 +10,13 @@ from sqlalchemy import select
 
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
+from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import (
     BazarrCache,
     Job,
     JobSource,
     JobStatus,
+    LogLevel,
     OutputFormat,
     Setting,
 )
@@ -307,5 +309,12 @@ async def create_job_service(
     db.add(job)
     await db.commit()
     await db.refresh(job)
+
+    await write_job_log(
+        db,
+        LogLevel.INFO,
+        f"Job created: source={source.value}, media_path={resolved_media_path}",
+        job_id=job.id,
+    )
 
     return job

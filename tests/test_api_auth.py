@@ -1,5 +1,9 @@
 """Tests for auth API routes."""
 
+from sqlalchemy import select
+
+from audio_to_subs.db.models import JobLog, LogLevel
+
 
 class TestHealthz:
     """Test health check endpoint."""
@@ -44,6 +48,36 @@ class TestLogin:
         )
 
         assert response.status_code == 401
+
+    def test_login_success_writes_info_job_log(self, api_client, sync_session):
+        """A successful login is recorded in the UI's activity log."""
+        response = api_client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "test-secure-password-12345"},
+        )
+        assert response.status_code == 200
+
+        log = sync_session.execute(select(JobLog)).scalar_one()
+        assert log.job_id is None
+        assert log.level == LogLevel.INFO
+        assert "admin" in log.message
+        assert "logged in" in log.message
+
+    def test_login_failure_writes_warning_job_log_without_password(
+        self, api_client, sync_session
+    ):
+        """A failed login is recorded, but the password is never persisted."""
+        response = api_client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "wrongpassword"},
+        )
+        assert response.status_code == 401
+
+        log = sync_session.execute(select(JobLog)).scalar_one()
+        assert log.job_id is None
+        assert log.level == LogLevel.WARNING
+        assert "admin" in log.message
+        assert "wrongpassword" not in log.message
 
 
 class TestMe:

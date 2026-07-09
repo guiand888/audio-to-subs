@@ -23,7 +23,8 @@ from audio_to_subs.core.models import (
 )
 from audio_to_subs.core.path_utils import generate_output_path
 from audio_to_subs.core.pipeline import Pipeline, PipelineResult
-from audio_to_subs.db.models import Job, JobLog, JobStatus, LogLevel, Setting
+from audio_to_subs.db.job_logs import write_job_log as persist_log
+from audio_to_subs.db.models import Job, JobStatus, LogLevel, Setting
 from audio_to_subs.queue_.claim import ClaimedJob
 from audio_to_subs.queue_.events import publish_done
 from audio_to_subs.worker.progress import ProgressBridge
@@ -106,27 +107,6 @@ async def persist_result(
     except Exception as e:
         await session.rollback()
         logger.error(f"Failed to persist result for job {job_id}: {e}")
-
-
-async def persist_log(
-    session: "AsyncSession",
-    job_id: UUID,
-    level: LogLevel,
-    message: str,
-) -> None:
-    """Write a log entry to the database."""
-    try:
-        log_entry = JobLog(
-            job_id=str(job_id),
-            ts=datetime.now(timezone.utc),
-            level=level,
-            message=message,
-        )
-        session.add(log_entry)
-        await session.commit()
-    except Exception as e:
-        await session.rollback()
-        logger.error(f"Failed to write log for job {job_id}: {e}")
 
 
 async def _get_db_settings(session: "AsyncSession") -> dict[str, Any]:
@@ -299,9 +279,9 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
             # Log but don't fail the job - this is best-effort
             await persist_log(
                 deps.session,
-                job_id,
                 LogLevel.WARNING,
                 f"Bazarr rescan failed: {str(e)}",
+                job_id=job_id,
             )
 
         # Publish done event
@@ -330,14 +310,14 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         )
 
     except Exception as e:
-        logger.error(f"Job {job_id} failed: {e}")
+        logger.exception(f"Job {job_id} failed")
 
         # Log the error
         await persist_log(
             deps.session,
-            job_id,
             LogLevel.ERROR,
             f"Job failed: {str(e)}",
+            job_id=job_id,
         )
 
         # Publish failed event
