@@ -159,7 +159,11 @@ async def _calculate_stats(
     if conditions:
         base_where = and_(base_where, and_(*conditions))
 
-    # Get total count, sum of costs, sum of audio length, and sum of runtime
+    # Get total count, sum of costs, sum of audio length, and sum of runtime.
+    # ``costed_jobs`` counts only jobs that actually incurred a cost (the
+    # worker sets estimated_cost_usd solely on success, so FAILED/CANCELLED
+    # jobs are NULL and excluded). Using a filtered aggregate keeps it in the
+    # same single query and stays symmetric with SUM (which ignores NULLs).
     totals_query = select(
         func.count(Job.id).label("total_jobs"),
         func.sum(Job.estimated_cost_usd).label("total_cost_usd"),
@@ -168,6 +172,9 @@ async def _calculate_stats(
             (func.julianday(Job.finished_at) - func.julianday(Job.started_at))
             * 86400.0
         ).label("total_runtime_seconds"),
+        func.count(Job.id)
+        .filter(Job.estimated_cost_usd.isnot(None))
+        .label("costed_jobs"),
     ).where(base_where)
 
     totals_result = await db.execute(totals_query)
@@ -176,6 +183,7 @@ async def _calculate_stats(
     total_cost = float(totals_row.total_cost_usd or 0.0)
     total_audio_length = float(totals_row.total_audio_length_seconds or 0.0)
     total_runtime = float(totals_row.total_runtime_seconds or 0.0)
+    costed_jobs = totals_row.costed_jobs or 0
 
     if total_jobs == 0:
         return HistoryStats(
@@ -239,7 +247,7 @@ async def _calculate_stats(
         total_cost_usd=round(total_cost, 4),
         total_audio_length_seconds=round(total_audio_length, 2),
         total_runtime_seconds=round(total_runtime, 2),
-        average_cost_usd=round(total_cost / total_jobs, 4) if total_jobs > 0 else 0.0,
+        average_cost_usd=round(total_cost / costed_jobs, 4) if costed_jobs > 0 else 0.0,
         average_audio_length_seconds=(
             round(total_audio_length / total_jobs, 2) if total_jobs > 0 else 0.0
         ),
