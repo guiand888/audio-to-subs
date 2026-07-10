@@ -57,6 +57,95 @@ def test_get_history_with_done_jobs(authenticated_client, sync_session):
     assert data["stats"]["count_by_language"]["fr"] == 1
 
 
+def test_history_avg_cost_excludes_no_cost_jobs(authenticated_client, sync_session):
+    """Avg Cost/Job divides by jobs that incurred a cost, not all jobs.
+
+    FAILED and CANCELLED jobs never have ``estimated_cost_usd`` set
+    (the worker only computes cost on success), so they must be excluded
+    from the denominator. Otherwise the average is artificially diluted.
+    """
+    done_low = Job(
+        id=str(uuid4()),
+        status=JobStatus.DONE,
+        source=JobSource.MANUAL,
+        media_path="/test/d1.mp4",
+        audio_duration_seconds=60.0,
+        estimated_cost_usd=0.50,
+        language_code="en",
+    )
+    done_high = Job(
+        id=str(uuid4()),
+        status=JobStatus.DONE,
+        source=JobSource.MANUAL,
+        media_path="/test/d2.mp4",
+        audio_duration_seconds=120.0,
+        estimated_cost_usd=0.75,
+        language_code="en",
+    )
+    failed_job = Job(
+        id=str(uuid4()),
+        status=JobStatus.FAILED,
+        source=JobSource.MANUAL,
+        media_path="/test/f1.mp4",
+    )
+    cancelled_job = Job(
+        id=str(uuid4()),
+        status=JobStatus.CANCELLED,
+        source=JobSource.MANUAL,
+        media_path="/test/c1.mp4",
+    )
+    sync_session.add_all([done_low, done_high, failed_job, cancelled_job])
+    sync_session.commit()
+
+    response = authenticated_client.get("/api/history")
+    assert response.status_code == 200
+    data = response.json()
+
+    assert data["stats"]["total_jobs"] == 4
+    assert data["stats"]["total_cost_usd"] == pytest.approx(1.25, abs=0.001)
+    # Average is over the 2 costed jobs (0.50 + 0.75) / 2, NOT 1.25 / 4.
+    assert data["stats"]["average_cost_usd"] == pytest.approx(0.625, abs=0.001)
+
+
+def test_history_avg_cost_includes_zero_cost_jobs(authenticated_client, sync_session):
+    """A completed job whose cost computed to $0 is counted in the average.
+
+    The denominator uses ``estimated_cost_usd IS NOT NULL``, so a legitimately
+    free job (e.g. rate configured to 0) is included among costed jobs.
+    """
+    paid = Job(
+        id=str(uuid4()),
+        status=JobStatus.DONE,
+        source=JobSource.MANUAL,
+        media_path="/test/p1.mp4",
+        audio_duration_seconds=60.0,
+        estimated_cost_usd=0.50,
+    )
+    free = Job(
+        id=str(uuid4()),
+        status=JobStatus.DONE,
+        source=JobSource.MANUAL,
+        media_path="/test/p2.mp4",
+        audio_duration_seconds=60.0,
+        estimated_cost_usd=0.00,
+    )
+    no_cost = Job(
+        id=str(uuid4()),
+        status=JobStatus.FAILED,
+        source=JobSource.MANUAL,
+        media_path="/test/p3.mp4",
+    )
+    sync_session.add_all([paid, free, no_cost])
+    sync_session.commit()
+
+    data = authenticated_client.get("/api/history").json()
+
+    assert data["stats"]["total_jobs"] == 3
+    assert data["stats"]["total_cost_usd"] == pytest.approx(0.50, abs=0.001)
+    # Average over the 2 costed jobs (paid + free), NOT over 3 total jobs.
+    assert data["stats"]["average_cost_usd"] == pytest.approx(0.25, abs=0.001)
+
+
 def test_get_history_filters_by_status(authenticated_client, sync_session):
     """GET /api/history can be filtered by status."""
     sync_session.add_all(
