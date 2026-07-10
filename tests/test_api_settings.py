@@ -1,5 +1,7 @@
 """Tests for API settings endpoints."""
 
+import pytest
+
 
 def test_get_settings_empty_db(authenticated_client):
     """GET /api/settings returns default settings on a fresh database."""
@@ -175,6 +177,74 @@ class TestSettingsUpdateModel:
         assert data["bazarr_url"] == "http://test-bazarr:6767"
         assert data["bazarr_api_key"] == "test-api-key"
         assert data["bazarr_timeout"] == 60.0
+
+
+class TestTimezoneSetting:
+    """Tests for the user-configurable timezone setting."""
+
+    def test_timezone_in_defaults(self):
+        """timezone is part of DEFAULT_SETTINGS with a UTC default."""
+        from audio_to_subs.api.routes.settings import DEFAULT_SETTINGS
+
+        assert "timezone" in DEFAULT_SETTINGS
+        assert DEFAULT_SETTINGS["timezone"] == "UTC"
+
+    def test_settings_response_includes_timezone(self):
+        """SettingsResponse exposes a timezone field."""
+        from audio_to_subs.api.routes.settings import SettingsResponse
+
+        response = SettingsResponse.from_db_settings({})
+        assert hasattr(response, "timezone")
+        assert response.timezone == "UTC"
+
+    def test_settings_response_merges_timezone(self):
+        """SettingsResponse merges a DB-stored timezone over the default."""
+        from audio_to_subs.api.routes.settings import SettingsResponse
+
+        response = SettingsResponse.from_db_settings({"timezone": "Europe/Paris"})
+        assert response.timezone == "Europe/Paris"
+
+    def test_settings_update_accepts_valid_timezone(self):
+        """SettingsUpdate accepts a valid IANA timezone string."""
+        from audio_to_subs.api.routes.settings import SettingsUpdate
+
+        update = SettingsUpdate(timezone="America/New_York")
+        data = update.model_dump(exclude_unset=True)
+        assert data["timezone"] == "America/New_York"
+
+    def test_settings_update_rejects_invalid_timezone(self):
+        """SettingsUpdate rejects a non-existent IANA timezone (422)."""
+        from pydantic import ValidationError
+
+        from audio_to_subs.api.routes.settings import SettingsUpdate
+
+        with pytest.raises(ValidationError):
+            SettingsUpdate(timezone="Not/A/Real_Zone")
+
+    def test_get_settings_returns_timezone(self, authenticated_client):
+        """GET /api/settings returns the timezone field with its default."""
+        response = authenticated_client.get("/api/settings")
+        assert response.status_code == 200
+        assert response.json()["timezone"] == "UTC"
+
+    def test_patch_settings_persists_timezone(self, authenticated_client):
+        """PATCH /api/settings persists and round-trips the timezone."""
+        response = authenticated_client.patch(
+            "/api/settings", json={"timezone": "Europe/Paris"}
+        )
+        assert response.status_code == 200
+        assert response.json()["timezone"] == "Europe/Paris"
+
+        # Re-read to confirm persistence
+        response = authenticated_client.get("/api/settings")
+        assert response.json()["timezone"] == "Europe/Paris"
+
+    def test_patch_settings_rejects_invalid_timezone(self, authenticated_client):
+        """PATCH /api/settings with an invalid timezone returns 422."""
+        response = authenticated_client.patch(
+            "/api/settings", json={"timezone": "Bogus/Zone"}
+        )
+        assert response.status_code == 422
 
 
 # ---------------------------------------------------------------------------
@@ -467,9 +537,7 @@ class TestBazarrConnectionTestWireBehavior:
             audio_language={"name": "English", "code2": "en", "code3": "eng"}
         )
         respx_mock.get("http://bazarr-wire-test:6767/api/series").mock(
-            return_value=httpx.Response(
-                200, json={"data": [drifted_item], "total": 1}
-            )
+            return_value=httpx.Response(200, json={"data": [drifted_item], "total": 1})
         )
 
         response = authenticated_client.post(
