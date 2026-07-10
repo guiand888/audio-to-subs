@@ -21,6 +21,7 @@ import signal
 import socket
 import uuid
 from datetime import datetime, timezone
+from types import FrameType
 from typing import Any
 
 from redis.asyncio import Redis
@@ -185,19 +186,23 @@ class Worker:
 
 
 def handle_shutdown(worker: Worker) -> None:
-    """Handle shutdown signals."""
+    """Register graceful-shutdown handlers for SIGINT and SIGTERM.
 
-    def shutdown(signame: str) -> None:
+    ``signal.signal`` ALWAYS invokes the handler as ``handler(signum, frame)``.
+    A single-arg ``shutdown(signame: str)`` therefore raised
+    ``TypeError: shutdown() takes 1 positional argument but 2 were given`` on a
+    real SIGINT/SIGTERM — confirmed bug fixed in M5.7 (a unit test now invokes
+    the handler with the OS signature). The handler must accept both positional
+    arguments; ``frame`` is unused but required by the C signal-delivery ABI.
+    """
+
+    def shutdown(signum: int, frame: FrameType | None) -> None:
+        signame = signal.Signals(signum).name
         logger.info(f"Received signal {signame}, shutting down...")
         worker._shutdown = True
 
-    # BUG (deferred to M5.7, not fixed here): signal.signal() always invokes
-    # the handler as handler(signum, frame); `shutdown` only accepts a single
-    # `signame: str` positional arg, so an actual SIGINT/SIGTERM will raise
-    # TypeError here instead of shutting down gracefully. Needs a real fix +
-    # a signal-delivery smoke test, not just a type: ignore.
-    signal.signal(signal.SIGINT, shutdown)  # type: ignore[arg-type]
-    signal.signal(signal.SIGTERM, shutdown)  # type: ignore[arg-type]
+    signal.signal(signal.SIGINT, shutdown)
+    signal.signal(signal.SIGTERM, shutdown)
 
 
 async def main() -> None:
