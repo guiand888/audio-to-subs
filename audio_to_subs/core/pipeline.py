@@ -6,6 +6,7 @@ Adds structured progress callbacks and cancellation support for v2.
 
 import logging
 import os
+import re
 import tempfile
 from dataclasses import dataclass
 from pathlib import Path
@@ -46,10 +47,16 @@ class ProgressEvent(TypedDict, total=False):
     segment_count: int
     audio_duration_seconds: float
     mistral_usage: dict[str, Any]
+    step_index: int | None
+    step_total: int | None
 
 
 StructuredProgressCallback = Callable[[ProgressEvent], None]
 ProgressCallback = Callable[[str, Optional[int]], None]
+
+# Matches the trailing "(XX.X%)" ffmpeg reports in its -progress output, so the
+# extract/split sub-progress callback can recover a numeric percentage.
+_PERCENT_RE = re.compile(r"\(([\d.]+)%\)")
 
 
 @dataclass
@@ -155,26 +162,80 @@ class Pipeline:
         self.subtitle_generator = SubtitleGenerator()
         self._language = language
         self._language_mode = language_mode
+        # Step accounting. ``_step_total`` is resolved once we know the audio
+        # duration (after extraction): 4 if splitting occurs, else 3. ``None``
+        # until then (init stage, before extraction completes).
+        self._step_total: int | None = None
 
     def _check_cancel(self) -> None:
         """Check if cancellation has been requested and raise Cancelled if so."""
         if self._cancel_token is not None:
             self._cancel_token.check()
 
-    def _single_arg_progress_callback(self) -> Optional[Callable[[str], None]]:
-        """Adapt self.progress_callback for extract_audio/split_audio.
+    def _subprogress_callback(
+        self, stage: Literal["extract", "split"], lo: int, hi: int
+    ) -> Optional[Callable[[str], None]]:
+        """Build a ffmpeg sub-progress callback for ``extract``/``split``.
 
-        Those helpers call their progress_callback with a single message
-        string (the percentage is already embedded in the text); self's
-        legacy ProgressCallback always requires a second `percent` arg, so
-        passing it through directly would raise TypeError the first time
-        FFmpeg reports progress. Returns None if verbose_progress is off or
-        no callback is configured.
+        Returns a ``Callable[[str], None]`` matching the signature
+        ``extract_audio``/``split_audio`` expect from ``_parse_ffmpeg_progress``
+        (a message string with a trailing ``(XX.X%)``). It parses ffmpeg's own
+        time-based percentage out of that message and maps it linearly into the
+        stage's percent sub-range ``[lo, hi]``, then forwards it through
+        ``_emit_progress``. This drives continuous interior progress during the
+        (potentially long) ffmpeg decode — independent of ``verbose_progress``,
+        gated only on whether a structured callback is configured (the worker
+        path). Returns None when no structured callback is set.
+
+        M5.8 (#1, verified): previously the worker built the pipeline with
+        ``verbose_progress=False``, so no ffmpeg progress callback was wired and
+        long decodes showed a single 10%->25% jump. This is the fix; do NOT
+        re-gate on ``verbose_progress``.
         """
-        if not self.verbose_progress or self.progress_callback is None:
+        if self._structured_progress_callback is None:
             return None
-        legacy_callback = self.progress_callback
-        return lambda message: legacy_callback(message, None)
+
+        def _cb(message: str) -> None:
+            match = _PERCENT_RE.search(message)
+            if not match:
+                return
+            ratio = min(100.0, max(0.0, float(match.group(1)))) / 100.0
+            mapped = int(lo + (hi - lo) * ratio)
+            self._emit_progress(stage, message, mapped)
+
+        return _cb
+
+    def _step_for(
+        self,
+        stage: Literal["init", "extract", "split", "transcribe", "generate", "done"],
+    ) -> tuple[Optional[int], Optional[int]]:
+        """Return ``(step_index, step_total)`` for a pipeline stage.
+
+        ``init`` and ``done`` are not numbered steps (init is hidden, done is
+        terminal), so they return ``(None, None)``. ``step_total`` is ``None``
+        until resolved after extraction (when we know whether splitting occurs).
+
+        M5.8 (#4, verified): step numbering decided as extract=1, init hidden,
+        done terminal (step_total 3 w/o split, 4 w/ split). ``step_index``/
+        ``step_total`` are also persisted (progress_stage/step_* columns) so a
+        refresh mid-job reconstructs the step — see worker/progress.py.
+        """
+        if self._step_total is None or stage in ("init", "done"):
+            return (None, None)
+        if self._step_total == 4:
+            mapping = {
+                "extract": 1,
+                "split": 2,
+                "transcribe": 3,
+                "generate": 4,
+            }
+        else:
+            mapping = {
+                "extract": 1,
+                "transcribe": 2,
+                "generate": 3,
+            }
+        return (mapping.get(stage), self._step_total)
 
     def _emit_progress(
         self,
@@ -200,6 +261,10 @@ class Pipeline:
             event: ProgressEvent = {"stage": stage, "message": message}
             if percent is not None:
                 event["percent"] = percent
+            step_index, step_total = self._step_for(stage)
+            if step_index is not None:
+                event["step_index"] = step_index
+                event["step_total"] = step_total
             # extra is a **kwargs dict[str, Any]; TypedDict.update() can't
             # verify its keys/types match ProgressEvent's schema statically.
             event.update(extra)  # type: ignore[typeddict-item]
@@ -388,11 +453,13 @@ class Pipeline:
                 Path(self.temp_dir) / f"audio_{video_file.stem}_{uuid4().hex[:8]}.wav"
             )
 
-            # Pass cancel_token to audio extractor
+            # Pass cancel_token to audio extractor. The structured sub-progress
+            # callback drives continuous ffmpeg time-based progress during the
+            # (potentially long) decode, independent of verbose_progress.
             return extract_audio(
                 video_path,
                 str(audio_path),
-                progress_callback=self._single_arg_progress_callback(),
+                progress_callback=self._subprogress_callback("extract", 10, 25),
                 cancel_token=self._cancel_token,
             )
 
@@ -437,6 +504,9 @@ class Pipeline:
         audio_duration_seconds = get_audio_duration(audio_path)
         logger.debug(f"Audio duration: {audio_duration_seconds} seconds")
 
+        # Resolve step accounting now that we know whether splitting will occur.
+        self._step_total = 4 if audio_duration_seconds > self.max_audio_length else 3
+
         self._emit_progress(
             "extract",
             "Audio extraction complete",
@@ -476,7 +546,7 @@ class Pipeline:
                 audio_path,
                 self.temp_dir,
                 max_length=self.max_audio_length,
-                progress_callback=self._single_arg_progress_callback(),
+                progress_callback=self._subprogress_callback("split", 25, 30),
                 cancel_token=self._cancel_token,
             )
             logger.debug(f"Audio split into {len(audio_segments)} segments")
