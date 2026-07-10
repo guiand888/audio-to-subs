@@ -93,6 +93,16 @@ describe("HistoryPage", () => {
     expect(screen.getAllByText("All sources").length).toBeGreaterThan(0)
   })
 
+  it("renders each job status exactly once", async () => {
+    vi.mocked(api.get).mockResolvedValue(historyWith([BASE_JOB]))
+
+    render(<HistoryPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getAllByText("Done")).toHaveLength(1)
+    })
+  })
+
   it("shows a review warning and lets the user correct an 'und' auto-mode job", async () => {
     vi.mocked(api.get).mockResolvedValue(historyWith([BASE_JOB]))
     vi.mocked(api.patch).mockResolvedValue({
