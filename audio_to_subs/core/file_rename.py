@@ -9,6 +9,10 @@ def rename_subtitle_language(
 ) -> str:
     """Rename `stem.<old_code>.<ext>` to `stem.<new_code>.<ext>` on disk.
 
+    Strips *all* trailing ``.<old_code>`` occurrences from the stem so
+    already-broken files (e.g. ``stem.fr.fr.srt`` from the double-append
+    bug) collapse to a single ``.<new_code>`` suffix.
+
     Falls back to appending the new suffix to the bare stem if old_code
     isn't actually present in the filename (defensive - shouldn't happen
     for jobs that reached DONE with a language-suffixed output path).
@@ -19,14 +23,14 @@ def rename_subtitle_language(
     silently disagreeing about the file's language.
     """
     path = Path(current_path)
-    name = path.name
-    old_suffix = f".{old_code}{path.suffix}" if old_code else None
+    stem = path.stem
 
-    if old_suffix and name.endswith(old_suffix):
-        new_name = name[: -len(old_suffix)] + f".{new_code}{path.suffix}"
-    else:
-        new_name = f"{path.stem}.{new_code}{path.suffix}"
+    if old_code:
+        old_lang_suffix = f".{old_code}"
+        while stem.endswith(old_lang_suffix):
+            stem = stem[: -len(old_lang_suffix)]
 
+    new_name = f"{stem}.{new_code}{path.suffix}"
     new_path = path.parent / new_name
     os.rename(current_path, new_path)
     return str(new_path)

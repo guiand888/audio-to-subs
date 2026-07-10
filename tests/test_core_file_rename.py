@@ -56,3 +56,40 @@ def test_rename_preserves_directory(tmp_path):
 
     assert new_path == str(subdir / "movie.de.vtt")
     assert os.path.exists(new_path)
+
+
+def test_rename_strips_double_appended_language_code(tmp_path):
+    """An already-broken file like ``movie.fr.fr.srt`` (double-appended
+    code from the generation bug) must collapse to a single code when
+    renamed — not leave a stale ``.fr`` in the stem."""
+    src = tmp_path / "movie.fr.fr.srt"
+    src.write_text("subtitle content")
+
+    new_path = rename_subtitle_language(str(src), "fr", "es")
+
+    assert new_path == str(tmp_path / "movie.es.srt")
+    assert os.path.exists(new_path)
+    assert not src.exists()
+
+
+def test_rename_strips_triple_appended_language_code(tmp_path):
+    """Even a triple-appended code collapses to a single suffix."""
+    src = tmp_path / "movie.fr.fr.fr.srt"
+    src.write_text("subtitle content")
+
+    new_path = rename_subtitle_language(str(src), "fr", "de")
+
+    assert new_path == str(tmp_path / "movie.de.srt")
+    assert os.path.exists(new_path)
+
+
+def test_rename_same_code_collapses_double(tmp_path):
+    """Renaming a double-coded file to the *same* code (e.g. correcting
+    ``movie.fr.fr.srt`` → ``fr``) collapses to a single suffix."""
+    src = tmp_path / "movie.fr.fr.srt"
+    src.write_text("subtitle content")
+
+    new_path = rename_subtitle_language(str(src), "fr", "fr")
+
+    assert new_path == str(tmp_path / "movie.fr.srt")
+    assert os.path.exists(new_path)
