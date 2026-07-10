@@ -8,6 +8,15 @@ interface UseLogsOptions {
   refreshInterval?: number
 }
 
+// Normalise a local datetime input value to an unambiguous UTC ISO string
+// for the backend, which compares `since`/`until` against UTC timestamps.
+// A value already carrying an offset/Z is passed through unchanged.
+function toUtcIso(value: string): string {
+  const ms = Date.parse(value)
+  if (isNaN(ms)) return value
+  return new Date(ms).toISOString()
+}
+
 export function useLogs({
   filters,
   autoRefresh = true,
@@ -17,8 +26,8 @@ export function useLogs({
   const params = new URLSearchParams()
   if (filters.level_filter) params.set("level_filter", filters.level_filter)
   if (filters.job_id) params.set("job_id", filters.job_id)
-  if (filters.since) params.set("since", filters.since)
-  if (filters.until) params.set("until", filters.until)
+  if (filters.since) params.set("since", toUtcIso(filters.since))
+  if (filters.until) params.set("until", toUtcIso(filters.until))
   params.set("limit", String(filters.limit || 50))
   params.set("offset", String(filters.offset || 0))
 

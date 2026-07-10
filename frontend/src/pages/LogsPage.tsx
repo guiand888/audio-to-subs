@@ -3,9 +3,9 @@
 
 import { useState } from "react"
 import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react"
-import { format } from "date-fns"
 
 import { useLogs } from "@/hooks/useLogs"
+import { useTimezoneSetting, formatDateTime } from "@/lib/datetime"
 import type { LogsFilters, LogLevel } from "@/lib/types"
 
 // Import from shadcn/ui
@@ -54,15 +54,6 @@ function getLevelVariant(level: LogLevel): "default" | "secondary" | "destructiv
       return "outline"
     default:
       return "default"
-  }
-}
-
-// Format timestamp
-function formatTimestamp(ts: string): string {
-  try {
-    return format(new Date(ts), "yyyy-MM-dd HH:mm:ss")
-  } catch {
-    return ts
   }
 }
 
@@ -153,6 +144,8 @@ export function LogsPage() {
     autoRefresh,
     refreshInterval,
   })
+
+  const timezone = useTimezoneSetting()
 
   const handleFiltersChange = (newFilters: LogsFilters) => {
     setFilters(newFilters)
@@ -252,7 +245,7 @@ export function LogsPage() {
                         className="border-t hover:bg-muted/50"
                       >
                         <TableCell className="p-3 whitespace-nowrap">
-                          {formatTimestamp(log.ts)}
+                          {formatDateTime(log.ts, timezone ?? undefined)}
                         </TableCell>
                         <TableCell className="p-3">
                           <Badge
