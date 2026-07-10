@@ -18,8 +18,10 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.3 — Structural refactor batch (Phases 5–8) | ✅ Done | 2026-07-05 | Depends on M5.2; see `REFACTOR.md` |
 | M5.4 — Refactor cleanup & configurable limits | ✅ Done | 2026-07-06 | Depends on M5.3 |
 | M5.5 — Settings save-counter regression + Bazarr connection-test fix | ✅ Done | 2026-07-07 | Depends on M5.4 |
-| M5.6 — M5.5 code-review follow-up (schema tightening, dead-field removal, error UX) | ⏳ Not Started | - | Depends on M5.5 |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6 |
+| M5.6 — M5.5 code-review follow-up (schema tightening, dead-field removal, error UX) | ✅ Done | 2026-07-07 | Depends on M5.5 |
+| M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
+| M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ⏳ Not Started | - | Independent cleanup |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6, M5.7 |
 
 Every milestone ends with the same quality bar:
 
@@ -356,6 +358,56 @@ Acceptance:
 
 Out of scope:
 - The `path_mappings as any` cast in `settingsToFormData` — pre-existing (not introduced by either reviewed commit); fixing it requires touching the `SettingsPatch` type and is a separate concern.
+
+## M5.6.1 — Post-M5.6 stabilization batch (unplanned)
+
+**Goal**: not a planned milestone — a retroactive record of an ad-hoc bug-fix
+run (2026-07-07 to 2026-07-10) that landed directly on `dev` between M5.6 and
+the M5.7 write-up, discovered via live use against real Bazarr/Podman rather
+than through milestone planning. Recorded here so this document keeps
+matching `dev`'s actual state.
+
+**Depends on**: M5.6
+
+Notable fixes, roughly grouped:
+
+- **Worker/queue correctness** (`worker/__main__.py`, `worker/runner.py`):
+  `ClaimedJob.id` was a `uuid.UUID` against a `String(36)` column — aiosqlite
+  can't bind it, so failed jobs never persisted their status and stuck in
+  `running` forever, getting re-claimed on every worker restart (`9bc375f`).
+  The worker also held the sole SQLite write lock (`BEGIN IMMEDIATE`) for the
+  entire multi-minute Mistral call, blocking History reads and progress
+  writes until they errored `database is locked` (`41cde58`) — same class of
+  bug as the M5.1 poller finding, different call site.
+- **Bazarr path resolution** (`bazarr/poller.py`): wanted-endpoint items have
+  `sceneName=null` and no path; the real path only lives on the full
+  movie/episode detail endpoints. Poller now fetches those details and
+  threads the authoritative path through (`479f0bb`), and the API surfaces a
+  clear 400 instead of a confusing validation error when no path resolves
+  (`166543e`).
+- **Subtitle filename correctness** (`core/subtitle_generator.py`,
+  rename endpoint): the language code could be appended twice
+  (`stem.fr.fr.srt`) because both job-creation-time and generation-time paths
+  added it independently; made idempotent (`0bf433b`), the rename endpoint
+  fixed to strip all trailing suffixes so already-broken files self-correct
+  (`a0c4bba`), and `job.output_path` is now persisted post-completion so auto
+  mode's actual on-disk path matches the DB (`e093638`).
+- **Logging**: the API never configured logging (uvicorn leaves root logger
+  untouched) and the worker had disconnected config, so most info/debug
+  output and several UI-facing `job_logs` events (job creation, Bazarr
+  sync/notify, login) were silently dropped. Added `configure_logging_from_env()`
+  (`LOG_LEVEL`) and a shared `write_job_log()` helper (`f64868f`).
+- **Podman hardening**: fully-qualified remaining short image names so
+  Podman stops prompting on unaliased short names (`65dc82c`, `06a042b`),
+  and fixed the worker crash-looping from a missing `SESSION_SECRET_FILE`
+  env var (`75c1370`).
+- **Frontend polish**: Wanted table column stability, rows-per-page
+  selector, refresh scoped to the active Movies/Series filter, reveal
+  toggle for the Bazarr API key field.
+
+No acceptance checklist — this predates any plan. Full `pytest`/`black`/`ruff`
+suite was green at each commit per their individual messages; `mypy --strict`
+gaps from this period are exactly what M5.7 tracks.
 
 ## M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals
 
