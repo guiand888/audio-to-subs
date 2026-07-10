@@ -515,6 +515,73 @@ class TestProcessMovie:
         assert entry is not None
         assert entry.audio_language == []
 
+    @pytest.mark.asyncio
+    async def test_process_movie_prefers_detail_path_over_sceneName(
+        self, mock_db_session
+    ):
+        """The wanted endpoint's sceneName is often null in real Bazarr; the
+        authoritative media path comes from the full movie details endpoint.
+        media_path_detail must win over sceneName when both are present."""
+
+        class MockWantedMovie:
+            title = "Inception"
+            radarrId = 700
+            sceneName = "Inception.2010.1080p.BluRay.x264-GROUP"
+            missing_subtitles = []
+
+        mock_movie = MockWantedMovie()
+        path_map = PathMap([("/bazarr/movies", "/local/movies")])
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(
+            mock_db_session,
+            mock_movie,
+            path_map,
+            started_at,
+            media_path_detail="/bazarr/movies/Inception (2010)/Inception.mkv",
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:700")
+        )
+        entry = result.scalar_one()
+        # The full-detail path was translated and stored, not the sceneName.
+        assert entry.media_path == "/local/movies/Inception (2010)/Inception.mkv"
+
+    @pytest.mark.asyncio
+    async def test_process_movie_null_sceneName_uses_detail_path(
+        self, mock_db_session
+    ):
+        """Mirrors the real-world bug: the wanted endpoint returns
+        sceneName=None and the cache must still get a usable media_path
+        from the joined-in full-detail path."""
+
+        class MockWantedMovie:
+            title = "The Players"
+            radarrId = 701
+            sceneName = None
+            missing_subtitles = []
+
+        mock_movie = MockWantedMovie()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(
+            mock_db_session,
+            mock_movie,
+            path_map,
+            started_at,
+            media_path_detail="/movies/The Players (2012)/The Players 720p H264.mkv",
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:701")
+        )
+        entry = result.scalar_one()
+        assert entry.media_path == (
+            "/movies/The Players (2012)/The Players 720p H264.mkv"
+        )
+
 
 class TestProcessEpisode:
     """Test _process_episode function."""
@@ -636,6 +703,76 @@ class TestProcessEpisode:
                 "hi": False,
             }
         ]
+
+
+class TestProcessEpisodePath:
+    """Test _process_episode media_path resolution from full-detail path."""
+
+    @pytest.mark.asyncio
+    async def test_process_episode_null_sceneName_uses_detail_path(
+        self, mock_db_session
+    ):
+        """The wanted-episodes endpoint returns sceneName=None; the real file
+        path is joined in from the full episodes endpoint and must populate
+        media_path."""
+
+        class MockWantedEpisode:
+            seriesTitle = "Baron Noir"
+            episodeTitle = "Jupiter"
+            sonarrEpisodeId = 324
+            sonarrSeriesId = 5
+            sceneName = None
+            missing_subtitles = []
+
+        mock_episode = MockWantedEpisode()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_episode(
+            mock_db_session,
+            mock_episode,
+            path_map,
+            started_at,
+            media_path_detail="/tv/Baron Noir/S01E03.mkv",
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "episode:324")
+        )
+        entry = result.scalar_one()
+        assert entry.media_path == "/tv/Baron Noir/S01E03.mkv"
+
+    @pytest.mark.asyncio
+    async def test_process_episode_prefers_detail_path_over_sceneName(
+        self, mock_db_session
+    ):
+        """media_path_detail wins over sceneName when both are present."""
+
+        class MockWantedEpisode:
+            seriesTitle = "Test Show"
+            episodeTitle = "Pilot"
+            sonarrEpisodeId = 702
+            sonarrSeriesId = 9
+            sceneName = "Test.Show.S01E01.1080p.WEB.x264-GROUP"
+            missing_subtitles = []
+
+        mock_episode = MockWantedEpisode()
+        path_map = PathMap([("/bazarr/tv", "/local/tv")])
+        started_at = datetime.now(timezone.utc)
+
+        await _process_episode(
+            mock_db_session,
+            mock_episode,
+            path_map,
+            started_at,
+            media_path_detail="/bazarr/tv/Test Show/S01E01.mkv",
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "episode:702")
+        )
+        entry = result.scalar_one()
+        assert entry.media_path == "/local/tv/Test Show/S01E01.mkv"
 
 
 class TestDeleteStale:

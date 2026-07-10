@@ -10,10 +10,11 @@ generation are pure string operations that don't require the file to exist.
 """
 
 import json
+from datetime import datetime, timezone
 
 from sqlalchemy import select
 
-from audio_to_subs.db.models import Job, JobLog, LogLevel, Setting
+from audio_to_subs.db.models import BazarrCache, Job, JobLog, LogLevel, Setting
 
 MEDIA_PATH = "/movies/Test Movie (2024)/movie.mkv"
 
@@ -131,3 +132,38 @@ def test_create_job_explicit_mode_no_code_applies_default_language_to_path(
     job = sync_session.get(Job, data["id"])
     assert job.language_code == "es"
     assert job.output_path == "/movies/Test Movie (2024)/movie.es.srt"
+
+
+def test_create_job_bazarr_source_empty_media_path_clear_error(
+    authenticated_client, sync_session
+):
+    """A bazarr source whose cache entry has an empty media_path (which is
+    what the wanted endpoint produces when the real path wasn't joined in)
+    must fail with a clear, actionable message rather than the generic
+    root-directory validation error."""
+    sync_session.add(
+        BazarrCache(
+            id="movie:42",
+            kind="movie",
+            ext_id=42,
+            title="Pathless Movie",
+            media_path="",  # empty - the bug condition
+            has_any_subs=False,
+            missing_subtitles=[],
+            last_polled=datetime.now(timezone.utc),
+        )
+    )
+    sync_session.commit()
+
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "bazarr_movie",
+            "source_ref": "42",
+            "media_path": "",  # frontend sends the empty cached path
+        },
+    )
+
+    assert response.status_code == 400, response.text
+    detail = response.json()["detail"]
+    assert "No media file path is available" in detail

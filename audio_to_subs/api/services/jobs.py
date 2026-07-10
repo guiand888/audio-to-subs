@@ -247,6 +247,21 @@ async def create_job_service(
             detail="Failed to resolve source. Please check your source configuration.",
         ) from e
 
+    # An empty media_path can't be transcribed. For bazarr sources this
+    # happens when the item is cached without a usable file path (e.g.
+    # Bazarr's wanted endpoint reports no sceneName and the full-detail
+    # path is also missing). Surface a clear, actionable error rather than
+    # the generic root-directory validation message below.
+    if not resolved_media_path or not resolved_media_path.strip():
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "No media file path is available for this item from Bazarr. "
+                "Refresh the wanted list and try again; if the path is still "
+                "missing, the media file may not exist on disk."
+            ),
+        )
+
     # Validate media_path against configured root paths (handles symlinks and traversal)
     movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
     tv_root = getattr(settings, "TV_ROOT_PATH", None)

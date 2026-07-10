@@ -20,6 +20,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from audio_to_subs.api.settings import Settings
+    from audio_to_subs.bazarr.schemas import Episode, Movie
 
 logger = logging.getLogger(__name__)
 
@@ -243,32 +244,36 @@ async def poll_bazarr_manually(
         # Process wanted movies
         if poll_movies:
             movies_page = await client.list_wanted_movies(length=200)
-            audio_lang_by_movie = await _fetch_audio_language_for_movies(
+            movie_details = await _fetch_movie_details(
                 client, [m.radarrId for m in movies_page.data]
             )
             for movie in movies_page.data:
+                movie_detail = movie_details.get(movie.radarrId)
                 await _process_movie(
                     db,
                     movie,
                     path_map,
                     started_at,
-                    audio_lang_by_movie.get(movie.radarrId),
+                    movie_detail.audio_language if movie_detail else None,
+                    movie_detail.path if movie_detail else None,
                 )
                 movies_processed += 1
 
         # Process wanted episodes
         if poll_episodes:
             episodes_page = await client.list_wanted_episodes(length=200)
-            audio_lang_by_episode = await _fetch_audio_language_for_episodes(
+            episode_details = await _fetch_episode_details(
                 client, {e.sonarrSeriesId for e in episodes_page.data}
             )
             for episode in episodes_page.data:
+                episode_detail = episode_details.get(episode.sonarrEpisodeId)
                 await _process_episode(
                     db,
                     episode,
                     path_map,
                     started_at,
-                    audio_lang_by_episode.get(episode.sonarrEpisodeId),
+                    episode_detail.audio_language if episode_detail else None,
+                    episode_detail.path if episode_detail else None,
                 )
                 episodes_processed += 1
 
@@ -305,62 +310,66 @@ async def poll_bazarr_manually(
     return movies_processed, episodes_processed
 
 
-async def _fetch_audio_language_for_movies(
+async def _fetch_movie_details(
     client: BazarrClient, radarr_ids: list[int]
-) -> dict[int, list[Any]]:
-    """Batch-fetch audio_language for a set of movies by Radarr ID.
+) -> dict[int, "Movie"]:
+    """Batch-fetch full movie details (audio_language + path) by Radarr ID.
 
-    Bazarr's wanted-movies endpoint never carries audio_language, so it must
-    be joined in from the full-detail endpoint. One HTTP call per poll cycle
-    for exactly the movies being processed, not one per item.
+    Bazarr's wanted-movies endpoint carries neither audio_language nor a
+    usable file path (sceneName is null there), so both must be joined in
+    from the full-detail endpoint. One HTTP call per poll cycle for exactly
+    the movies being processed, not one per item.
 
     Args:
         client: BazarrClient instance
         radarr_ids: Radarr IDs to look up
 
     Returns:
-        Dict mapping radarrId to its audio_language list (missing entries
-        mean Bazarr couldn't report a language for that movie)
+        Dict mapping radarrId to its full Movie (missing entries mean
+        Bazarr couldn't report details for that movie)
     """
     if not radarr_ids:
         return {}
     try:
         full_movies = await client.list_all_movies(radarrid=radarr_ids)
-        return {m.radarrId: m.audio_language for m in full_movies.data}
+        return {m.radarrId: m for m in full_movies.data}
     except Exception as e:
-        logger.warning("Failed to fetch audio_language for movies: %s", e)
+        logger.warning("Failed to fetch movie details: %s", e)
         return {}
 
 
-async def _fetch_audio_language_for_episodes(
+async def _fetch_episode_details(
     client: BazarrClient, series_ids: set[int]
-) -> dict[int, list[Any]]:
-    """Batch-fetch audio_language for episodes, by their series.
+) -> dict[int, "Episode"]:
+    """Batch-fetch full episode details (audio_language + path), by series.
 
-    Bazarr's wanted-episodes endpoint never carries audio_language, and its
-    episodes endpoint only accepts a single series ID (not a list), so this
-    batches by unique series rather than per-episode - bounded by "distinct
-    series with wanted episodes this poll", not one call per episode.
+    Bazarr's wanted-episodes endpoint carries neither audio_language nor a
+    usable file path (sceneName is null there), and its episodes endpoint
+    only accepts a single series ID (not a list), so this batches by unique
+    series rather than per-episode - bounded by "distinct series with wanted
+    episodes this poll", not one call per episode.
 
     Args:
         client: BazarrClient instance
         series_ids: Unique Sonarr series IDs to look up
 
     Returns:
-        Dict mapping sonarrEpisodeId to its audio_language list (missing
-        entries mean Bazarr couldn't report a language for that episode)
+        Dict mapping sonarrEpisodeId to its full Episode (missing entries
+        mean Bazarr couldn't report details for that episode)
     """
-    audio_lang_by_episode: dict[int, list[Any]] = {}
+    details_by_episode: dict[int, "Episode"] = {}
     for series_id in series_ids:
         try:
             eps = await client.list_episodes(seriesid=series_id)
             for ep in eps.data:
-                audio_lang_by_episode[ep.sonarrEpisodeId] = ep.audio_language
+                details_by_episode[ep.sonarrEpisodeId] = ep
         except Exception as e:
             logger.warning(
-                "Failed to fetch audio_language for series %s: %s", series_id, e
+                "Failed to fetch episode details for series %s: %s",
+                series_id,
+                e,
             )
-    return audio_lang_by_episode
+    return details_by_episode
 
 
 def _build_language_list(languages: list[Any] | None) -> list[dict]:
@@ -453,6 +462,7 @@ async def _process_movie(
     path_map: PathMap,
     started_at: datetime,
     audio_language: list[Any] | None = None,
+    media_path_detail: str | None = None,
 ) -> None:
     """Process a single wanted movie.
 
@@ -463,9 +473,14 @@ async def _process_movie(
         started_at: Poll start time
         audio_language: Audio languages for this movie, if known (the wanted
             endpoint doesn't carry it; callers batch-fetch it separately)
+        media_path_detail: Real media file path for this movie, fetched from
+            the full movie details endpoint. The wanted endpoint only
+            carries sceneName (often null), so the authoritative path is
+            joined in separately. Falls back to sceneName if unavailable.
     """
-    # Translate sceneName to media_path if available
-    media_path = wanted_movie.sceneName or ""
+    # Resolve media_path: prefer the full-detail path (authoritative),
+    # fall back to the wanted endpoint's sceneName.
+    media_path = media_path_detail or wanted_movie.sceneName or ""
     if media_path:
         media_path = path_map.translate(media_path)
 
@@ -494,6 +509,7 @@ async def _process_episode(
     path_map: PathMap,
     started_at: datetime,
     audio_language: list[Any] | None = None,
+    media_path_detail: str | None = None,
 ) -> None:
     """Process a single wanted episode.
 
@@ -505,9 +521,14 @@ async def _process_episode(
         audio_language: Audio languages for this episode, if known (the
             wanted endpoint doesn't carry it; callers batch-fetch it
             separately)
+        media_path_detail: Real media file path for this episode, fetched
+            from the full episode details endpoint. The wanted endpoint
+            only carries sceneName (often null), so the authoritative path
+            is joined in separately. Falls back to sceneName if unavailable.
     """
-    # Translate sceneName to media_path if available
-    media_path = wanted_episode.sceneName or ""
+    # Resolve media_path: prefer the full-detail path (authoritative),
+    # fall back to the wanted endpoint's sceneName.
+    media_path = media_path_detail or wanted_episode.sceneName or ""
     if media_path:
         media_path = path_map.translate(media_path)
 
@@ -551,7 +572,7 @@ async def _poll_all_movies(
         for movie in movies_page.data:
             # Check if movie has no subtitles at all
             if not movie.subtitles:
-                media_path = movie.sceneName or ""
+                media_path = movie.path or movie.sceneName or ""
                 if media_path:
                     media_path = path_map.translate(media_path)
 

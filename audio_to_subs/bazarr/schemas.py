@@ -113,6 +113,10 @@ class Movie(BaseModel):
         default_factory=list,
         description="Audio languages; code2/code3 may be null for unresolved tracks",
     )
+    # `/api/movies` returns the real file path in `path`; `sceneName` is just
+    # the release/scene name and is often null. `path` is the authoritative
+    # source for the media file location.
+    path: str | None = Field(default=None, description="Media file path for the movie")
     sceneName: str | None = Field(default=None, description="Scene name for the movie")
     tags: list[str] = Field(default_factory=list, description="Movie tags")
 

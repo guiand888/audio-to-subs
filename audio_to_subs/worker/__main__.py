@@ -108,25 +108,32 @@ class Worker:
 
                 mistral_api_key = self._settings.mistral_api_key
 
-                # Run the job in its own session. All writes inside (progress,
-                # result) commit per-event, keeping every transaction short.
-                async with get_async_session(dsn) as session:
-                    if mistral_api_key is None:
-                        logger.error("MISTRAL_API_KEY not configured. Cannot run job.")
+                if mistral_api_key is None:
+                    logger.error("MISTRAL_API_KEY not configured. Cannot run job.")
+                    async with get_async_session(dsn) as session:
                         await self._mark_job_failed(
                             session, claimed.id, "Missing Mistral API key"
                         )
-                        continue
+                    continue
 
-                    deps = WorkerDeps(
-                        session=session,
-                        redis=self._redis,
-                        settings=self._settings,
-                        mistral_api_key=mistral_api_key,
-                        database_url=dsn,
-                    )
+                # Run the job with NO DB session held: run_job and the
+                # ProgressBridge open their own short-lived sessions for each
+                # write (settings fetch, progress, logs, rescan). Holding a
+                # session open here would keep BEGIN IMMEDIATE active across
+                # the minutes-long transcription and lock out every other
+                # writer (progress updates, the API's History reads, etc.).
+                deps = WorkerDeps(
+                    session=None,  # no long-lived session; per-write sessions only
+                    redis=self._redis,
+                    settings=self._settings,
+                    mistral_api_key=mistral_api_key,
+                    database_url=dsn,
+                )
 
-                    result = await run_job(claimed, deps)
+                result = await run_job(claimed, deps)
+
+                # Persist the result in a short-lived session.
+                async with get_async_session(dsn) as session:
                     await persist_result(session, claimed.id, result)
 
                 logger.info(

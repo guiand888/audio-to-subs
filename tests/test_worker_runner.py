@@ -23,7 +23,7 @@ from audio_to_subs.worker.runner import (
 def make_claimed_job(**overrides) -> ClaimedJob:
     """Build a ClaimedJob with sensible test defaults."""
     defaults = {
-        "id": uuid4(),
+        "id": str(uuid4()),
         "media_path": "/test/video.mp4",
         "output_path": "/test/output.srt",
         "language_code": "en",
@@ -132,7 +132,7 @@ class TestPersistResult:
     async def test_persist_result_nonexistent_job_does_not_raise(self, mock_db_session):
         """Updating a job id that doesn't exist should be a no-op, not an error."""
         result = JobResult(status=JobStatus.DONE)
-        await persist_result(mock_db_session, uuid4(), result)
+        await persist_result(mock_db_session, str(uuid4()), result)
 
     @pytest.mark.asyncio
     async def test_persist_result_auto_mode_uses_detected_language(
@@ -247,6 +247,8 @@ class TestPersistLog:
 
     @pytest.mark.asyncio
     async def test_persist_log_writes_entry(self, mock_db_session):
+        from audio_to_subs.api.settings import get_settings
+
         job = Job(
             id=str(uuid4()),
             status=JobStatus.RUNNING,
@@ -258,8 +260,11 @@ class TestPersistLog:
         await mock_db_session.flush()
         await mock_db_session.commit()
 
+        # persist_log now opens its own short-lived session via database_url
+        # (so the worker never holds a write transaction across the long
+        # transcription). The per-test DB URL points at the same file DB.
         await persist_log(
-            mock_db_session, LogLevel.ERROR, "something failed", job_id=job.id
+            get_settings().DATABASE_URL, job.id, LogLevel.ERROR, "something failed"
         )
 
         rows = (
@@ -281,11 +286,15 @@ class TestGetDbSettings:
 
     @pytest.mark.asyncio
     async def test_returns_empty_dict_when_no_settings(self, mock_db_session):
-        settings = await _get_db_settings(mock_db_session)
+        from audio_to_subs.api.settings import get_settings
+
+        settings = await _get_db_settings(get_settings().DATABASE_URL)
         assert settings == {}
 
     @pytest.mark.asyncio
     async def test_reads_known_settings_keys(self, mock_db_session):
+        from audio_to_subs.api.settings import get_settings
+
         mock_db_session.add(Setting(key="mistral_model", value_json='"voxtral-large"'))
         mock_db_session.add(
             Setting(key="ignored_unknown_key", value_json='"should-not-appear"')
@@ -293,13 +302,15 @@ class TestGetDbSettings:
         await mock_db_session.flush()
         await mock_db_session.commit()
 
-        settings = await _get_db_settings(mock_db_session)
+        settings = await _get_db_settings(get_settings().DATABASE_URL)
 
         assert settings.get("mistral_model") == "voxtral-large"
         assert "ignored_unknown_key" not in settings
 
     @pytest.mark.asyncio
     async def test_parses_value_json_when_present(self, mock_db_session):
+        from audio_to_subs.api.settings import get_settings
+
         mock_db_session.add(
             Setting(
                 key="mistral_rate_usd_per_minute",
@@ -309,7 +320,7 @@ class TestGetDbSettings:
         await mock_db_session.flush()
         await mock_db_session.commit()
 
-        settings = await _get_db_settings(mock_db_session)
+        settings = await _get_db_settings(get_settings().DATABASE_URL)
 
         assert settings.get("mistral_rate_usd_per_minute") == 0.02
 

@@ -10,7 +10,6 @@ import logging
 from dataclasses import dataclass
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any, Literal, Optional, cast
-from uuid import UUID
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
@@ -23,8 +22,9 @@ from audio_to_subs.core.models import (
 )
 from audio_to_subs.core.path_utils import generate_output_path
 from audio_to_subs.core.pipeline import Pipeline, PipelineResult
-from audio_to_subs.db.job_logs import write_job_log as persist_log
+from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import Job, JobStatus, LogLevel, Setting
+from audio_to_subs.db.session import get_async_session
 from audio_to_subs.queue_.claim import ClaimedJob
 from audio_to_subs.queue_.events import publish_done
 from audio_to_subs.worker.progress import ProgressBridge
@@ -43,14 +43,17 @@ class WorkerDeps:
     """Dependencies for worker job execution.
 
     Attributes:
-        session: Async database session
+        session: Optional async session; run_job no longer uses a long-lived
+            session (it opens short per-write sessions via database_url to
+            avoid holding BEGIN IMMEDIATE across the transcription). Kept for
+            backward-compat with tests that pass one.
         redis: Redis async client
         settings: Application settings
         mistral_api_key: Mistral API key for transcription
         database_url: Database connection URL for creating per-write sessions
     """
 
-    session: "AsyncSession"
+    session: Optional["AsyncSession"]
     redis: "Redis"
     settings: "Settings"
     mistral_api_key: str
@@ -72,7 +75,7 @@ class JobResult:
 
 async def persist_result(
     session: "AsyncSession",
-    job_id: UUID,
+    job_id: str,
     result: JobResult,
 ) -> None:
     """Persist job result to database."""
@@ -109,35 +112,53 @@ async def persist_result(
         logger.error(f"Failed to persist result for job {job_id}: {e}")
 
 
-async def _get_db_settings(session: "AsyncSession") -> dict[str, Any]:
-    """Fetch current settings from the database.
+async def persist_log(
+    database_url: str,
+    job_id: str,
+    level: LogLevel,
+    message: str,
+) -> None:
+    """Write a log entry to the database in a short-lived session.
+
+    Opens its own session via database_url (rather than reusing a
+    caller-held session) so the worker never holds a write transaction
+    across the long transcription.
+    """
+    async with get_async_session(database_url) as session:
+        await write_job_log(session, level, message, job_id=job_id)
+
+
+async def _get_db_settings(database_url: str) -> dict[str, Any]:
+    """Fetch current settings from the database in a short-lived session.
 
     Returns a dict with settings that override environment defaults.
     Worker must read from DB (not environment) so that UI-changed settings
-    affect active jobs.
+    affect active jobs. Opens its own session so the caller never holds a
+    write transaction (BEGIN IMMEDIATE) open across the long transcription.
     """
     settings_dict = {}
     try:
-        result = await session.execute(select(Setting))
-        for setting in result.scalars().all():
-            if setting.key in (
-                "SUBTITLES_SAME_DIRECTORY",
-                "mistral_model",
-                "mistral_rate_usd_per_minute",
-                "mistral_input_token_rate_usd",
-                "mistral_output_token_rate_usd",
-                "max_audio_length",
-            ):
-                # Parse JSON if needed
-                value = setting.value_json or setting.value
-                if setting.value_json:
-                    try:
-                        import json
+        async with get_async_session(database_url) as session:
+            result = await session.execute(select(Setting))
+            for setting in result.scalars().all():
+                if setting.key in (
+                    "SUBTITLES_SAME_DIRECTORY",
+                    "mistral_model",
+                    "mistral_rate_usd_per_minute",
+                    "mistral_input_token_rate_usd",
+                    "mistral_output_token_rate_usd",
+                    "max_audio_length",
+                ):
+                    # Parse JSON if needed
+                    value = setting.value_json or setting.value
+                    if setting.value_json:
+                        try:
+                            import json
 
-                        value = json.loads(value)
-                    except (json.JSONDecodeError, TypeError):
-                        value = setting.value
-                settings_dict[setting.key] = value
+                            value = json.loads(value)
+                        except (json.JSONDecodeError, TypeError):
+                            value = setting.value
+                    settings_dict[setting.key] = value
     except Exception as e:
         logger.warning(f"Failed to fetch settings from DB: {e}")
     return settings_dict
@@ -179,8 +200,9 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
     )
 
     # Fetch settings from DB (worker must use DB settings, not cached env settings,
-    # so that UI-changed settings affect running jobs)
-    db_settings = await _get_db_settings(deps.session)
+    # so that UI-changed settings affect running jobs). Uses a short-lived session
+    # so no write transaction is held across the long transcription.
+    db_settings = await _get_db_settings(deps.database_url)
 
     # Use DB settings with env defaults as fallback
     subtitles_same_dir = db_settings.get(
@@ -278,10 +300,10 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
             logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
             # Log but don't fail the job - this is best-effort
             await persist_log(
-                deps.session,
+                deps.database_url,
+                job_id,
                 LogLevel.WARNING,
                 f"Bazarr rescan failed: {str(e)}",
-                job_id=job_id,
             )
 
         # Publish done event
@@ -314,10 +336,10 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
 
         # Log the error
         await persist_log(
-            deps.session,
+            deps.database_url,
+            job_id,
             LogLevel.ERROR,
             f"Job failed: {str(e)}",
-            job_id=job_id,
         )
 
         # Publish failed event
@@ -335,7 +357,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
 async def _rescan_bazarr_movie(
     deps: WorkerDeps,
     source_ref: str | None,
-    job_id: UUID,
+    job_id: str,
 ) -> None:
     """Trigger rescan for a Bazarr movie.
 
@@ -354,10 +376,12 @@ async def _rescan_bazarr_movie(
         radarr_id = int(source_ref)
         from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
 
-        # Get Bazarr client using database settings first, then environment fallback
-        client, bazarr_url, bazarr_api_key, bazarr_timeout = (
-            await get_bazarr_client_with_settings(deps.session, deps.settings)
-        )
+        # Get Bazarr client using database settings first, then environment fallback.
+        # Short-lived session so no write lock is held during the rescan HTTP call.
+        async with get_async_session(deps.database_url) as session:
+            client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+                await get_bazarr_client_with_settings(session, deps.settings)
+            )
 
         if client is None:
             logger.info(
@@ -385,7 +409,7 @@ async def _rescan_bazarr_movie(
 async def _rescan_bazarr_episode(
     deps: WorkerDeps,
     source_ref: str | None,
-    job_id: UUID,
+    job_id: str,
 ) -> None:
     """Trigger rescan for a Bazarr episode.
 
@@ -404,10 +428,12 @@ async def _rescan_bazarr_episode(
         sonarr_episode_id = int(source_ref)
         from audio_to_subs.bazarr.poller import get_bazarr_client_with_settings
 
-        # Get Bazarr client using database settings first, then environment fallback
-        client, bazarr_url, bazarr_api_key, bazarr_timeout = (
-            await get_bazarr_client_with_settings(deps.session, deps.settings)
-        )
+        # Get Bazarr client using database settings first, then environment fallback.
+        # Short-lived session so no write lock is held during the rescan HTTP call.
+        async with get_async_session(deps.database_url) as session:
+            client, bazarr_url, bazarr_api_key, bazarr_timeout = (
+                await get_bazarr_client_with_settings(session, deps.settings)
+            )
 
         if client is None:
             logger.info(
