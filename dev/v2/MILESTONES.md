@@ -21,7 +21,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.6 — M5.5 code-review follow-up (schema tightening, dead-field removal, error UX) | ✅ Done | 2026-07-07 | Depends on M5.5 |
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ⏳ Not Started | - | Independent cleanup |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6, M5.7 |
+| M5.8 — Queue progress reporting: live-update gaps and step-based UX | ⏳ Not Started | - | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
+| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6, M5.7, M5.8 |
 
 Every milestone ends with the same quality bar:
 
@@ -426,6 +427,37 @@ Acceptance:
 - Transcription pipeline manually verified against a real (or recorded) Mistral call after the `transcription_client.py` changes.
 - Worker manually verified to still shut down gracefully on SIGTERM/SIGINT after the signal-handler typing fix.
 - Full `pytest`, `black --check`, `ruff check` clean; no behaviour change outside the three files above.
+
+## M5.8 — Queue progress reporting: live-update gaps and step-based UX
+
+**Goal**: fix the user-reported "Queue page looks frozen unless I manually refresh" bug and replace the raw 0-100% bar with a step-based indicator (`Step 2 of 4 — Extracting audio`) plus an inner sub-progress bar where real sub-progress data exists.
+
+**Depends on**: none — independent, isolated to the pipeline's progress emission and the Queue page's SSE handling.
+
+**Authoritative plan**: [`QUEUE_PROGRESS_REVIEW.md`](QUEUE_PROGRESS_REVIEW.md) (full root-cause analysis and design). This section only summarizes; do not duplicate its detail here.
+
+Root causes (all confirmed against current code — see the linked doc for `file.py:line` references):
+
+1. `extract` and `split` each emit exactly one progress event at stage-start and one at stage-completion, with total silence during the actual (potentially long) ffmpeg decode — because the worker constructs `Pipeline(verbose_progress=False)`, which strips the callback that would otherwise drive ffmpeg's already-implemented native time-based progress parsing. This is the literal cause of the screenshot: a job pinned on "Extracting audio from video…" / 10% for however long ffmpeg takes.
+2. The `"new"` SSE event only increments an unused `pendingNewCount` counter in the frontend Zustand store — nothing consumes it, so a job created after the Queue page loads never appears until a manual refresh.
+3. API-originated SSE events (`new`, `cancel`) are delivered twice per client (once via an in-process observer callback, once via the API process's own Redis-subscriber loopback); worker-originated events (`progress`, `done`) aren't affected since the worker process's observer lists are always empty.
+4. The pipeline's discrete stage (`init`/`extract`/`split`/`transcribe`/`generate`/`done`) is forwarded live over SSE but never persisted to the `jobs` table — only `progress_percent`/`progress_message` are — so a refresh mid-job can't reconstruct which step a job is on.
+5. Stage percent boundaries (10/25/30/75/100) are unweighted magic numbers with no timing basis.
+
+Tasks (see `QUEUE_PROGRESS_REVIEW.md` for full detail):
+- DB: new migration adding `jobs.progress_stage`; `ProgressBridge` persists it.
+- `core/pipeline.py`: compute `step_index`/`step_total` per job (accounting for whether splitting actually occurs); wire ffmpeg's native time-based progress into `extract`/`split` independent of `verbose_progress`.
+- `queue_/events.py` + `api/app.py`: remove the duplicate in-process observer delivery path; route 100% of SSE delivery through Redis pub/sub, matching `QUEUE.md`'s documented architecture.
+- API schema (`JobResponse`) and frontend types (`JobResponse`, `LiveJob`, `SseEventData`) gain `progress_stage`/`step_index`/`step_total`.
+- Frontend `QueuePage.tsx`: `JobCard` shows `Step {step_index} of {step_total} — {stage}` as the primary label with the existing percent bar as a secondary in-step indicator (indeterminate when no sub-progress source exists); wire the dead `pendingNewCount` to a `["jobs"]` query invalidation.
+
+Acceptance:
+- A job whose video takes >30s to decode shows continuously advancing percent during "Extracting audio", not a single jump from 10%→25%.
+- Creating a job from another tab/actor while the Queue page is open makes it appear within one SSE round-trip, no manual refresh required.
+- Each SSE event is delivered to a connected client exactly once (regression test covering the API-originated `new`/`cancel` path specifically).
+- A hard refresh mid-job shows the correct persisted step/stage, not just percent/message.
+- `step_total` reflects whether splitting actually occurred for that job (3 vs 4), not a hardcoded constant.
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean; frontend `vitest` and `tsc --noEmit` clean; new code ≥ 80% coverage.
 
 ## M6 — Polish, docs, coverage, security pass
 
