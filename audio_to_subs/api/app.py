@@ -36,6 +36,37 @@ from audio_to_subs.queue_.reaper import reap_stale_running  # noqa: E402
 logger = logging.getLogger(__name__)
 
 
+def _ensure_session_secret_file() -> None:
+    """Generate the session secret file before Settings is instantiated.
+
+    Settings validates that ``SESSION_SECRET`` resolves to a non-None value.
+    When the app is configured with ``SESSION_SECRET_FILE`` (container mode)
+    and the file does not exist yet (first boot, fresh volume), Settings would
+    crash because the file-based secret resolves to None.
+
+    This function reads the env vars directly — before Settings exists — and
+    creates the file so the subsequent ``get_settings()`` call succeeds. The
+    lifespan no longer needs to handle generation; it only needs to *use* the
+    secret that is now guaranteed to exist.
+    """
+    import os
+    from pathlib import Path
+
+    # If SESSION_SECRET is explicitly set, the file is irrelevant.
+    if os.environ.get("SESSION_SECRET"):
+        return
+
+    secret_file = os.environ.get("SESSION_SECRET_FILE")
+    if not secret_file:
+        return
+
+    if not Path(secret_file).exists():
+        from audio_to_subs.auth.sessions import SessionManager
+
+        SessionManager.write_secret_file(secret_file)
+        logger.info("Pre-generated session secret at %s", secret_file)
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan handler.
@@ -69,20 +100,6 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
         logger.error("Failed to run migrations: %s", result.stderr)
         raise RuntimeError(f"Migration failed: {result.stderr}")
     logger.info("Database migrations applied")
-
-    # Bootstrap session secret: generate and persist one if not provided via
-    # SESSION_SECRET and no secret file exists yet. Persisted to the data
-    # volume so sessions survive restarts.
-    if not settings.SESSION_SECRET and settings.SESSION_SECRET_FILE:
-        from pathlib import Path
-
-        from audio_to_subs.auth.sessions import SessionManager
-
-        if not Path(settings.SESSION_SECRET_FILE).exists():
-            SessionManager.write_secret_file(settings.SESSION_SECRET_FILE)
-            logger.info(
-                "Generated new session secret at %s", settings.SESSION_SECRET_FILE
-            )
 
     # Bootstrap admin user
     logger.info("Bootstrapping admin user...")
@@ -158,6 +175,7 @@ def create_app() -> FastAPI:
     Returns:
         FastAPI application instance
     """
+    _ensure_session_secret_file()
     settings = get_settings()
 
     app = FastAPI(

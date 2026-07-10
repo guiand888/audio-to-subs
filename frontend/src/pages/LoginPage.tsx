@@ -29,7 +29,9 @@ export function LoginPage() {
           if (err instanceof ApiError && err.status === 401) {
             toast.error("Invalid username or password")
           } else {
-            toast.error("Login failed — please try again")
+            toast.error(
+              "Server is starting up. Please wait a moment, then try again.",
+            )
           }
         },
       },
