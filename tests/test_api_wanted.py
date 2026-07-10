@@ -1,10 +1,12 @@
 """Tests for API wanted endpoints."""
 
 from datetime import datetime, timezone
+from unittest.mock import AsyncMock, patch
 
 import pytest
+from sqlalchemy import select
 
-from audio_to_subs.db.models import BazarrCache, JobStatus
+from audio_to_subs.db.models import BazarrCache, JobLog, JobStatus, LogLevel
 
 
 class TestWantedItemModel:
@@ -379,3 +381,23 @@ class TestWantedRefreshEndpoint:
         assert "episodes_processed" in data
         assert isinstance(data["movies_processed"], int)
         assert isinstance(data["episodes_processed"], int)
+
+    def test_refresh_client_init_failure_writes_error_job_log(
+        self, authenticated_client, sync_session
+    ):
+        """If initializing the Bazarr client raises, the failure is persisted
+        to the UI's activity log, not just returned in the HTTP response."""
+        with patch(
+            "audio_to_subs.bazarr.poller.get_bazarr_client_with_settings",
+            new=AsyncMock(side_effect=RuntimeError("boom")),
+        ):
+            response = authenticated_client.post("/api/wanted/refresh")
+
+        assert response.status_code == 200
+        assert response.json()["status"] == "failed"
+
+        log = sync_session.execute(
+            select(JobLog).where(JobLog.level == LogLevel.ERROR)
+        ).scalar_one()
+        assert log.job_id is None
+        assert "Bazarr sync failed" in log.message

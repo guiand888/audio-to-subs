@@ -7,13 +7,15 @@ from audio_to_subs.db.models import Job, JobLog, JobSource, JobStatus, LogLevel
 
 
 def test_get_global_logs_empty(authenticated_client):
-    """GET /api/logs returns empty results on a fresh database."""
+    """GET /api/logs returns only the fixture's login entry on an otherwise
+    fresh database (authenticated_client logs in, which now writes a global
+    INFO job_log entry)."""
     response = authenticated_client.get("/api/logs")
 
     assert response.status_code == 200
     data = response.json()
-    assert data["logs"] == []
-    assert data["total"] == 0
+    assert data["total"] == 1
+    assert data["logs"][0]["message"] == "User 'admin' logged in"
 
 
 def test_get_global_logs_with_entries(authenticated_client, sync_session):
@@ -54,8 +56,9 @@ def test_get_global_logs_with_entries(authenticated_client, sync_session):
     response = authenticated_client.get("/api/logs")
     assert response.status_code == 200
     data = response.json()
-    assert len(data["logs"]) == 3
-    assert data["total"] == 3
+    # +1 for the authenticated_client fixture's own login entry.
+    assert len(data["logs"]) == 4
+    assert data["total"] == 4
 
 
 def test_get_global_logs_filter_by_job_id(authenticated_client, sync_session):
@@ -148,12 +151,13 @@ def test_get_global_logs_pagination(authenticated_client, sync_session):
     )
     sync_session.commit()
 
+    # +1 for the authenticated_client fixture's own login entry.
     resp1 = authenticated_client.get("/api/logs", params={"limit": 3, "offset": 0})
     assert resp1.status_code == 200
     data1 = resp1.json()
     assert len(data1["logs"]) == 3
-    assert data1["total"] == 10
+    assert data1["total"] == 11
 
     resp2 = authenticated_client.get("/api/logs", params={"limit": 3, "offset": 9})
     assert resp2.status_code == 200
-    assert len(resp2.json()["logs"]) == 1
+    assert len(resp2.json()["logs"]) == 2

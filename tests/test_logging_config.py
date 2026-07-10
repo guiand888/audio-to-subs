@@ -10,7 +10,10 @@ from io import StringIO
 
 import pytest
 
-from audio_to_subs.core.logging_config import configure_logging
+from audio_to_subs.core.logging_config import (
+    configure_logging,
+    configure_logging_from_env,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -226,3 +229,32 @@ class TestLoggingDefaults:
         configure_logging(verbose=False)
         configure_logging(verbose=bool(1))
         configure_logging(verbose=bool(0))
+
+
+class TestConfigureLoggingFromEnv:
+    """Test LOG_LEVEL-driven configuration for non-interactive entry points."""
+
+    def test_unset_defaults_to_info(self, monkeypatch):
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        configure_logging_from_env()
+        assert logging.root.level == logging.INFO
+
+    def test_log_level_debug_enables_verbose(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        configure_logging_from_env()
+        assert logging.root.level == logging.DEBUG
+
+    def test_log_level_debug_is_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "debug")
+        configure_logging_from_env()
+        assert logging.root.level == logging.DEBUG
+
+    def test_log_level_info_stays_non_verbose(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+        configure_logging_from_env()
+        assert logging.root.level == logging.INFO
+
+    def test_unrecognized_log_level_falls_back_to_info(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "bogus")
+        configure_logging_from_env()
+        assert logging.root.level == logging.INFO

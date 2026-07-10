@@ -13,10 +13,12 @@ from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.routes._helpers import get_job_or_404, publish_job_event
 from audio_to_subs.api.services.jobs import create_job_service
 from audio_to_subs.core.file_rename import rename_subtitle_language
+from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import (
     Job,
     JobSource,
     JobStatus,
+    LogLevel,
     OutputFormat,
 )
 from audio_to_subs.queue_.events import publish_cancel, publish_new
@@ -407,6 +409,12 @@ async def notify_bazarr(
                 radarr_id = int(job.source_ref)
                 await client.rescan_movie(radarr_id)
                 logger.info(f"Triggered Bazarr rescan for movie {radarr_id}")
+                await write_job_log(
+                    db,
+                    LogLevel.INFO,
+                    f"Triggered Bazarr rescan for movie {radarr_id}",
+                    job_id=job_id,
+                )
 
             return {
                 "status": "triggered",
@@ -429,14 +437,33 @@ async def notify_bazarr(
                         logger.warning(
                             f"Bazarr rescan failed for episode {sonarr_episode_id}"
                         )
+                        await write_job_log(
+                            db,
+                            LogLevel.WARNING,
+                            f"Bazarr rescan failed for episode {sonarr_episode_id}",
+                            job_id=job_id,
+                        )
                         return {"status": "failed", "error": "Bazarr rescan failed"}
                     logger.info(
                         f"Triggered Bazarr rescan for episode {sonarr_episode_id}"
+                    )
+                    await write_job_log(
+                        db,
+                        LogLevel.INFO,
+                        f"Triggered Bazarr rescan for episode {sonarr_episode_id}",
+                        job_id=job_id,
                     )
                 else:
                     logger.warning(
                         f"Cannot trigger Bazarr rescan for episode {sonarr_episode_id}: "
                         "episode not found in Bazarr"
+                    )
+                    await write_job_log(
+                        db,
+                        LogLevel.WARNING,
+                        f"Cannot trigger Bazarr rescan for episode "
+                        f"{sonarr_episode_id}: episode not found in Bazarr",
+                        job_id=job_id,
                     )
                     return {"status": "failed", "error": "episode not found in Bazarr"}
 
@@ -449,10 +476,22 @@ async def notify_bazarr(
         else:
             # Unknown Bazarr source type — shouldn't happen given the enum, but guard it
             logger.warning(f"Unhandled source {job.source!r} for job {job_id}")
+            await write_job_log(
+                db,
+                LogLevel.WARNING,
+                f"Unhandled Bazarr source {job.source!r} for job {job_id}",
+                job_id=job_id,
+            )
             return {"status": "skipped", "reason": f"Unhandled source: {job.source}"}
 
     except Exception as e:
         logger.warning(f"Failed to trigger Bazarr rescan for job {job_id}: {e}")
+        await write_job_log(
+            db,
+            LogLevel.WARNING,
+            f"Failed to trigger Bazarr rescan: {e}",
+            job_id=job_id,
+        )
         return {"status": "failed", "error": str(e)}
 
     finally:

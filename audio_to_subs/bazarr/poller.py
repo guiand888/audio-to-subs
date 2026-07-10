@@ -12,7 +12,8 @@ from sqlalchemy import delete, or_, select
 
 from audio_to_subs.bazarr.client import BazarrClient
 from audio_to_subs.bazarr.pathmap import PathMap
-from audio_to_subs.db.models import BazarrCache
+from audio_to_subs.db.job_logs import write_job_log
+from audio_to_subs.db.models import BazarrCache, LogLevel
 
 if TYPE_CHECKING:
     from fastapi import FastAPI
@@ -289,9 +290,16 @@ async def poll_bazarr_manually(
             episodes_processed,
             deleted_count,
         )
+        await write_job_log(
+            db,
+            LogLevel.INFO,
+            f"Bazarr sync completed: {movies_processed} movies, "
+            f"{episodes_processed} episodes processed, {deleted_count} stale removed",
+        )
 
     except Exception as e:
         logger.error("Error during Bazarr poll: %s", e, exc_info=True)
+        await write_job_log(db, LogLevel.ERROR, f"Bazarr sync failed: {e}")
         raise
 
     return movies_processed, episodes_processed

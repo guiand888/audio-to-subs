@@ -258,7 +258,9 @@ class TestPersistLog:
         await mock_db_session.flush()
         await mock_db_session.commit()
 
-        await persist_log(mock_db_session, job.id, LogLevel.ERROR, "something failed")
+        await persist_log(
+            mock_db_session, LogLevel.ERROR, "something failed", job_id=job.id
+        )
 
         rows = (
             (

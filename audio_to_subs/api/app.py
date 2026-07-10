@@ -5,25 +5,33 @@ import logging
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 
-from fastapi import Depends, FastAPI
-from fastapi.middleware.cors import CORSMiddleware
+from audio_to_subs.core.logging_config import configure_logging_from_env
 
-from audio_to_subs.api.routes import auth, healthz
-from audio_to_subs.api.routes.history import router as history_router
-from audio_to_subs.api.routes.jobs import router as jobs_router
-from audio_to_subs.api.routes.logs import (
+# Must run before any other audio_to_subs module logs anything, and before
+# uvicorn (which never configures the root logger itself) starts emitting -
+# otherwise logger.info/.debug calls throughout the API process are silently
+# discarded.
+configure_logging_from_env()
+
+from fastapi import Depends, FastAPI  # noqa: E402
+from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
+
+from audio_to_subs.api.routes import auth, healthz  # noqa: E402
+from audio_to_subs.api.routes.history import router as history_router  # noqa: E402
+from audio_to_subs.api.routes.jobs import router as jobs_router  # noqa: E402
+from audio_to_subs.api.routes.logs import (  # noqa: E402
     global_logs_router,
 )
-from audio_to_subs.api.routes.logs import (
+from audio_to_subs.api.routes.logs import (  # noqa: E402
     router as jobs_logs_router,
 )
-from audio_to_subs.api.routes.settings import router as settings_router
-from audio_to_subs.api.routes.stream import router as stream_router
-from audio_to_subs.api.routes.wanted import router as wanted_router
-from audio_to_subs.api.settings import get_settings
-from audio_to_subs.auth.bootstrap import bootstrap_admin
-from audio_to_subs.bazarr.poller import start_poller, stop_poller
-from audio_to_subs.queue_.reaper import reap_stale_running
+from audio_to_subs.api.routes.settings import router as settings_router  # noqa: E402
+from audio_to_subs.api.routes.stream import router as stream_router  # noqa: E402
+from audio_to_subs.api.routes.wanted import router as wanted_router  # noqa: E402
+from audio_to_subs.api.settings import get_settings  # noqa: E402
+from audio_to_subs.auth.bootstrap import bootstrap_admin  # noqa: E402
+from audio_to_subs.bazarr.poller import start_poller, stop_poller  # noqa: E402
+from audio_to_subs.queue_.reaper import reap_stale_running  # noqa: E402
 
 logger = logging.getLogger(__name__)
 
@@ -138,8 +146,8 @@ async def _run_reaper_periodically(database_url: str) -> None:
                 reaped = await reap_stale_running(session, stale_seconds=120)
                 if reaped > 0:
                     logger.info(f"Reaper: {reaped} stale jobs requeued")
-        except Exception as e:
-            logger.error(f"Reaper error: {e}")
+        except Exception:
+            logger.exception("Reaper error")
 
         await asyncio.sleep(60)  # Run every 60 seconds
 

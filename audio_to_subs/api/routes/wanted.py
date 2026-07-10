@@ -11,7 +11,8 @@ from sqlalchemy import desc, func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.bazarr.pathmap import PathMap
-from audio_to_subs.db.models import BazarrCache, Job, JobStatus
+from audio_to_subs.db.job_logs import write_job_log
+from audio_to_subs.db.models import BazarrCache, Job, JobStatus, LogLevel
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -358,6 +359,11 @@ async def refresh_wanted_list(
         )
     except Exception as e:
         logger.error("Failed to initialize Bazarr client: %s", type(e).__name__)
+        await write_job_log(
+            db,
+            LogLevel.ERROR,
+            "Bazarr sync failed: could not initialize Bazarr client",
+        )
         return WantedRefreshResponse(
             status="failed",
             movies_processed=0,

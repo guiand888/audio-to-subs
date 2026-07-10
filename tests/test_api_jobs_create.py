@@ -11,7 +11,9 @@ generation are pure string operations that don't require the file to exist.
 
 import json
 
-from audio_to_subs.db.models import Job, Setting
+from sqlalchemy import select
+
+from audio_to_subs.db.models import Job, JobLog, LogLevel, Setting
 
 MEDIA_PATH = "/movies/Test Movie (2024)/movie.mkv"
 
@@ -36,6 +38,27 @@ def test_create_job_auto_mode_ignores_language_code(authenticated_client):
     # No language suffix yet - the real language isn't known until the
     # worker finishes transcribing.
     assert data["output_path"] == "/movies/Test Movie (2024)/movie.srt"
+
+
+def test_create_job_writes_info_job_log(authenticated_client, sync_session):
+    """Job creation persists an INFO job_log entry visible in the UI's
+    activity log, not just an HTTP response."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": MEDIA_PATH,
+            "language_mode": "auto",
+        },
+    )
+    assert response.status_code == 201, response.text
+    job_id = response.json()["id"]
+
+    log = sync_session.execute(
+        select(JobLog).where(JobLog.job_id == job_id)
+    ).scalar_one()
+    assert log.level == LogLevel.INFO
+    assert "Job created" in log.message
 
 
 def test_create_job_explicit_mode_keeps_language_code(authenticated_client):

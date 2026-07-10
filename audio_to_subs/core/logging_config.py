@@ -4,6 +4,7 @@ Provides structured logging setup with configurable verbosity levels.
 """
 
 import logging
+import os
 import sys
 
 
@@ -16,9 +17,9 @@ def configure_logging(verbose: bool = False) -> None:
     """
     log_level = logging.DEBUG if verbose else logging.INFO
     log_format = (
-        "[%(levelname)s] %(name)s: %(message)s"
+        "%(asctime)s [%(levelname)s] %(name)s: %(message)s"
         if verbose
-        else "[%(levelname)s] %(message)s"
+        else "%(asctime)s [%(levelname)s] %(message)s"
     )
 
     # Configure root logger
@@ -34,3 +35,15 @@ def configure_logging(verbose: bool = False) -> None:
         logging.getLogger("mistralai").setLevel(logging.WARNING)
         logging.getLogger("httpx").setLevel(logging.WARNING)
         logging.getLogger("urllib3").setLevel(logging.WARNING)
+
+
+def configure_logging_from_env() -> None:
+    """Configure logging using the LOG_LEVEL environment variable.
+
+    Entry point for long-running processes (API, worker) that have no
+    interactive --verbose flag. LOG_LEVEL=DEBUG enables verbose logging;
+    any other value (including unset) falls back to normal INFO-level
+    operation. See configure_logging() for the underlying behavior.
+    """
+    verbose = os.environ.get("LOG_LEVEL", "INFO").strip().upper() == "DEBUG"
+    configure_logging(verbose=verbose)
