@@ -19,6 +19,7 @@ function settingsToFormData(settings: SettingsOut): Partial<SettingsPatch> {
     tv_root_path: settings.tv_root_path || "",
     subtitles_same_directory: settings.subtitles_same_directory ?? true,
     max_audio_length: settings.max_audio_length || 900,
+    timezone: settings.timezone || "UTC",
   }
 }
 
@@ -69,6 +70,7 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
       "tv_root_path",
       "subtitles_same_directory",
       "max_audio_length",
+      "timezone",
     ]
 
     let count = 0
