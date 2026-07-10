@@ -242,28 +242,50 @@ def get_app() -> FastAPI:
 # For running with uvicorn: uvicorn audio_to_subs.api.app:app
 # Defer app creation if running under pytest (autouse fixture will set up env)
 import sys  # noqa: E402
+from typing import Any, Protocol  # noqa: E402
+
+
+class _SupportsASGI(Protocol):
+    """The subset of the ASGI interface uvicorn needs from ``app``."""
+
+    async def __call__(
+        self, scope: dict[str, Any], receive: Any, send: Any
+    ) -> None: ...
+
+
+class _LazyApp:
+    """Lazily resolve the FastAPI app on first use (pytest-safe).
+
+    During pytest collection, ``create_app()`` may fail because the test
+    environment is not yet configured by the autouse fixture. Attribute access
+    (and the ASGI ``__call__``) is forwarded to a real ``FastAPI`` instance that
+    is only built on first use, after fixtures have set up the environment.
+
+    This replaces the previous ``_AppProxy`` hack, which assigned a proxy object
+    to a ``FastAPI``-typed module global and silenced the resulting
+    ``# type: ignore[assignment]``. Typing it via the ``_SupportsASGI`` Protocol
+    (M5.7) keeps ``app`` statically correct for uvicorn while preserving the
+    lazy, fixture-after-resolution behavior that tests rely on.
+    """
+
+    def __init__(self) -> None:
+        self._resolved: FastAPI | None = None
+
+    def _resolve(self) -> FastAPI:
+        if self._resolved is None:
+            self._resolved = get_app()
+        return self._resolved
+
+    async def __call__(self, scope: dict[str, Any], receive: Any, send: Any) -> None:
+        await self._resolve()(scope, receive, send)
+
+    def __getattr__(self, name: str) -> Any:
+        return getattr(self._resolve(), name)
+
+
+app: _SupportsASGI
 
 if "pytest" not in sys.modules:
     app = create_app()
 else:
-    # During pytest collection, create_app() may fail due to missing test env.
-    # Use lazy initialization that gets called after fixtures set up the environment.
-    # This lazy-proxy pattern is inherently dynamic (app: FastAPI | None | _AppProxy)
-    # and would need a Protocol-based redesign to type properly rather than a
-    # quick annotation; deferred to M5.7 rather than risking app-lifecycle
-    # behavior changes here.
-    app = None  # type: ignore[assignment]
-
-    def _get_lazy_app():  # type: ignore[no-untyped-def]
-        global app
-        if app is None:
-            app = get_app()
-        return app
-
-    class _AppProxy:
-        """Proxy to lazily create the FastAPI app during pytest."""
-
-        def __getattr__(self, name):  # type: ignore[no-untyped-def]
-            return getattr(_get_lazy_app(), name)
-
-    app = _AppProxy()  # type: ignore[assignment]
+    app = _LazyApp()
