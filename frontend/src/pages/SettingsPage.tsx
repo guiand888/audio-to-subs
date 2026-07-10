@@ -37,6 +37,7 @@ import { ApiError } from "@/lib/api"
 import { MistralSettingsForm } from "@/components/settings/MistralSettingsForm"
 import { BazarrSettingsForm } from "@/components/settings/BazarrSettingsForm"
 import { PathMappingsForm } from "@/components/settings/PathMappingsForm"
+import { LocalizationSettingsForm } from "@/components/settings/LocalizationSettingsForm"
 
 // Import the form state hook
 import { useSettingsForm } from "@/hooks/useSettingsForm"
@@ -358,6 +359,19 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent>
             <PathMappingsForm formData={formData} onChange={updateFormData} />
+          </CardContent>
+        </Card>
+
+        {/* Localization */}
+        <Card>
+          <CardHeader>
+            <CardTitle>Localization</CardTitle>
+            <CardDescription>
+              Choose how times are displayed throughout the UI
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <LocalizationSettingsForm formData={formData} onChange={updateFormData} />
           </CardContent>
         </Card>
       </div>

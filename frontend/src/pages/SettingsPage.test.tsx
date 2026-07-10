@@ -60,6 +60,7 @@ const MOCK_SETTINGS = {
   tv_root_path: "/tv",
   subtitles_same_directory: true,
   max_audio_length: 900,
+  timezone: "UTC",
 }
 
 const MOCK_CONNECTION_SUCCESS = {
@@ -201,6 +202,60 @@ describe("SettingsPage - Bazarr Configuration Section", () => {
       const urlInput = screen.getByLabelText(/Bazarr API URL/i)
       expect(urlInput).toBeInTheDocument()
       expect(urlInput).toHaveValue("http://localhost:6767")
+    })
+  })
+})
+
+describe("SettingsPage - Localization (timezone)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue(MOCK_SETTINGS)
+    vi.mocked(api.patch).mockResolvedValue(MOCK_SETTINGS)
+  })
+
+  it("renders the Localization section with the current timezone", async () => {
+    render(<SettingsPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText(/Localization/i)).toBeInTheDocument()
+    })
+    // The combobox button shows the persisted timezone value.
+    expect(screen.getByRole("combobox", { name: /Display Timezone/i })).toHaveTextContent("UTC")
+  })
+
+  it("selecting a timezone marks it as a change and saves it", async () => {
+    let persisted: Record<string, unknown> = { ...MOCK_SETTINGS }
+    vi.mocked(api.get).mockImplementation(() => Promise.resolve({ ...persisted }))
+    vi.mocked(api.patch).mockImplementation((_url: unknown, body: unknown) => {
+      persisted = { ...persisted, ...(body as object) }
+      return Promise.resolve({ ...persisted })
+    })
+
+    const user = userEvent.setup()
+    render(<SettingsPage />, { wrapper })
+
+    // Wait for the timezone combobox to render with the current value.
+    const combobox = await screen.findByRole("combobox", { name: /Display Timezone/i })
+    await waitFor(() => {
+      expect(combobox).toHaveTextContent("UTC")
+    })
+
+    // Open the picker and choose Europe/Paris.
+    await user.click(combobox)
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("Search timezone…")).toBeInTheDocument()
+    })
+    await user.click(screen.getByRole("option", { name: /Europe\/Paris/i }))
+
+    // The change should be tracked.
+    await waitFor(() => {
+      expect(screen.getByText("1 change")).toBeInTheDocument()
+    })
+
+    // Save and verify the PATCH carried the timezone.
+    await user.click(screen.getByText("Save Settings"))
+    await waitFor(() => {
+      expect(api.patch).toHaveBeenCalledWith("/api/settings", expect.objectContaining({ timezone: "Europe/Paris" }))
     })
   })
 })
