@@ -31,11 +31,37 @@ function jobTitle(job: LiveJob): string {
   return parts[parts.length - 1] ?? job.media_path
 }
 
+// Friendly labels for the pipeline's discrete stages.
+const STAGE_LABELS: Record<string, string> = {
+  init: "Preparing",
+  extract: "Extracting audio",
+  split: "Splitting audio",
+  transcribe: "Transcribing",
+  generate: "Generating subtitles",
+  done: "Complete",
+}
+
+// Stages that emit continuous ffmpeg/segment sub-progress. Stages without a
+// sub-progress source render an indeterminate (pulsing) bar instead of a
+// frozen percentage.
+const STAGES_WITH_SUBPROGRESS = new Set(["extract", "split", "transcribe"])
+
+function stageLabel(job: LiveJob): string {
+  const label = STAGE_LABELS[job.stage] ?? job.stage ?? "Processing"
+  if (job.step_index != null && job.step_total != null) {
+    return `Step ${job.step_index} of ${job.step_total} — ${label}`
+  }
+  return label
+}
+
 function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
   const isTerminal =
     job.status === "done" ||
     job.status === "failed" ||
     job.status === "cancelled"
+
+  const indeterminate =
+    job.status === "running" && !STAGES_WITH_SUBPROGRESS.has(job.stage)
 
   return (
     <Card
@@ -73,9 +99,15 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
         {/* Progress bar (only for running jobs) */}
         {job.status === "running" && (
           <div className="space-y-1">
-            <Progress value={job.percent} className="h-1.5" />
+            {indeterminate ? (
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-primary/20">
+                <div className="h-full w-1/3 animate-pulse rounded-full bg-primary" />
+              </div>
+            ) : (
+              <Progress value={job.percent} className="h-1.5" />
+            )}
             <div className="flex justify-between text-xs text-muted-foreground">
-              <span className="truncate">{job.stage || job.message || "Processing…"}</span>
+              <span className="truncate">{stageLabel(job)}</span>
               <span className="flex-none ml-2">{job.percent}%</span>
             </div>
           </div>
@@ -116,6 +148,7 @@ export function QueuePage() {
   const seed = useJobsStore((s) => s.seed)
   const remove = useJobsStore((s) => s.remove)
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
+  const pendingNewCount = useJobsStore((s) => s.pendingNewCount)
   const jobs = useJobsStore((s) => s.jobs)
 
   // Track job IDs we're currently animating out
@@ -145,6 +178,15 @@ export function QueuePage() {
     }, 1500)
     return () => clearTimeout(timer)
   }, [lastTerminalJobId, remove, queryClient])
+
+  // M5.8 (#2, verified): the "new" SSE event previously only bumped the
+  // (otherwise dead) pendingNewCount counter, so jobs created by another actor
+  // never appeared without a manual refresh. Invalidating ["jobs"] makes the
+  // store re-seed from GET /api/jobs and the new card shows up live.
+  useEffect(() => {
+    if (pendingNewCount === 0) return
+    void queryClient.invalidateQueries({ queryKey: ["jobs"] })
+  }, [pendingNewCount, queryClient])
 
   const handleCancel = (jobId: string) => {
     cancelJob.mutate(jobId, {
