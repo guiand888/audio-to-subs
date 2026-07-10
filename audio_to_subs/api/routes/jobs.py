@@ -90,6 +90,11 @@ class JobResponse(UTCAwareModel):
     priority: int
     progress_percent: int
     progress_message: str | None
+    # M5.8 (#4, verified): persisted step/stage for step-based UX + refresh
+    # survival. Nullable; step_index/step_total are None until extracted.
+    progress_stage: str | None
+    progress_step_index: int | None
+    progress_step_total: int | None
     cancel_requested: bool
     worker_id: str | None
     audio_duration_seconds: float | None
