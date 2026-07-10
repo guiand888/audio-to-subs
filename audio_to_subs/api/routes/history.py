@@ -23,11 +23,19 @@ class HistoryStats(BaseModel):
 
     total_jobs: int = Field(description="Total number of completed jobs")
     total_cost_usd: float = Field(description="Total cost across all jobs")
-    total_duration_seconds: float = Field(
-        description="Total audio duration across all jobs"
+    total_audio_length_seconds: float = Field(
+        description="Total audio track length across all jobs"
+    )
+    total_runtime_seconds: float = Field(
+        description="Total job wall-clock processing time across all jobs"
     )
     average_cost_usd: float = Field(description="Average cost per job")
-    average_duration_seconds: float = Field(description="Average duration per job")
+    average_audio_length_seconds: float = Field(
+        description="Average audio track length per job"
+    )
+    average_runtime_seconds: float = Field(
+        description="Average job wall-clock processing time per job"
+    )
     count_by_status: dict[str, int] = Field(
         description="Count of jobs by status", default_factory=dict
     )
@@ -151,26 +159,33 @@ async def _calculate_stats(
     if conditions:
         base_where = and_(base_where, and_(*conditions))
 
-    # Get total count, sum of costs, and sum of durations in one query
+    # Get total count, sum of costs, sum of audio length, and sum of runtime
     totals_query = select(
         func.count(Job.id).label("total_jobs"),
         func.sum(Job.estimated_cost_usd).label("total_cost_usd"),
-        func.sum(Job.audio_duration_seconds).label("total_duration_seconds"),
+        func.sum(Job.audio_duration_seconds).label("total_audio_length_seconds"),
+        func.sum(
+            (func.julianday(Job.finished_at) - func.julianday(Job.started_at))
+            * 86400.0
+        ).label("total_runtime_seconds"),
     ).where(base_where)
 
     totals_result = await db.execute(totals_query)
     totals_row = totals_result.one()
     total_jobs = totals_row.total_jobs or 0
     total_cost = float(totals_row.total_cost_usd or 0.0)
-    total_duration = float(totals_row.total_duration_seconds or 0.0)
+    total_audio_length = float(totals_row.total_audio_length_seconds or 0.0)
+    total_runtime = float(totals_row.total_runtime_seconds or 0.0)
 
     if total_jobs == 0:
         return HistoryStats(
             total_jobs=0,
             total_cost_usd=0.0,
-            total_duration_seconds=0.0,
+            total_audio_length_seconds=0.0,
+            total_runtime_seconds=0.0,
             average_cost_usd=0.0,
-            average_duration_seconds=0.0,
+            average_audio_length_seconds=0.0,
+            average_runtime_seconds=0.0,
         )
 
     # Get counts by status using GROUP BY
@@ -222,10 +237,14 @@ async def _calculate_stats(
     return HistoryStats(
         total_jobs=total_jobs,
         total_cost_usd=round(total_cost, 4),
-        total_duration_seconds=round(total_duration, 2),
+        total_audio_length_seconds=round(total_audio_length, 2),
+        total_runtime_seconds=round(total_runtime, 2),
         average_cost_usd=round(total_cost / total_jobs, 4) if total_jobs > 0 else 0.0,
-        average_duration_seconds=(
-            round(total_duration / total_jobs, 2) if total_jobs > 0 else 0.0
+        average_audio_length_seconds=(
+            round(total_audio_length / total_jobs, 2) if total_jobs > 0 else 0.0
+        ),
+        average_runtime_seconds=(
+            round(total_runtime / total_jobs, 2) if total_jobs > 0 else 0.0
         ),
         count_by_status=count_by_status,
         count_by_language=count_by_language,

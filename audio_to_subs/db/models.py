@@ -181,6 +181,16 @@ class Job(Base):
             JobStatus.CANCELLED,
         )
 
+    @property
+    def runtime_seconds(self) -> float | None:
+        """Wall-clock time the job spent processing, in seconds.
+
+        Returns ``None`` when either timestamp is missing.
+        """
+        if self.started_at and self.finished_at:
+            return (self.finished_at - self.started_at).total_seconds()
+        return None
+
 
 class JobLog(Base):
     """Job log model for milestone logging."""
