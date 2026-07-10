@@ -633,3 +633,92 @@ class TestSegmentTextBoundaryConditions:
         for line in result:
             if line:
                 assert len(line) <= 20, f"Line '{line}' exceeds max_chars=20"
+
+
+class TestFilenameIdempotency:
+    """Tests guarding against double-appending the language code.
+
+    Regression tests for the bug where ``generate_output_path`` embeds
+    the language code (explicit mode) and ``_generate_output_filename``
+    appends it again, producing ``stem.fr.fr.srt``.
+    """
+
+    def test_generate_filename_idempotent_with_existing_same_code(self, tmp_path):
+        """If the output path already ends with the same language code
+        (e.g. ``movie.fr.srt``), the generator must not append it again."""
+        generator = SubtitleGenerator()
+        segments = [{"start": 0.0, "end": 1.0, "text": "test"}]
+        output_file = tmp_path / "movie.fr.srt"
+
+        result = generator.generate(segments, str(output_file), "srt", "fr")
+
+        result_path = Path(result)
+        assert result_path.name == "movie.fr.srt"
+        assert result_path.exists()
+
+    def test_generate_filename_strips_double_appended_code(self, tmp_path):
+        """An already-broken path like ``movie.fr.fr.srt`` must collapse
+        back to ``movie.fr.srt`` (all trailing occurrences stripped)."""
+        generator = SubtitleGenerator()
+        segments = [{"start": 0.0, "end": 1.0, "text": "test"}]
+        output_file = tmp_path / "movie.fr.fr.srt"
+
+        result = generator.generate(segments, str(output_file), "srt", "fr")
+
+        result_path = Path(result)
+        assert result_path.name == "movie.fr.srt"
+        assert result_path.exists()
+
+    def test_generate_filename_different_code_preserved(self, tmp_path):
+        """When the stem already ends in a *different* language code
+        (e.g. ``show.fr.srt`` with target ``en``), both codes must
+        appear: ``show.fr.en.srt``."""
+        generator = SubtitleGenerator()
+        segments = [{"start": 0.0, "end": 1.0, "text": "test"}]
+        output_file = tmp_path / "show.fr.srt"
+
+        result = generator.generate(segments, str(output_file), "srt", "en")
+
+        result_path = Path(result)
+        assert result_path.name == "show.fr.en.srt"
+        assert result_path.exists()
+
+    def test_generate_filename_with_directory_and_double_code(self, tmp_path):
+        """Double-appending must be fixed even when the path has a
+        directory component (the real-world scenario)."""
+        generator = SubtitleGenerator()
+        segments = [{"start": 0.0, "end": 1.0, "text": "test"}]
+        subdir = tmp_path / "tv" / "Show"
+        subdir.mkdir(parents=True)
+        output_file = subdir / "Show.S01E01.AC3.fr.srt"
+
+        result = generator.generate(segments, str(output_file), "srt", "fr")
+
+        result_path = Path(result)
+        assert result_path.name == "Show.S01E01.AC3.fr.srt"
+        assert result_path.exists()
+        assert result_path.parent == subdir
+
+    def test_generate_output_filename_idempotent_unit(self):
+        """Unit-level test for _generate_output_filename with same code."""
+        generator = SubtitleGenerator()
+
+        result = generator._generate_output_filename("movie.fr.srt", "srt", "fr")
+
+        assert result == "movie.fr.srt"
+
+    def test_generate_output_filename_strips_double_unit(self):
+        """Unit-level test: double code is stripped to single."""
+        generator = SubtitleGenerator()
+
+        result = generator._generate_output_filename("movie.fr.fr.srt", "srt", "fr")
+
+        assert result == "movie.fr.srt"
+
+    def test_generate_output_filename_triple_code_collapses(self):
+        """Even a triple-appended code collapses to a single occurrence."""
+        generator = SubtitleGenerator()
+
+        result = generator._generate_output_filename("movie.fr.fr.fr.srt", "srt", "fr")
+
+        assert result == "movie.fr.srt"

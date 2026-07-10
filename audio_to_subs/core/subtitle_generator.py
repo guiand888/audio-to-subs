@@ -361,11 +361,20 @@ class SubtitleGenerator:
         # But we want to remove the final extension if it's a subtitle format
         filename = output_file.name
 
-        # Remove subtitle format extensions if present
+        # Remove subtitle format extension if present
         for fmt in ["srt", "vtt", "webvtt", "sbv"]:
             if filename.endswith(f".{fmt}"):
                 filename = filename[: -len(f".{fmt}")]
                 break
+
+        # Strip any existing occurrences of the target language-code
+        # suffix so the code is applied exactly once (idempotency guard).
+        # This fixes the double-appending bug where generate_output_path
+        # already embedded the code (explicit mode) and this method
+        # appended it again, producing stem.fr.fr.srt.
+        lang_suffix = f".{language_code}"
+        while filename.endswith(lang_suffix):
+            filename = filename[: -len(lang_suffix)]
 
         # Generate new filename with language code
         # Format: filename.language_code.format
