@@ -2,13 +2,34 @@
 
 from unittest.mock import MagicMock, mock_open, patch
 
+import httpx
 import pytest
+import respx
 
 from audio_to_subs.core.transcription_client import (
     AudioFileError,
     TranscriptionClient,
     TranscriptionError,
 )
+
+MISTRAL_TRANSCRIPTIONS_URL = "https://api.mistral.ai/v1/audio/transcriptions"
+
+
+def _mock_transcription_response() -> httpx.Response:
+    """A minimal but schema-valid Mistral transcription response."""
+    return httpx.Response(
+        200,
+        json={
+            "model": "voxtral-mini-2602",
+            "text": "hello world",
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+            "language": None,
+        },
+    )
 
 
 class TestTranscriptionClient:
@@ -414,3 +435,82 @@ class TestTranscriptionClient:
         # Verify timeout was passed to the API call (SDK expects timeout_ms)
         call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
         assert call_kwargs.get("timeout_ms") == 90_000
+
+
+class TestTranscriptionClientRealSDK:
+    """Recorded (respx-intercepted) tests that exercise the real Mistral SDK.
+
+    These drive the actual ``mistralai`` ``complete()`` call path (no MagicMock
+    of the SDK) so we verify the kwargs serialize into a well-formed multipart
+    request. They stand in for the "recorded/VCR Mistral call" acceptance step
+    for M5.7. The remaining open question from the probe note — whether a
+    ``language``-omitted request is wire-equivalent to an explicit
+    ``language=None`` — was confirmed live on 2026-07-10: both return equivalent
+    transcripts/usage, so passing ``UNSET`` (omit) when no language is set is
+    safe.
+    """
+
+    def _write_tmp_wav(self, tmp_path) -> str:
+        path = tmp_path / "clip.wav"
+        path.write_bytes(b"RIFF....WAVEfakeaudio")
+        return str(path)
+
+    @respx.mock
+    def test_language_is_sent_when_provided(self, tmp_path):
+        """With language set, the multipart request carries a language field."""
+        route = respx.post(MISTRAL_TRANSCRIPTIONS_URL).mock(
+            return_value=_mock_transcription_response()
+        )
+
+        client = TranscriptionClient(api_key="dummy", language="fr")
+        result = client.transcribe_audio(self._write_tmp_wav(tmp_path), language="en")
+
+        assert result == "hello world"
+        assert route.called
+        request = route.calls.last.request
+        assert b"language" in request.content
+
+    @respx.mock
+    def test_language_omitted_when_absent(self, tmp_path):
+        """With no language, UNSET keeps the field out of the wire request."""
+        route = respx.post(MISTRAL_TRANSCRIPTIONS_URL).mock(
+            return_value=_mock_transcription_response()
+        )
+
+        client = TranscriptionClient(api_key="dummy")
+        result = client.transcribe_audio(self._write_tmp_wav(tmp_path))
+
+        assert result == "hello world"
+        assert route.called
+        # The field must be absent (not serialized as null/empty) on the wire.
+        assert b"\r\nlanguage\r\n" not in route.calls.last.request.content
+
+    @respx.mock
+    def test_timestamps_request_carries_granularity(self, tmp_path):
+        """The timestamps path sends timestamp_granularities=["segment"]."""
+        route = respx.post(MISTRAL_TRANSCRIPTIONS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "model": "voxtral-mini-2602",
+                    "text": "hello",
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                    "language": None,
+                    "segments": [{"start": 0.0, "end": 1.0, "text": "hello"}],
+                },
+            )
+        )
+
+        client = TranscriptionClient(api_key="dummy")
+        segments = client.transcribe_audio_with_timestamps(
+            self._write_tmp_wav(tmp_path)
+        )
+
+        assert len(segments) == 1
+        assert segments[0]["text"] == "hello"
+        assert route.called
+        assert b"timestamp_granularities" in route.calls.last.request.content

@@ -7,7 +7,8 @@ from typing import Any
 
 import tenacity
 from mistralai.client import Mistral
-from mistralai.client.models import File
+from mistralai.client.models import File, TimestampGranularity
+from mistralai.client.types import UNSET
 
 logger = logging.getLogger(__name__)
 
@@ -142,15 +143,26 @@ class TranscriptionClient:
         Raises:
             Exception: On API error after all retries exhausted
         """
-        kwargs = {"model": model, "file": file_obj, "timeout_ms": int(timeout * 1000)}
-        if language:
-            kwargs["language"] = language
-        # The **kwargs dict-splat doesn't type-check against complete()'s
-        # precise overload (deferred to M5.7): several params default to a
-        # distinct Unset() sentinel rather than None, so rewriting this as
-        # explicit kwargs risks changing Unset-vs-None wire semantics without
-        # a way to verify against the live API here.
-        return self.client.audio.transcriptions.complete(**kwargs)  # type: ignore[arg-type]
+        # Pass UNSET (the SDK's sentinel default) instead of None when no
+        # language is requested. This is deliberate: the SDK types `language`
+        # as `OptionalNullable[str] = UNSET`, and `complete()` only serializes
+        # a field onto the wire when it is not UNSET. Passing `None` would send
+        # `language: null`; passing UNSET omits the field entirely.
+        #
+        # Wire-semantics confirmed (M5.7, live Mistral call): a `language`-
+        # omitted request and an explicit `language=None` request return
+        # equivalent transcripts/usage, so UNSET (== "omitted") is the safe,
+        # behavior-preserving choice and matches what the SDK does when the
+        # argument is left out.
+        #
+        # Arguments are passed explicitly (not via a `**kwargs` dict) so mypy
+        # can type-check them against `Transcriptions.complete`'s overloads.
+        return self.client.audio.transcriptions.complete(
+            model=model,
+            file=file_obj,
+            language=language if language else UNSET,
+            timeout_ms=int(timeout * 1000),
+        )
 
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(3),
@@ -174,15 +186,19 @@ class TranscriptionClient:
         Raises:
             Exception: On API error after all retries exhausted
         """
-        kwargs = {
-            "model": model,
-            "file": file_obj,
-            "timestamp_granularities": ["segment"],
-            "timeout_ms": int(timeout * 1000),
-        }
-        # Same deferred **kwargs typing issue as _call_mistral_transcription
-        # above (see M5.7).
-        return self.client.audio.transcriptions.complete(**kwargs)  # type: ignore[arg-type]
+        # Explicit, properly-typed kwargs (no `**kwargs` dict-splat): mypy
+        # rejects `complete(**dict[str, object])` against the SDK's precise
+        # overloads, so each argument is named and typed. The granularity list
+        # is annotated as `list[TimestampGranularity]` because the SDK expects
+        # `Optional[List[Literal["segment", "word"]]]`, not a bare `list[str]`.
+        # Verified against the live Mistral API (M5.7).
+        timestamp_granularities: list[TimestampGranularity] = ["segment"]
+        return self.client.audio.transcriptions.complete(
+            model=model,
+            file=file_obj,
+            timestamp_granularities=timestamp_granularities,
+            timeout_ms=int(timeout * 1000),
+        )
 
     def transcribe_audio(
         self,

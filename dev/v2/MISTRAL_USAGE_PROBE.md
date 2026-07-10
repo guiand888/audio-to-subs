@@ -116,3 +116,20 @@ A follow-up probe adapted from this script should specifically:
 - Try the tuple-based `file=("clip.wav", f, "audio/wav")` form used above instead of building a `File(...)` object — if the SDK accepts it identically, it may sidestep the `fileName`/`contentType` alias mismatch in `transcription_client.py` entirely, rather than just fixing the keyword casing.
 
 Same cost/setup caveats as above (a few cents, needs `MISTRAL_API_KEY`, short clip).
+
+### Resolution (M5.7, 2026-07-10)
+
+Both open questions are now settled against the live Mistral API:
+
+- **`language` omitted vs `language=None`:** a `language`-omitted call and an
+  explicit `language=None` call return equivalent transcripts/usage, so passing
+  `UNSET` (which omits the field on the wire) when no language is set is
+  behavior-preserving and safe. `transcription_client.py` passes `UNSET` (not
+  `None`) for this reason; see the comment above
+  `_call_mistral_transcription`.
+- **`File(...)` object vs tuple form:** the `File(...)` constructor (with
+  `file_name`/`content_type`) is already type-correct against
+  `Transcriptions.complete` and serializes correctly on the wire, so the tuple
+  form is unnecessary. The calls were rewritten with explicit, typed kwargs
+  (no `**kwargs` splat) to satisfy mypy --strict, and verified live for both
+  `_call_mistral_transcription` and `_call_mistral_transcription_with_timestamps`.
