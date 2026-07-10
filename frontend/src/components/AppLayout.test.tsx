@@ -46,7 +46,7 @@ describe("AppLayout - backend unreachable", () => {
       error: new TypeError("Failed to fetch"),
       isFetching: false,
       refetch: vi.fn(),
-    } as ReturnType<typeof useMe>)
+    } as unknown as ReturnType<typeof useMe>)
 
     render(<AppLayout />)
 
@@ -63,7 +63,7 @@ describe("AppLayout - backend unreachable", () => {
       error: new TypeError("Failed to fetch"),
       isFetching: true,
       refetch: vi.fn(),
-    } as ReturnType<typeof useMe>)
+    } as unknown as ReturnType<typeof useMe>)
 
     render(<AppLayout />)
 
@@ -81,7 +81,7 @@ describe("AppLayout - backend unreachable", () => {
       error: new TypeError("Failed to fetch"),
       isFetching: false,
       refetch: mockRefetch,
-    } as ReturnType<typeof useMe>)
+    } as unknown as ReturnType<typeof useMe>)
 
     render(<AppLayout />)
 
@@ -96,7 +96,7 @@ describe("AppLayout - backend unreachable", () => {
       error: null,
       isFetching: false,
       refetch: vi.fn(),
-    } as ReturnType<typeof useMe>)
+    } as unknown as ReturnType<typeof useMe>)
 
     render(<AppLayout />)
 
