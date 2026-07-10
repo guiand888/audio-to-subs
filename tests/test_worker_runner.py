@@ -241,6 +241,72 @@ class TestPersistResult:
         assert refreshed.mistral_detected_language == "fr"
         assert refreshed.needs_language_review is False
 
+    @pytest.mark.asyncio
+    async def test_persist_result_updates_output_path(self, mock_db_session):
+        """persist_result must write result.output_path to job.output_path so
+        the DB always reflects the actual on-disk file (critical in auto
+        mode where the language isn't known at creation time)."""
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+            output_path="/test/video.srt",
+            language_mode="auto",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(
+            status=JobStatus.DONE,
+            output_path="/test/video.fr.srt",
+            detected_language="fr",
+            language_mode="auto",
+        )
+
+        await persist_result(mock_db_session, job_id, result)
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.output_path == "/test/video.fr.srt"
+
+    @pytest.mark.asyncio
+    async def test_persist_result_preserves_output_path_when_none(
+        self, mock_db_session
+    ):
+        """If result.output_path is None (e.g. failure), the existing
+        job.output_path must not be clobbered."""
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+            output_path="/test/video.fr.srt",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+
+        job_id = job.id
+        result = JobResult(
+            status=JobStatus.FAILED,
+            error_message="boom",
+        )
+
+        await persist_result(mock_db_session, job_id, result)
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.output_path == "/test/video.fr.srt"
+
 
 class TestPersistLog:
     """Test persist_log writes a JobLog row."""
@@ -470,3 +536,33 @@ class TestRunJob:
 
         mock_generate_path.assert_called_once()
         assert result.status == JobStatus.DONE
+
+    @pytest.mark.asyncio
+    async def test_run_job_returns_output_path_in_result(self, mock_db_session):
+        """run_job must carry the pipeline's actual output_path (which may
+        differ from the creation-time path in auto mode) into the JobResult
+        so persist_result can write it to the DB."""
+        claimed = make_claimed_job(
+            output_path="/test/video.srt",
+            language_code=None,
+            language_mode="auto",
+        )
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/test/video.fr.srt",
+            audio_duration_seconds=30.0,
+            mistral_usage=None,
+            segments_count=1,
+            detected_language="fr",
+        )
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.DONE
+        assert result.output_path == "/test/video.fr.srt"

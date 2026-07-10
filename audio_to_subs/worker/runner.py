@@ -71,6 +71,7 @@ class JobResult:
     estimated_cost_usd: Optional[float] = None
     detected_language: Optional[str] = None
     language_mode: Optional[str] = None
+    output_path: Optional[str] = None
 
 
 async def persist_result(
@@ -93,6 +94,8 @@ async def persist_result(
                 job.mistral_usage_json = result.mistral_usage_json
             if result.estimated_cost_usd is not None:
                 job.estimated_cost_usd = result.estimated_cost_usd
+            if result.output_path:
+                job.output_path = result.output_path
             if result.detected_language is not None:
                 job.mistral_detected_language = result.detected_language
             if result.language_mode == "auto":
@@ -318,6 +321,7 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
             estimated_cost_usd=cost_breakdown.estimated_cost_usd,
             detected_language=result.detected_language,
             language_mode=claimed.language_mode,
+            output_path=result.output_path,
         )
 
     except Cancelled:
