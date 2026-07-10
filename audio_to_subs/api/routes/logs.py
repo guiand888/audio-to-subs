@@ -9,7 +9,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
 
 from audio_to_subs.api.deps import get_db
-from audio_to_subs.api.routes._helpers import get_job_or_404
+from audio_to_subs.api.routes._helpers import UTCAwareModel, get_job_or_404
 from audio_to_subs.db.models import JobLog, LogLevel
 
 if TYPE_CHECKING:
@@ -22,7 +22,7 @@ jobs_logs_router = APIRouter(prefix="/api/jobs", tags=["logs"])
 global_logs_router = APIRouter(prefix="/api/logs", tags=["logs"])
 
 
-class JobLogResponse(BaseModel):
+class JobLogResponse(UTCAwareModel):
     """Response model for a job log entry."""
 
     model_config = {"from_attributes": True}

@@ -10,7 +10,11 @@ from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
-from audio_to_subs.api.routes._helpers import get_job_or_404, publish_job_event
+from audio_to_subs.api.routes._helpers import (
+    UTCAwareModel,
+    get_job_or_404,
+    publish_job_event,
+)
 from audio_to_subs.api.services.jobs import create_job_service
 from audio_to_subs.core.file_rename import rename_subtitle_language
 from audio_to_subs.db.job_logs import write_job_log
@@ -67,7 +71,7 @@ class JobCreateRequest(BaseModel):
     )
 
 
-class JobResponse(BaseModel):
+class JobResponse(UTCAwareModel):
     """Response model for a job."""
 
     model_config = {"from_attributes": True}

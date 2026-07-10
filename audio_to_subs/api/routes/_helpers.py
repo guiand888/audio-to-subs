@@ -7,10 +7,12 @@ part of the public API surface.
 
 import logging
 from collections.abc import Awaitable
+from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
 from uuid import UUID
 
 from fastapi import HTTPException, status
+from pydantic import BaseModel, model_validator
 from sqlalchemy import select
 
 from audio_to_subs.db.models import Job
@@ -22,6 +24,29 @@ if TYPE_CHECKING:
     from audio_to_subs.api.settings import Settings
 
 logger = logging.getLogger(__name__)
+
+
+class UTCAwareModel(BaseModel):
+    """Pydantic base that stamps naive datetime fields as UTC.
+
+    The DB stores timestamps as naive UTC (SQLite ``CURRENT_TIMESTAMP``) and
+    Pydantic v2 serializes naive datetimes WITHOUT an offset, which makes the
+    wire format ambiguous: JavaScript's ``Date`` parser then treats the value
+    as local time (the root cause of the "UI always shows UTC" symptom). This
+    validator stamps any naive datetime field with ``timezone.utc`` after
+    validation, so the serialized output carries an explicit ``+00:00``
+    offset that the frontend can reliably convert to the user's timezone.
+
+    Aware datetimes are left untouched (never double-stamped).
+    """
+
+    @model_validator(mode="after")
+    def _stamp_utc_on_naive_datetimes(self) -> "UTCAwareModel":
+        for field_name in type(self).model_fields:
+            value = getattr(self, field_name)
+            if isinstance(value, datetime) and value.tzinfo is None:
+                object.__setattr__(self, field_name, value.replace(tzinfo=timezone.utc))
+        return self
 
 
 async def get_job_or_404(db: "AsyncSession", job_id: UUID) -> Job:
