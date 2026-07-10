@@ -47,7 +47,7 @@ class ConfigParser:
         Returns:
             Dict with default configuration (format, temp_dir, etc.)
         """
-        defaults = self.config.get("defaults", {})
+        defaults: dict[str, Any] = self.config.get("defaults", {})
         if "format" not in defaults:
             defaults["format"] = "srt"
         return defaults

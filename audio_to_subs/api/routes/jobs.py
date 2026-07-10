@@ -7,7 +7,7 @@ from uuid import UUID
 
 from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import and_, desc, func, select, true
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.routes._helpers import (
@@ -166,7 +166,7 @@ async def list_jobs(
                 func.count(Job.id).label("count"),
             )
             .select_from(Job)
-            .where(and_(*conditions) if conditions else True)
+            .where(and_(*conditions) if conditions else true())
             .group_by(Job.status)
         )
     ).all()
@@ -370,7 +370,7 @@ async def notify_bazarr(
     job_id: UUID,
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
-) -> dict[str, str]:
+) -> dict[str, str | None]:
     """Trigger Bazarr rescan for a completed job.
 
     This endpoint triggers a rescan in Bazarr for the source media of a job.

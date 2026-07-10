@@ -1,6 +1,7 @@
 """FastAPI dependencies for authentication."""
 
 import time
+from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import Depends, HTTPException, Request, Response, status
@@ -21,7 +22,7 @@ if TYPE_CHECKING:
     from audio_to_subs.api.settings import Settings
 
 
-async def get_db() -> AsyncSession:
+async def get_db() -> AsyncGenerator[AsyncSession, None]:
     """FastAPI dependency for async database session.
 
     Uses the configured DATABASE_URL (from settings) so tests and production
@@ -49,7 +50,7 @@ async def get_session_manager_dep() -> SessionManager:
     )
 
 
-async def get_settings_dep():
+async def get_settings_dep() -> "Settings":
     """FastAPI dependency for settings (local version to avoid circular import)."""
     from audio_to_subs.api.settings import get_settings
 
@@ -159,6 +160,9 @@ async def get_current_user(
     # Sliding renewal: renew session if older than threshold
     iat = payload.get("iat", 0)
     if (time.time() - iat) > SLIDING_RENEWAL_THRESHOLD:
+        # token is guaranteed non-None here: _resolve_user() above already
+        # raised 401 if it were None.
+        assert token is not None
         new_token = session_manager.renew_session(token)
         set_session_cookie(response, new_token, secure=settings.BEHIND_TLS)
 

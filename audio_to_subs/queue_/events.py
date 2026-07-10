@@ -169,7 +169,7 @@ async def publish_cancel(redis: Redis, job_id: str) -> None:
         redis: Redis async client
         job_id: UUID of the job to cancel
     """
-    payload = {}
+    payload: dict[str, Any] = {}
     # Publish to job-specific channel
     await _publish(redis, f"jobs:cancel:{job_id}", payload)
     # Also publish to global fan-out channel

@@ -4,6 +4,8 @@ SQLite with WAL mode for concurrent read/write access.
 SQLAlchemy 2.x ORM.
 """
 
+from typing import Any
+
 from sqlalchemy import event
 from sqlalchemy.engine import Engine
 from sqlalchemy.ext.asyncio import (
@@ -61,7 +63,7 @@ def _install_sqlite_listeners(sync_engine: Engine) -> None:
     """
 
     @event.listens_for(sync_engine, "connect")
-    def _on_connect(dbapi_connection, connection_record):
+    def _on_connect(dbapi_connection: Any, connection_record: Any) -> None:
         # Disable pysqlite's implicit transaction management so we can emit our
         # own BEGIN IMMEDIATE below. Without this, transactions start DEFERRED:
         # a SELECT-then-UPDATE acquires a read lock first, then fails instantly
@@ -72,7 +74,7 @@ def _install_sqlite_listeners(sync_engine: Engine) -> None:
             dbapi_connection.execute(f"PRAGMA {key} = {value}")
 
     @event.listens_for(sync_engine, "begin")
-    def _on_begin(conn):
+    def _on_begin(conn: Any) -> None:
         # Acquire the write lock up front; busy_timeout then makes concurrent
         # writers wait politely instead of erroring.
         conn.exec_driver_sql("BEGIN IMMEDIATE")

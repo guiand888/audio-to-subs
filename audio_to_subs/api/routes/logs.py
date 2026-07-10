@@ -69,7 +69,7 @@ async def get_job_logs(
     if level_filter is not None:
         count_query = count_query.where(JobLog.level == level_filter)
     count_result = await db.execute(count_query)
-    total = count_result.scalar()
+    total = count_result.scalar() or 0
 
     # Get paginated logs
     query = query.order_by(desc(JobLog.ts)).limit(limit).offset(offset)
@@ -92,7 +92,10 @@ async def create_job_log(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
     level: LogLevel = LogLevel.INFO,
-    message: str = ...,
+    # Ellipsis is FastAPI's convention for "required" on a param that must
+    # follow ones with real defaults; mypy doesn't model this without a
+    # FastAPI/pydantic plugin.
+    message: str = ...,  # type: ignore[assignment]
 ) -> JobLogResponse:
     """Create a log entry for a job.
 

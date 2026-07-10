@@ -168,7 +168,8 @@ class Job(Base):
         if self.mistral_usage_json is None:
             return None
         try:
-            return json.loads(self.mistral_usage_json)
+            usage: dict[str, Any] = json.loads(self.mistral_usage_json)
+            return usage
         except json.JSONDecodeError:
             return None
 

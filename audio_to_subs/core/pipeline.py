@@ -161,6 +161,21 @@ class Pipeline:
         if self._cancel_token is not None:
             self._cancel_token.check()
 
+    def _single_arg_progress_callback(self) -> Optional[Callable[[str], None]]:
+        """Adapt self.progress_callback for extract_audio/split_audio.
+
+        Those helpers call their progress_callback with a single message
+        string (the percentage is already embedded in the text); self's
+        legacy ProgressCallback always requires a second `percent` arg, so
+        passing it through directly would raise TypeError the first time
+        FFmpeg reports progress. Returns None if verbose_progress is off or
+        no callback is configured.
+        """
+        if not self.verbose_progress or self.progress_callback is None:
+            return None
+        legacy_callback = self.progress_callback
+        return lambda message: legacy_callback(message, None)
+
     def _emit_progress(
         self,
         stage: Literal["init", "extract", "split", "transcribe", "generate", "done"],
@@ -185,7 +200,9 @@ class Pipeline:
             event: ProgressEvent = {"stage": stage, "message": message}
             if percent is not None:
                 event["percent"] = percent
-            event.update(extra)
+            # extra is a **kwargs dict[str, Any]; TypedDict.update() can't
+            # verify its keys/types match ProgressEvent's schema statically.
+            event.update(extra)  # type: ignore[typeddict-item]
             self._structured_progress_callback(event)
 
     def process_batch(self, jobs: list[dict[str, str]]) -> dict[str, PipelineResult]:
@@ -371,16 +388,11 @@ class Pipeline:
                 Path(self.temp_dir) / f"audio_{video_file.stem}_{uuid4().hex[:8]}.wav"
             )
 
-            # Only pass progress callback if verbose_progress is True
-            progress_callback = (
-                self.progress_callback if self.verbose_progress else None
-            )
-
             # Pass cancel_token to audio extractor
             return extract_audio(
                 video_path,
                 str(audio_path),
-                progress_callback=progress_callback,
+                progress_callback=self._single_arg_progress_callback(),
                 cancel_token=self._cancel_token,
             )
 
@@ -464,9 +476,7 @@ class Pipeline:
                 audio_path,
                 self.temp_dir,
                 max_length=self.max_audio_length,
-                progress_callback=(
-                    self.progress_callback if self.verbose_progress else None
-                ),
+                progress_callback=self._single_arg_progress_callback(),
                 cancel_token=self._cancel_token,
             )
             logger.debug(f"Audio split into {len(audio_segments)} segments")

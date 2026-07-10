@@ -5,7 +5,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, desc, func, select
+from sqlalchemy import ColumnElement, and_, desc, func, select
 
 from audio_to_subs.api.deps import get_db
 from audio_to_subs.api.routes.jobs import JobResponse
@@ -155,7 +155,7 @@ async def _calculate_stats(
         HistoryStats with all aggregate calculations
     """
     # Base query filters
-    base_where = Job.status.in_(statuses)
+    base_where: ColumnElement[bool] = Job.status.in_(statuses)
     if conditions:
         base_where = and_(base_where, and_(*conditions))
 
@@ -169,8 +169,7 @@ async def _calculate_stats(
         func.sum(Job.estimated_cost_usd).label("total_cost_usd"),
         func.sum(Job.audio_duration_seconds).label("total_audio_length_seconds"),
         func.sum(
-            (func.julianday(Job.finished_at) - func.julianday(Job.started_at))
-            * 86400.0
+            (func.julianday(Job.finished_at) - func.julianday(Job.started_at)) * 86400.0
         ).label("total_runtime_seconds"),
         func.count(Job.id)
         .filter(Job.estimated_cost_usd.isnot(None))
@@ -207,9 +206,9 @@ async def _calculate_stats(
     )
 
     status_result = await db.execute(status_query)
-    count_by_status = {
-        row.status.value if hasattr(row.status, "value") else str(row.status): row.count
-        for row in status_result.all()
+    count_by_status: dict[str, int] = {
+        (status_val.value if hasattr(status_val, "value") else str(status_val)): count
+        for status_val, count in status_result.all()
     }
 
     # Get counts by language using GROUP BY
@@ -224,7 +223,11 @@ async def _calculate_stats(
     )
 
     language_result = await db.execute(language_query)
-    count_by_language = {row.language_code: row.count for row in language_result.all()}
+    # language_code is filtered to isnot(None) in language_query above, so
+    # str(...) here is a type-narrowing no-op, never a real "None" string.
+    count_by_language: dict[str, int] = {
+        str(language_code): count for language_code, count in language_result.all()
+    }
 
     # Get counts by source using GROUP BY
     source_query = (
@@ -237,9 +240,9 @@ async def _calculate_stats(
     )
 
     source_result = await db.execute(source_query)
-    count_by_source = {
-        row.source.value if hasattr(row.source, "value") else str(row.source): row.count
-        for row in source_result.all()
+    count_by_source: dict[str, int] = {
+        (source_val.value if hasattr(source_val, "value") else str(source_val)): count
+        for source_val, count in source_result.all()
     }
 
     return HistoryStats(

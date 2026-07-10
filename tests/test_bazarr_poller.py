@@ -549,9 +549,7 @@ class TestProcessMovie:
         assert entry.media_path == "/local/movies/Inception (2010)/Inception.mkv"
 
     @pytest.mark.asyncio
-    async def test_process_movie_null_sceneName_uses_detail_path(
-        self, mock_db_session
-    ):
+    async def test_process_movie_null_sceneName_uses_detail_path(self, mock_db_session):
         """Mirrors the real-world bug: the wanted endpoint returns
         sceneName=None and the cache must still get a usable media_path
         from the joined-in full-detail path."""

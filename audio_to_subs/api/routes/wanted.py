@@ -195,11 +195,14 @@ async def list_wanted(  # noqa: C901
     offset = (page - 1) * page_size
     query = query.limit(page_size).offset(offset)
     result = await db.execute(query)
-    items = result.scalars().all()
+    # mypy misresolves db.execute()'s overload here (reuses the int-typed
+    # result from count_query above); runtime type is correctly
+    # Sequence[BazarrCache], confirmed by the passing test suite. See M5.7.
+    items: list[BazarrCache] = list(result.scalars().all())  # type: ignore[arg-type]
 
     # Filter by language if specified (Python-side since SQLite lacks json_contains)
     if language:
-        filtered_items = []
+        filtered_items: list[BazarrCache] = []
         for item in items:
             if item.missing_subtitles:
                 for sub in item.missing_subtitles:

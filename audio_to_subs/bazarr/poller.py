@@ -166,7 +166,7 @@ async def get_settings_value(
 
 async def get_track_no_subs(db: "AsyncSession") -> bool:
     """Check if bazarr_track_no_subs is enabled."""
-    return await get_settings_value(db, "bazarr_track_no_subs", False)
+    return bool(await get_settings_value(db, "bazarr_track_no_subs", False))
 
 
 async def poll_once(
@@ -729,7 +729,7 @@ async def _get_poll_interval(db: "AsyncSession") -> int:
     Returns:
         Poll interval in seconds (default: 3600)
     """
-    return await get_settings_value(db, "bazarr_poll_interval", 3600)
+    return int(await get_settings_value(db, "bazarr_poll_interval", 3600))
 
 
 async def run_bazarr_poller(app: "FastAPI") -> None:

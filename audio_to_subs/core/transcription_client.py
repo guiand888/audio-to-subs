@@ -80,13 +80,12 @@ class TranscriptionClient:
             Mistral File object wrapping the file's full contents
         """
         file_size = os.path.getsize(audio_path)
-        report_progress = bool(
-            self.progress_callback and segment_number and total_segments
-        )
+        callback = self.progress_callback
+        report_progress = bool(callback and segment_number and total_segments)
 
-        if report_progress:
+        if report_progress and callback is not None:
             mb_total = file_size / (1024 * 1024)
-            self.progress_callback(
+            callback(
                 f"Uploading segment {segment_number}/{total_segments}: 0 / {mb_total:.1f} MB (0%)",
                 0,
             )
@@ -94,17 +93,17 @@ class TranscriptionClient:
         with open(audio_path, "rb") as audio_file:
             file_content = audio_file.read()
 
-        if report_progress:
+        if report_progress and callback is not None:
             mb_total = file_size / (1024 * 1024)
-            self.progress_callback(
+            callback(
                 f"Uploading segment {segment_number}/{total_segments}: {mb_total:.1f} / {mb_total:.1f} MB (100%)",
                 100,
             )
 
         return File(
             content=file_content,
-            fileName=Path(audio_path).name,
-            contentType="audio/wav",
+            file_name=Path(audio_path).name,
+            content_type="audio/wav",
         )
 
     def _capture_usage(self, response: Any) -> None:
@@ -146,7 +145,12 @@ class TranscriptionClient:
         kwargs = {"model": model, "file": file_obj, "timeout_ms": int(timeout * 1000)}
         if language:
             kwargs["language"] = language
-        return self.client.audio.transcriptions.complete(**kwargs)
+        # The **kwargs dict-splat doesn't type-check against complete()'s
+        # precise overload (deferred to M5.7): several params default to a
+        # distinct Unset() sentinel rather than None, so rewriting this as
+        # explicit kwargs risks changing Unset-vs-None wire semantics without
+        # a way to verify against the live API here.
+        return self.client.audio.transcriptions.complete(**kwargs)  # type: ignore[arg-type]
 
     @tenacity.retry(
         stop=tenacity.stop_after_attempt(3),
@@ -176,7 +180,9 @@ class TranscriptionClient:
             "timestamp_granularities": ["segment"],
             "timeout_ms": int(timeout * 1000),
         }
-        return self.client.audio.transcriptions.complete(**kwargs)
+        # Same deferred **kwargs typing issue as _call_mistral_transcription
+        # above (see M5.7).
+        return self.client.audio.transcriptions.complete(**kwargs)  # type: ignore[arg-type]
 
     def transcribe_audio(
         self,
@@ -228,7 +234,7 @@ class TranscriptionClient:
                 f"Transcription response received, text length: {len(response.text)}"
             )
             self._capture_usage(response)
-            return response.text
+            return str(response.text)
         except Exception as e:
             logger.error(f"Transcription failed: {str(e)}")
             raise TranscriptionError(f"Transcription failed: {str(e)}") from e

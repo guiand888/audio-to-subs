@@ -7,6 +7,7 @@ Supported formats:
 - SBV (YouTube): .sbv files
 """
 
+from collections.abc import Iterator
 from pathlib import Path
 from typing import Any, Optional
 
@@ -138,7 +139,9 @@ def format_timestamp_sbv(seconds: float) -> str:
     return f"{hours}:{minutes:02d}:{secs:02d},{milliseconds:03d}"
 
 
-def _iter_subtitle_pages(segments: list[dict[str, Any]]):
+def _iter_subtitle_pages(
+    segments: list[dict[str, Any]],
+) -> Iterator[tuple[float, float, list[str]]]:
     """Yield (page_start_time, page_end_time, page_lines) across all segments.
 
     Shared page-splitting logic used by generate_srt/generate_vtt/generate_sbv:
@@ -221,6 +224,9 @@ class SubtitleGenerator:
             return self.generate_vtt(segments, final_output_path)
         elif output_format == "sbv":
             return self.generate_sbv(segments, final_output_path)
+        # Unreachable: output_format is validated against SUPPORTED_FORMATS
+        # above, and every value there is handled by a branch above.
+        raise SubtitleFormatError(f"Unsupported format: {output_format}")
 
     def generate_srt(self, segments: list[dict[str, Any]], output_path: str) -> str:
         """Generate SRT file from transcription segments.

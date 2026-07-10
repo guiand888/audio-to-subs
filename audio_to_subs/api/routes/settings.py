@@ -437,6 +437,55 @@ class BazarrConnectionTestResponse(BaseModel):
     ) = Field(default=None, description="Error type or category")
 
 
+def _map_bazarr_test_error(
+    e: Exception,
+) -> Literal[
+    "authentication_failed",
+    "resource_not_found",
+    "rate_limited",
+    "server_error",
+    "unexpected_response",
+    "connection_failed",
+]:
+    """Map a Bazarr connection-test exception to a user-facing error code.
+
+    Logs details for the categories that warrant it; never exposes
+    credentials, URLs, or other sensitive data to the client.
+    """
+    from audio_to_subs.bazarr.client import (
+        BazarrAuthError,
+        BazarrNotFoundError,
+        BazarrRateLimited,
+        BazarrServerError,
+    )
+
+    if isinstance(e, BazarrAuthError):
+        return "authentication_failed"
+    elif isinstance(e, BazarrNotFoundError):
+        return "resource_not_found"
+    elif isinstance(e, BazarrRateLimited):
+        return "rate_limited"
+    elif isinstance(e, BazarrServerError):
+        return "server_error"
+    elif isinstance(e, ValidationError):
+        # Reached Bazarr and got a response, but it didn't match our
+        # schema - this is schema drift, not a connectivity problem.
+        # Log field locations only, never payload values (may contain
+        # user media paths/titles).
+        locs = sorted({".".join(str(p) for p in err["loc"]) for err in e.errors()})
+        logger.warning(
+            "Bazarr connection test: unexpected response shape "
+            "(%d validation error(s) at: %s)",
+            e.error_count(),
+            ", ".join(locs),
+        )
+        return "unexpected_response"
+    else:
+        # Generic error - log it but don't expose details to user
+        logger.warning("Bazarr connection test failed: %s", type(e).__name__)
+        return "connection_failed"
+
+
 @router.post(
     "/test-bazarr-connection",
     response_model=BazarrConnectionTestResponse,
@@ -532,67 +581,12 @@ async def test_bazarr_connection(
 
         except Exception as e:
             # Handle various error types - never expose sensitive data
-            from audio_to_subs.bazarr.client import (
-                BazarrAuthError,
-                BazarrNotFoundError,
-                BazarrRateLimited,
-                BazarrServerError,
-            )
-
             await client.close()
-
-            # Map error types to user-friendly messages using isinstance
-            if isinstance(e, BazarrAuthError):
-                return BazarrConnectionTestResponse(
-                    success=False,
-                    message=None,
-                    error="authentication_failed",
-                )
-            elif isinstance(e, BazarrNotFoundError):
-                return BazarrConnectionTestResponse(
-                    success=False,
-                    message=None,
-                    error="resource_not_found",
-                )
-            elif isinstance(e, BazarrRateLimited):
-                return BazarrConnectionTestResponse(
-                    success=False,
-                    message=None,
-                    error="rate_limited",
-                )
-            elif isinstance(e, BazarrServerError):
-                return BazarrConnectionTestResponse(
-                    success=False,
-                    message=None,
-                    error="server_error",
-                )
-            elif isinstance(e, ValidationError):
-                # Reached Bazarr and got a response, but it didn't match our
-                # schema - this is schema drift, not a connectivity problem.
-                # Log field locations only, never payload values (may
-                # contain user media paths/titles).
-                locs = sorted(
-                    {".".join(str(p) for p in err["loc"]) for err in e.errors()}
-                )
-                logger.warning(
-                    "Bazarr connection test: unexpected response shape "
-                    "(%d validation error(s) at: %s)",
-                    e.error_count(),
-                    ", ".join(locs),
-                )
-                return BazarrConnectionTestResponse(
-                    success=False,
-                    message=None,
-                    error="unexpected_response",
-                )
-            else:
-                # Generic error - log it but don't expose details to user
-                logger.warning("Bazarr connection test failed: %s", type(e).__name__)
-                return BazarrConnectionTestResponse(
-                    success=False,
-                    message=None,
-                    error="connection_failed",
-                )
+            return BazarrConnectionTestResponse(
+                success=False,
+                message=None,
+                error=_map_bazarr_test_error(e),
+            )
 
     except Exception as e:
         # Catch any unexpected errors during client creation

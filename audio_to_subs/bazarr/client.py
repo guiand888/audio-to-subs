@@ -154,7 +154,7 @@ class BazarrClient:
         """
         if retry_after_seconds is not None:
             return min(float(retry_after_seconds), self._backoff_max)
-        delay = self._backoff_base * (2**attempt)
+        delay: float = self._backoff_base * float(2**attempt)
         return min(delay, self._backoff_max)
 
     def _handle_status(self, response: httpx.Response, path: str, attempt: int) -> None:
@@ -298,7 +298,8 @@ class BazarrClient:
         """
         response = await self._request("GET", path, params)
         response.raise_for_status()
-        return response.json()
+        data: dict[str, Any] = response.json()
+        return data
 
     async def _patch(
         self,

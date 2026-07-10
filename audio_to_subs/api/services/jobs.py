@@ -126,7 +126,7 @@ async def get_default_language_code(db: "AsyncSession") -> str | None:
         )
         value_json = result.scalar_one_or_none()
         if value_json:
-            return json.loads(value_json)
+            return str(json.loads(value_json))
     except Exception:
         pass
 

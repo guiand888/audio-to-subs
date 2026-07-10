@@ -9,7 +9,7 @@ import logging
 import re
 import subprocess
 import time
-from typing import Callable, Optional
+from typing import IO, Callable, Optional
 
 from audio_to_subs.core.cancel import Cancelled, CancelToken
 
@@ -102,7 +102,7 @@ def terminate_ffmpeg(process: subprocess.Popen) -> None:
 
 
 def parse_ffmpeg_progress(  # noqa: C901
-    stdout,
+    stdout: IO[str] | None,
     progress_callback: Callable[[str], None],
     total_duration: float,
     operation_name: str,

@@ -65,7 +65,8 @@ def extract_usage(mistral_response: Any) -> dict[str, Any] | None:  # noqa: C901
             # If usage is a dict-like object, return it
             if hasattr(usage, "model_dump"):
                 try:
-                    return usage.model_dump()
+                    dumped_usage: dict[str, Any] = usage.model_dump()
+                    return dumped_usage
                 except Exception:
                     pass
             if isinstance(usage, dict):
@@ -76,7 +77,8 @@ def extract_usage(mistral_response: Any) -> dict[str, Any] | None:  # noqa: C901
         try:
             dumped = mistral_response.model_dump()
             if isinstance(dumped, dict) and "usage" in dumped:
-                return dumped["usage"]
+                usage_from_dump: dict[str, Any] = dumped["usage"]
+                return usage_from_dump
         except Exception:
             pass
 
@@ -84,7 +86,8 @@ def extract_usage(mistral_response: Any) -> dict[str, Any] | None:  # noqa: C901
     if hasattr(mistral_response, "__dict__"):
         d = mistral_response.__dict__
         if isinstance(d, dict) and "usage" in d:
-            return d["usage"]
+            usage_from_attrs: dict[str, Any] = d["usage"]
+            return usage_from_attrs
 
     return None
 

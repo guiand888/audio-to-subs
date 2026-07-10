@@ -1,8 +1,10 @@
 """FastAPI dependencies for the API."""
 
+from collections.abc import AsyncGenerator
 from typing import Annotated
 
 from fastapi import Depends
+from redis.asyncio import Redis
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from audio_to_subs.api.settings import Settings, get_settings
@@ -15,7 +17,7 @@ def get_settings_dep() -> Settings:
     return get_settings()
 
 
-async def get_redis():
+async def get_redis() -> AsyncGenerator[Redis, None]:
     """FastAPI dependency for Redis client.
 
     Creates a Redis connection from settings.REDIS_URL.

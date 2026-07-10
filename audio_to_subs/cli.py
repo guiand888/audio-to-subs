@@ -290,6 +290,11 @@ def main(
 
     # Single video processing
     _validate_single_video_args(input_path, output_path, api_key)
+    # _validate_single_video_args() exits the process if any of these are
+    # missing, so they're guaranteed non-None here.
+    assert input_path is not None
+    assert output_path is not None
+    assert api_key is not None
     _process_single_video(
         input_path, output_path, output_format, api_key, model, language, progress
     )

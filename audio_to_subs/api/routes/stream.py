@@ -24,17 +24,17 @@ router = APIRouter(prefix="/api/jobs", tags=["stream"])
 # Per-subscriber queues for fair event distribution
 # Maps job_id -> list of (queue, client_id) tuples
 # Each client gets its own queue so events aren't lost to other clients
-_job_subscribers: dict[str, list[tuple[asyncio.Queue, str]]] = {}
-_global_subscribers: list[tuple[asyncio.Queue, str]] = []
+_job_subscribers: dict[str, list[tuple[asyncio.Queue[dict[str, Any]], str]]] = {}
+_global_subscribers: list[tuple[asyncio.Queue[dict[str, Any]], str]] = []
 
 
-def _subscribe_job_stream(job_id: str, client_id: str) -> asyncio.Queue:
+def _subscribe_job_stream(job_id: str, client_id: str) -> asyncio.Queue[dict[str, Any]]:
     """Create a subscriber queue for a job stream.
 
     Returns a queue that will receive all events for this job.
     """
     global _job_subscribers
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     if job_id not in _job_subscribers:
         _job_subscribers[job_id] = []
     _job_subscribers[job_id].append((queue, client_id))
@@ -52,10 +52,10 @@ def _unsubscribe_job_stream(job_id: str, client_id: str) -> None:
             del _job_subscribers[job_id]
 
 
-def _subscribe_global_stream(client_id: str) -> asyncio.Queue:
+def _subscribe_global_stream(client_id: str) -> asyncio.Queue[dict[str, Any]]:
     """Create a subscriber queue for the global stream."""
     global _global_subscribers
-    queue = asyncio.Queue()
+    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
     _global_subscribers.append((queue, client_id))
     return queue
 
@@ -70,7 +70,7 @@ def _unsubscribe_global_stream(client_id: str) -> None:
 
 async def _redis_listener_coro(
     redis: "Redis",
-    queue: asyncio.Queue,
+    queue: asyncio.Queue[dict[str, Any]],
     channels: list[str],
     client_id: str,
 ) -> None:

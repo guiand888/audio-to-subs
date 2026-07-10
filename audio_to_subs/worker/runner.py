@@ -152,15 +152,13 @@ async def _get_db_settings(database_url: str) -> dict[str, Any]:
                     "mistral_output_token_rate_usd",
                     "max_audio_length",
                 ):
-                    # Parse JSON if needed
-                    value = setting.value_json or setting.value
-                    if setting.value_json:
-                        try:
-                            import json
-
-                            value = json.loads(value)
-                        except (json.JSONDecodeError, TypeError):
-                            value = setting.value
+                    # Parse JSON if possible; fall back to the raw stored
+                    # string on malformed JSON (value_json is always a
+                    # string column, never a bare "value" attribute).
+                    try:
+                        value = json.loads(setting.value_json)
+                    except (json.JSONDecodeError, TypeError):
+                        value = setting.value_json
                     settings_dict[setting.key] = value
     except Exception as e:
         logger.warning(f"Failed to fetch settings from DB: {e}")

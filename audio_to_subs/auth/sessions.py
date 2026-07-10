@@ -122,7 +122,7 @@ class SessionManager:
             Signed session token string
         """
         payload = {"user_id": user_id, "iat": int(time.time())}
-        return self._serializer.dumps(payload)
+        return str(self._serializer.dumps(payload))
 
     def validate_session(
         self, token: str, max_age: int | None = None
@@ -142,7 +142,8 @@ class SessionManager:
         """
         if max_age is None:
             max_age = self._ttl
-        return self._serializer.loads(token, max_age=max_age)
+        decoded: dict[str, Any] = self._serializer.loads(token, max_age=max_age)
+        return decoded
 
     def needs_renewal(self, payload: dict[str, Any]) -> bool:
         """Check if session needs sliding renewal.
@@ -154,7 +155,7 @@ class SessionManager:
             True if session should be renewed
         """
         iat = payload.get("iat", 0)
-        return (time.time() - iat) > SLIDING_RENEWAL_THRESHOLD
+        return bool((time.time() - iat) > SLIDING_RENEWAL_THRESHOLD)
 
     def renew_session(self, token: str) -> str:
         """Renew a session token.
@@ -167,7 +168,7 @@ class SessionManager:
         """
         payload = self._serializer.loads(token, max_age=self._ttl)
         payload["iat"] = int(time.time())
-        return self._serializer.dumps(payload)
+        return str(self._serializer.dumps(payload))
 
 
 def set_session_cookie(response: Response, token: str, *, secure: bool) -> None:

@@ -357,6 +357,24 @@ Acceptance:
 Out of scope:
 - The `path_mappings as any` cast in `settingsToFormData` — pre-existing (not introduced by either reviewed commit); fixing it requires touching the `SettingsPatch` type and is a separate concern.
 
+## M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals
+
+**Goal**: resolve the structural `mypy` errors deliberately deferred during the M5.6-era five-branch merge into `dev` (login-race-condition, ui-status-bugs, job-duration, avg-cost-calculation, local-time-ui-option). That merge's cleanup commit fixed all mechanical mypy errors (missing annotations, `no-any-return`, etc.) directly and added narrow, commented `# type: ignore[code]` markers for the harder cases below, rather than risk behaviour changes to code that couldn't be fully exercised end-to-end in that session (no live Mistral API access, no real OS signal delivery in the dev environment).
+
+**Depends on**: none (independent cleanup)
+
+Tasks:
+- `audio_to_subs/core/transcription_client.py` (27 errors, the bulk of the backlog): the `**dict[str, object]` kwargs pattern used to call the Mistral SDK's `Transcriptions.complete(...)` doesn't match its overloads (wrong keyword names in one spot — `fileName`/`contentType` vs `file_name`/`content_type` — plus argument-type mismatches). Needs a real pass against the installed SDK version: either build a properly-typed `TypedDict`/kwargs object per call site, or confirm the mismatched keyword args are dead/incorrect and fix them for real. Verify against a live (or recorded/VCR) Mistral API call, not just `mypy`.
+- `audio_to_subs/api/app.py`: `_AppProxy` lazy-init wrapper assigned where a `FastAPI` is expected (line ~247) — needs a proper `Protocol`/typing fix for the lazy-app pattern, not just an ignore.
+- `audio_to_subs/worker/__main__.py` — **confirmed bug, not just a typing gap**: `handle_shutdown`'s inner `shutdown(signame: str)` is registered directly via `signal.signal(signal.SIGINT, shutdown)` / `signal.signal(signal.SIGTERM, shutdown)`, but the stdlib always invokes signal handlers as `handler(signum, frame)`. A real SIGINT/SIGTERM will raise `TypeError: shutdown() takes 1 positional argument but 2 were given` instead of shutting the worker down gracefully. Fix the handler signature to accept `(signum: int, frame: FrameType | None)`, then verify with an actual signal-delivery test (e.g. send SIGTERM to a running worker process and confirm graceful shutdown), not just `mypy`/unit tests.
+- Sweep the remaining narrow `# type: ignore[...]` markers left by the M5.6-era cleanup commit (grep for a marker comment referencing this milestone) and replace each with a real fix using the same rigor.
+
+Acceptance:
+- `mypy audio_to_subs/` clean with zero `# type: ignore` remaining from the deferred set (new, well-justified ignores elsewhere are fine).
+- Transcription pipeline manually verified against a real (or recorded) Mistral call after the `transcription_client.py` changes.
+- Worker manually verified to still shut down gracefully on SIGTERM/SIGINT after the signal-handler typing fix.
+- Full `pytest`, `black --check`, `ruff check` clean; no behaviour change outside the three files above.
+
 ## M6 — Polish, docs, coverage, security pass
 
 **Goal**: shippable v2.0.

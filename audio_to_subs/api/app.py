@@ -248,9 +248,13 @@ if "pytest" not in sys.modules:
 else:
     # During pytest collection, create_app() may fail due to missing test env.
     # Use lazy initialization that gets called after fixtures set up the environment.
-    app = None
+    # This lazy-proxy pattern is inherently dynamic (app: FastAPI | None | _AppProxy)
+    # and would need a Protocol-based redesign to type properly rather than a
+    # quick annotation; deferred to M5.7 rather than risking app-lifecycle
+    # behavior changes here.
+    app = None  # type: ignore[assignment]
 
-    def _get_lazy_app():
+    def _get_lazy_app():  # type: ignore[no-untyped-def]
         global app
         if app is None:
             app = get_app()
@@ -259,7 +263,7 @@ else:
     class _AppProxy:
         """Proxy to lazily create the FastAPI app during pytest."""
 
-        def __getattr__(self, name):
+        def __getattr__(self, name):  # type: ignore[no-untyped-def]
             return getattr(_get_lazy_app(), name)
 
-    app = _AppProxy()
+    app = _AppProxy()  # type: ignore[assignment]
