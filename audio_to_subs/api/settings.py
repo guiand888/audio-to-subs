@@ -162,8 +162,15 @@ class Settings(BaseSettings):
 
     @model_validator(mode="after")
     def validate_session_secret_exists(self) -> "Settings":
-        """Ensure SESSION_SECRET is set or can be loaded from file."""
-        if not self.SESSION_SECRET:
+        """Ensure SESSION_SECRET is available or can be loaded from file.
+
+        Allows ``SESSION_SECRET`` to be ``None`` when ``SESSION_SECRET_FILE``
+        is configured — the file may not exist yet at Settings instantiation
+        time (first boot). ``_ensure_session_secret_file()`` in ``app.py``
+        generates it before this validator runs in production. The hard error
+        fires only when neither mechanism is configured at all.
+        """
+        if not self.SESSION_SECRET and not self.SESSION_SECRET_FILE:
             raise ValueError(
                 "SESSION_SECRET must be set via environment variable or "
                 "SESSION_SECRET_FILE must point to a valid file containing the secret"

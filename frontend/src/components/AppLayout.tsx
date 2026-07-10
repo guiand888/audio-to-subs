@@ -1,6 +1,8 @@
 // Persistent layout: 200px fixed sidebar + 64px topbar.
 // Mounts the global SSE stream (useJobsStream) once here.
-// Auth guard: checks /api/auth/me on boot; redirects to /login if 401.
+// Auth guard: checks /api/auth/me on boot; redirects to /login only on a
+// confirmed 401. Transient errors (502, 503, network) are treated as
+// "backend not ready" and show a retry screen instead of bouncing to /login.
 
 import { useEffect } from "react"
 import { Link, Outlet, useNavigate, useRouterState } from "@tanstack/react-router"
@@ -31,30 +33,59 @@ const navLinks = [
 export function AppLayout() {
   const navigate = useNavigate()
   const pathname = useRouterState({ select: (s) => s.location.pathname })
-  const { data: user, isLoading } = useMe()
+  const { data: user, isLoading, error, isFetching, refetch } = useMe()
   const logout = useLogout()
+
+  // True when useMe failed with a non-401 error (backend unreachable,
+  // 502/503, network failure). A 401 is swallowed inside useMe's queryFn
+  // (returns null), so any error that surfaces here is transient.
+  const isBackendUnreachable = !!error
 
   // Mount the global SSE stream exactly once
   useJobsStream()
 
-  // Redirect to /login if not authenticated. The pathname !== "/login" guard
-  // prevents a self-referential redirect: navigate() updates the router's
-  // reactive location before this route's component tree fully unmounts, so
-  // without the guard this effect can re-fire mid-transition with pathname
-  // already "/login" and produce /login?next=%2Flogin.
+  // Redirect to /login only on confirmed unauthenticated (null user with no
+  // error). When the backend is unreachable we keep the user on the current
+  // page so they see the retry screen, not the login page.
+  // The pathname !== "/login" guard prevents a self-referential redirect:
+  // navigate() updates the router's reactive location before this route's
+  // component tree fully unmounts, so without the guard this effect can
+  // re-fire mid-transition with pathname already "/login" and produce
+  // /login?next=%2Flogin.
   useEffect(() => {
-    if (!isLoading && !user && pathname !== "/login") {
+    if (!isLoading && !user && !isBackendUnreachable && pathname !== "/login") {
       void navigate({
         to: "/login",
         search: { next: pathname },
       })
     }
-  }, [user, isLoading, navigate, pathname])
+  }, [user, isLoading, isBackendUnreachable, navigate, pathname])
 
   if (isLoading) {
     return (
       <div className="flex h-screen items-center justify-center">
         <span className="text-muted-foreground text-sm">Loading…</span>
+      </div>
+    )
+  }
+
+  if (isBackendUnreachable) {
+    return (
+      <div className="flex h-screen flex-col items-center justify-center gap-4">
+        <span className="text-muted-foreground text-sm">
+          {isFetching
+            ? "Connecting to server…"
+            : "Unable to reach the server."}
+        </span>
+        {!isFetching && (
+          <Button
+            variant="outline"
+            size="sm"
+            onClick={() => void refetch()}
+          >
+            Retry
+          </Button>
+        )}
       </div>
     )
   }

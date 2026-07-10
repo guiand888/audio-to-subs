@@ -3,13 +3,26 @@
 Provides respx mocking for Mistral API and other utilities for BDD scenarios.
 Follows the pattern from tests/test_bazarr_client.py: mock only at the true
 external boundary (HTTP API), not at internal class/function level.
+
+Also re-exports the api_client / sync_session fixtures from tests/conftest.py
+so that BDD scenarios exercising the FastAPI layer can use them without
+duplicating the full DB + settings + admin-user bootstrap.
 """
 
-import json
-import pytest
-import httpx
 from pathlib import Path
-from unittest.mock import patch, MagicMock
+from unittest.mock import patch
+
+import httpx
+import pytest
+
+# ---------------------------------------------------------------------------
+# Re-export fixtures from tests/conftest.py so BDD steps can request them
+# ---------------------------------------------------------------------------
+from tests.conftest import (
+    _test_environment,  # noqa: F401
+    api_client,  # noqa: F401
+    sync_session,  # noqa: F401
+)
 
 
 @pytest.fixture
@@ -56,15 +69,13 @@ def mock_mistral_api(respx_mock):
             "segments": segments,
         }
 
-        respx_mock.post(
-            "https://api.mistral.ai/v1/files"
-        ).mock(
-            return_value=httpx.Response(200, json={"id": "mock-file-id", "filename": "test.wav"})
+        respx_mock.post("https://api.mistral.ai/v1/files").mock(
+            return_value=httpx.Response(
+                200, json={"id": "mock-file-id", "filename": "test.wav"}
+            )
         )
 
-        respx_mock.post(
-            "https://api.mistral.ai/v1/audio/transcriptions"
-        ).mock(
+        respx_mock.post("https://api.mistral.ai/v1/audio/transcriptions").mock(
             return_value=httpx.Response(200, json=response_body)
         )
 
@@ -80,9 +91,7 @@ def mock_mistral_api(respx_mock):
             "code": status_code,
         }
 
-        respx_mock.post(
-            "https://api.mistral.ai/v1/audio/transcriptions"
-        ).mock(
+        respx_mock.post("https://api.mistral.ai/v1/audio/transcriptions").mock(
             return_value=httpx.Response(status_code, json=error_response)
         )
 
@@ -100,12 +109,17 @@ def mock_audio_extractor_minimal():
     This fixture can be used in specific scenarios where we want to avoid real
     FFmpeg calls. Simply request this fixture in a scenario to enable it.
     """
-    def extract_audio_mock(video_path, output_path, progress_callback=None, cancel_token=None):
+
+    def extract_audio_mock(
+        video_path, output_path, progress_callback=None, cancel_token=None
+    ):
         # Create a minimal WAV file at the output path
         Path(output_path).touch()
         return str(output_path)
 
-    with patch('audio_to_subs.core.pipeline.extract_audio', side_effect=extract_audio_mock):
+    with patch(
+        "audio_to_subs.core.pipeline.extract_audio", side_effect=extract_audio_mock
+    ):
         yield extract_audio_mock
 
 
@@ -123,5 +137,5 @@ def setup_bdd_environment():
     """
     # Mock get_audio_duration to return a reasonable value
     # This is OK because we're not testing audio duration logic here
-    with patch('audio_to_subs.core.pipeline.get_audio_duration', return_value=10.0):
+    with patch("audio_to_subs.core.pipeline.get_audio_duration", return_value=10.0):
         yield
