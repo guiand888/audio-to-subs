@@ -20,7 +20,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.5 — Settings save-counter regression + Bazarr connection-test fix | ✅ Done | 2026-07-07 | Depends on M5.4 |
 | M5.6 — M5.5 code-review follow-up (schema tightening, dead-field removal, error UX) | ✅ Done | 2026-07-07 | Depends on M5.5 |
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
-| M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ⏳ Not Started | - | Independent cleanup |
+| M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ⏳ Not Started | - | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
 | M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6, M5.7, M5.8 |
 
