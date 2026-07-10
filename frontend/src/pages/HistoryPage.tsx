@@ -383,10 +383,7 @@ export function HistoryPage() {
                     {jobs.map((job) => (
                       <TableRow key={job.id} className="border-t hover:bg-muted/50">
                         <TableCell className="p-3">
-                          <div className="flex items-center gap-2">
-                            <JobStatusIcon status={job.status} />
-                            <span className="capitalize">{job.status}</span>
-                          </div>
+                          <JobStatusIcon status={job.status} />
                         </TableCell>
                         <TableCell className="p-3">
                           <Badge variant="outline">
