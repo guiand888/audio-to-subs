@@ -1,5 +1,6 @@
 """Tests for the /api/history endpoint."""
 
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -16,7 +17,9 @@ def test_get_history_empty(authenticated_client):
     assert data["jobs"] == []
     assert data["stats"]["total_jobs"] == 0
     assert data["stats"]["total_cost_usd"] == 0
-    assert data["stats"]["total_duration_seconds"] == 0
+    assert data["stats"]["total_audio_length_seconds"] == 0
+    assert data["stats"]["total_runtime_seconds"] == 0
+    assert data["stats"]["average_runtime_seconds"] == 0
 
 
 def test_get_history_with_done_jobs(authenticated_client, sync_session):
@@ -29,6 +32,8 @@ def test_get_history_with_done_jobs(authenticated_client, sync_session):
         audio_duration_seconds=120.5,
         estimated_cost_usd=0.50,
         language_code="en",
+        started_at=datetime(2024, 1, 1, 0, 0, 0, tzinfo=timezone.utc),
+        finished_at=datetime(2024, 1, 1, 0, 1, 0, tzinfo=timezone.utc),
     )
     job2 = Job(
         id=str(uuid4()),
@@ -39,6 +44,8 @@ def test_get_history_with_done_jobs(authenticated_client, sync_session):
         audio_duration_seconds=180.0,
         estimated_cost_usd=0.75,
         language_code="fr",
+        started_at=datetime(2024, 1, 1, 1, 0, 0, tzinfo=timezone.utc),
+        finished_at=datetime(2024, 1, 1, 1, 2, 0, tzinfo=timezone.utc),
     )
     sync_session.add_all([job1, job2])
     sync_session.commit()
@@ -50,11 +57,19 @@ def test_get_history_with_done_jobs(authenticated_client, sync_session):
     assert len(data["jobs"]) == 2
     assert data["stats"]["total_jobs"] == 2
     assert data["stats"]["total_cost_usd"] == pytest.approx(1.25, abs=0.001)
-    assert data["stats"]["total_duration_seconds"] == pytest.approx(300.5, abs=0.01)
+    assert data["stats"]["total_audio_length_seconds"] == pytest.approx(300.5, abs=0.01)
+    assert data["stats"]["total_runtime_seconds"] == pytest.approx(180.0, abs=0.01)
     assert data["stats"]["average_cost_usd"] == pytest.approx(0.625, abs=0.001)
+    assert data["stats"]["average_runtime_seconds"] == pytest.approx(90.0, abs=0.01)
     assert data["stats"]["count_by_status"]["done"] == 2
     assert data["stats"]["count_by_language"]["en"] == 1
     assert data["stats"]["count_by_language"]["fr"] == 1
+
+    for job in data["jobs"]:
+        assert "runtime_seconds" in job
+        assert "audio_duration_seconds" in job
+    assert data["jobs"][0]["runtime_seconds"] == pytest.approx(60.0, abs=0.01)
+    assert data["jobs"][1]["runtime_seconds"] == pytest.approx(120.0, abs=0.01)
 
 
 def test_get_history_filters_by_status(authenticated_client, sync_session):

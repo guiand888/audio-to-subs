@@ -26,6 +26,7 @@ export interface LiveJob {
   cancel_requested: boolean
   // Cost and duration (available for completed jobs)
   audio_duration_seconds: number | null
+  runtime_seconds: number | null
   estimated_cost_usd: number | null
 }
 
@@ -113,6 +114,7 @@ export const useJobsStore = create<JobsState>()((set) => ({
           finished_at: j.finished_at,
           cancel_requested: j.cancel_requested,
           audio_duration_seconds: j.audio_duration_seconds,
+          runtime_seconds: j.runtime_seconds,
           estimated_cost_usd: j.estimated_cost_usd,
         }
       }

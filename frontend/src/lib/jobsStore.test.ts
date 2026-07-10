@@ -21,6 +21,7 @@ const MOCK_JOB: JobResponse = {
   finished_at: null,
   cancel_requested: false,
   audio_duration_seconds: null,
+  runtime_seconds: null,
   estimated_cost_usd: null,
   output_path: null,
   priority: 0,

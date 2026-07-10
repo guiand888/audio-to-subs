@@ -14,6 +14,7 @@ import { useJobs, useCancelJob } from "@/hooks/useJobs"
 import { useJobsStore } from "@/lib/jobsStore"
 import type { LiveJob } from "@/lib/jobsStore"
 import { ApiError } from "@/lib/api"
+import { formatCost, formatDuration } from "@/lib/utils"
 
 // ── JobCard ───────────────────────────────────────────────────────────────────
 
@@ -28,27 +29,6 @@ function jobTitle(job: LiveJob): string {
   // Fall back to the filename
   const parts = job.media_path.replace(/\\/g, "/").split("/")
   return parts[parts.length - 1] ?? job.media_path
-}
-
-// Format cost as USD
-function formatCost(cost: number | null | undefined): string {
-  if (cost === null || cost === undefined) return ""
-  if (cost === 0) return "$0.00"
-  if (cost < 0.01) return `$${cost.toFixed(4)}`
-  if (cost < 1) return `$${cost.toFixed(2)}`
-  return `$${cost.toFixed(2)}`
-}
-
-// Format duration as human-readable string
-function formatDuration(seconds: number | null | undefined): string {
-  if (seconds === null || seconds === undefined) return ""
-  if (seconds < 60) return `${Math.round(seconds)}s`
-  const minutes = Math.floor(seconds / 60)
-  const secs = Math.round(seconds % 60)
-  if (minutes < 60) return `${minutes}m ${secs}s`
-  const hours = Math.floor(minutes / 60)
-  const mins = minutes % 60
-  return `${hours}h ${mins}m`
 }
 
 function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
@@ -102,11 +82,16 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
         )}
 
         {/* Cost and duration info (for completed jobs) */}
-        {isTerminal && (job.estimated_cost_usd !== null || job.audio_duration_seconds !== null) && (
+        {isTerminal && (job.estimated_cost_usd !== null || job.audio_duration_seconds !== null || job.runtime_seconds !== null) && (
           <div className="flex items-center gap-4 text-xs text-muted-foreground">
+            {job.runtime_seconds !== null && (
+              <span className="flex items-center gap-1">
+                <span>Runtime: {formatDuration(job.runtime_seconds)}</span>
+              </span>
+            )}
             {job.audio_duration_seconds !== null && (
               <span className="flex items-center gap-1">
-                <span>Duration: {formatDuration(job.audio_duration_seconds)}</span>
+                <span>Audio length: {formatDuration(job.audio_duration_seconds)}</span>
               </span>
             )}
             {job.estimated_cost_usd !== null && (

@@ -89,6 +89,7 @@ class JobResponse(BaseModel):
     cancel_requested: bool
     worker_id: str | None
     audio_duration_seconds: float | None
+    runtime_seconds: float | None = None
     mistral_usage_json: str | None
     estimated_cost_usd: float | None
     error_message: str | None

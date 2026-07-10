@@ -38,6 +38,7 @@ export interface JobResponse {
   cancel_requested: boolean
   worker_id: string | null
   audio_duration_seconds: number | null
+  runtime_seconds: number | null
   mistral_usage_json: string | null
   estimated_cost_usd: number | null
   error_message: string | null
@@ -265,9 +266,11 @@ export interface WantedRefreshResponse {
 export interface HistoryStats {
   total_jobs: number
   total_cost_usd: number
-  total_duration_seconds: number
+  total_audio_length_seconds: number
+  total_runtime_seconds: number
   average_cost_usd: number
-  average_duration_seconds: number
+  average_audio_length_seconds: number
+  average_runtime_seconds: number
   count_by_status: Record<string, number>
   count_by_language: Record<string, number>
   count_by_source: Record<string, number>
