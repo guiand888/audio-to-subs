@@ -106,3 +106,13 @@ Probe executed successfully on 2026-06-02 against `mistralai==2.4.5` with model 
 ### Reference once decided
 
 Update `core/cost.py` docstring and `dev/v2/PIPELINE_CHANGES.md` §4 to reference the exact field names this probe identified.
+
+## Note for M5.7
+
+This probe's `main()` function (above) is a reusable template for a *different*, still-open question blocking `M5.7` (`MILESTONES.md`): `transcription_client.py`'s `_call_mistral_transcription`/`_call_mistral_transcription_with_timestamps` build a `kwargs` dict and splat it into `complete(...)`, which mypy rejects because several SDK params (e.g. `language`) default to a distinct `Unset()` sentinel rather than `None`. This probe's own working call never passes `language` at all, so it doesn't settle whether passing `language=None` explicitly (as a straightforward `**kwargs`-free rewrite would) is equivalent to omitting it on the wire, or whether it changes request behavior.
+
+A follow-up probe adapted from this script should specifically:
+- Call `complete(...)` once with `language` omitted and once with `language=None` explicitly, and diff the raw request/response to confirm they're identical (or aren't).
+- Try the tuple-based `file=("clip.wav", f, "audio/wav")` form used above instead of building a `File(...)` object — if the SDK accepts it identically, it may sidestep the `fileName`/`contentType` alias mismatch in `transcription_client.py` entirely, rather than just fixing the keyword casing.
+
+Same cost/setup caveats as above (a few cents, needs `MISTRAL_API_KEY`, short clip).
