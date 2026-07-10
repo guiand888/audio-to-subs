@@ -128,6 +128,7 @@ export interface SettingsOut {
   tv_root_path: string | null
   subtitles_same_directory: boolean
   max_audio_length: number
+  timezone: string
 }
 
 export interface SettingsPatch {
@@ -147,6 +148,7 @@ export interface SettingsPatch {
   tv_root_path?: string | null
   subtitles_same_directory?: boolean
   max_audio_length?: number
+  timezone?: string
 }
 
 // --------------- Logs ---------------
@@ -200,6 +202,7 @@ export interface SettingsFormData {
   tv_root_path: string | null
   subtitles_same_directory: boolean
   max_audio_length: number
+  timezone: string
 }
 
 // Path mapping

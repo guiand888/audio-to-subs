@@ -10,6 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import desc, func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
+from audio_to_subs.api.routes._helpers import UTCAwareModel
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import BazarrCache, Job, JobStatus, LogLevel
@@ -28,7 +29,7 @@ class WantedItemType(str, Enum):
     EPISODE = "episode"
 
 
-class WantedItem(BaseModel):
+class WantedItem(UTCAwareModel):
     """Wanted item with job status."""
 
     model_config = {"from_attributes": True}
@@ -58,7 +59,7 @@ class WantedItem(BaseModel):
     )
 
 
-class WantedListResponse(BaseModel):
+class WantedListResponse(UTCAwareModel):
     """Response for wanted items list."""
 
     items: list[WantedItem] = Field(description="List of wanted items")

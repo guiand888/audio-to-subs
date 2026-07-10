@@ -7,6 +7,7 @@ import { toast } from "sonner"
 
 import { useHistory } from "@/hooks/useHistory"
 import { useUpdateJobLanguage } from "@/hooks/useJobs"
+import { useTimezoneSetting, formatDateTime } from "@/lib/datetime"
 import { formatCost, formatDuration } from "@/lib/utils"
 import type {
   HistoryFilters,
@@ -308,6 +309,8 @@ export function HistoryPage() {
 
   const { data, isLoading, isError } = useHistory(filters)
 
+  const timezone = useTimezoneSetting()
+
   // Sync page state with filters
   useEffect(() => {
     const newPage = Math.floor((filters.offset || 0) / (filters.limit || 20))
@@ -446,7 +449,7 @@ export function HistoryPage() {
                         <TableCell className="p-3 whitespace-nowrap">{formatDuration(job.audio_duration_seconds)}</TableCell>
                         <TableCell className="p-3">{formatCost(job.estimated_cost_usd)}</TableCell>
                         <TableCell className="p-3 whitespace-nowrap">
-                          {new Date(job.created_at).toLocaleString()}
+                          {formatDateTime(job.created_at, timezone ?? undefined)}
                         </TableCell>
                       </TableRow>
                     ))}

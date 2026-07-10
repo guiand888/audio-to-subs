@@ -49,6 +49,7 @@ DEFAULT_SETTINGS = {
     "tv_root_path": "/tv",
     "subtitles_same_directory": True,
     "max_audio_length": 900,
+    "timezone": "UTC",
 }
 
 
@@ -93,6 +94,10 @@ class SettingsResponse(BaseModel):
     )
     max_audio_length: int = Field(
         default=900, description="Maximum audio segment length in seconds (60-10800)"
+    )
+    timezone: str = Field(
+        default="UTC",
+        description="IANA timezone (e.g. 'Europe/Paris') for UI time display",
     )
 
     @classmethod
@@ -169,6 +174,24 @@ class SettingsUpdate(BaseModel):
     max_audio_length: int | None = Field(
         default=None, description="Maximum audio segment length in seconds (60-10800)"
     )
+    timezone: str | None = Field(
+        default=None,
+        description="IANA timezone (e.g. 'Europe/Paris') for UI time display",
+    )
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, v: str | None) -> str | None:
+        """Validate timezone is a real IANA zone (per security: never trust input)."""
+        if v is None:
+            return v
+        from zoneinfo import ZoneInfo, ZoneInfoNotFoundError
+
+        try:
+            ZoneInfo(v)
+        except (ZoneInfoNotFoundError, ValueError) as e:
+            raise ValueError(f"Invalid IANA timezone: {v}") from e
+        return v
 
     @field_validator("max_audio_length")
     @classmethod
