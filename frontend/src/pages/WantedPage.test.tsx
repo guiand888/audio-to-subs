@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
-import { api } from "@/lib/api"
+import { api, ApiError } from "@/lib/api"
 import { WantedPage } from "./WantedPage"
 
 // vi.mock calls are hoisted to the top of the file by vitest, so they must be
@@ -464,6 +464,68 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
     })
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies and 3 episodes")
+    })
+  })
+})
+
+describe("WantedPage - Transcribe error handling", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue({
+      items: [MOCK_ITEM_WITH_AUDIO_LANG],
+      total: 1,
+      last_refreshed_at: null,
+    })
+  })
+
+  it("surfaces the server error detail in the toast on a 400", async () => {
+    vi.mocked(api.post).mockRejectedValue(
+      new ApiError(
+        400,
+        "No media file path is available for this item from Bazarr. Refresh the wanted list and try again.",
+      ),
+    )
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Queue job")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Queue job"))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith(
+        "No media file path is available for this item from Bazarr. Refresh the wanted list and try again.",
+      )
+    })
+  })
+
+  it("shows the 'already active' message on a 409", async () => {
+    vi.mocked(api.post).mockRejectedValue(
+      new ApiError(409, "A job for this item is already active"),
+    )
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Queue job")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Queue job"))
+
+    await waitFor(() => {
+      expect(toast.error).toHaveBeenCalledWith("A job for this item is already active")
     })
   })
 })
