@@ -4,7 +4,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select
 
@@ -91,11 +91,13 @@ async def create_job_log(
     job_id: UUID,
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
+    # Required query param. Written as ``Annotated[str, Query()]`` (no ``= ...``
+    # default) rather than the common ``message: str = ...`` idiom: the latter
+    # requires a ``# type: ignore[assignment]`` under mypy --strict because
+    # ``...`` is not a ``str`` (M5.7). The required param must precede the
+    # defaulted ``level`` so Python's no-default-after-default rule holds.
+    message: Annotated[str, Query()],
     level: LogLevel = LogLevel.INFO,
-    # Ellipsis is FastAPI's convention for "required" on a param that must
-    # follow ones with real defaults; mypy doesn't model this without a
-    # FastAPI/pydantic plugin.
-    message: str = ...,  # type: ignore[assignment]
 ) -> JobLogResponse:
     """Create a log entry for a job.
 
