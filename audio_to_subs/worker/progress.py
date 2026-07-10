@@ -85,6 +85,8 @@ class ProgressBridge:
             percent = event.get("percent", 0)
             stage = event.get("stage", "unknown")
             message = event.get("message", "")
+            step_index = event.get("step_index")
+            step_total = event.get("step_total")
 
             # Publish to Redis immediately (cheap, no debouncing needed)
             await publish_progress(
@@ -93,6 +95,8 @@ class ProgressBridge:
                 percent,
                 stage,
                 message,
+                step_index=step_index,
+                step_total=step_total,
             )
 
             # Capture the previous stage before any updates below can change it,
@@ -106,7 +110,9 @@ class ProgressBridge:
                 or stage != previous_stage
                 or current_time - self._last_db_update >= DB_UPDATE_DEBOUNCE
             ):
-                await self._update_job_progress(percent, stage, message)
+                await self._update_job_progress(
+                    percent, stage, message, step_index, step_total
+                )
                 self._last_percent = percent
                 self._last_db_update = current_time
                 self._last_stage = stage
@@ -121,9 +127,20 @@ class ProgressBridge:
             # Don't raise - progress updates should never break the job
 
     async def _update_job_progress(
-        self, percent: int, stage: str, message: str
+        self,
+        percent: int,
+        stage: str,
+        message: str,
+        step_index: int | None = None,
+        step_total: int | None = None,
     ) -> None:
-        """Update job progress in database using a per-write session."""
+        """Update job progress in database using a per-write session.
+
+        M5.8 (#4, verified): also persists progress_stage / progress_step_index /
+        progress_step_total (nullable) so a hard refresh mid-job can reconstruct the
+        step/stage instead of only percent + free-text message. These columns were
+        added by migration 0004_add_progress_stage.
+        """
         async with self._write_lock:
             try:
                 async with get_async_session(self.database_url) as session:
@@ -133,6 +150,9 @@ class ProgressBridge:
                         SET
                             progress_percent = :percent,
                             progress_message = :message,
+                            progress_stage = :stage,
+                            progress_step_index = :step_index,
+                            progress_step_total = :step_total,
                             updated_at = CURRENT_TIMESTAMP
                         WHERE id = :job_id
                     """
@@ -142,6 +162,9 @@ class ProgressBridge:
                         {
                             "percent": percent,
                             "message": message,
+                            "stage": stage,
+                            "step_index": step_index,
+                            "step_total": step_total,
                             "job_id": str(self.job_id),
                         },
                     )
