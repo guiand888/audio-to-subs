@@ -47,6 +47,31 @@ class TestHandleProgressEvent:
     """Test ProgressBridge._handle's DB/Redis/log fan-out."""
 
     @pytest.mark.asyncio
+    async def test_persists_stage_and_step_fields(self, mock_db_session):
+        """M5.8 #4: progress_stage/step_index/step_total must persist to the DB."""
+        job_id = uuid4()
+        await make_job_row(mock_db_session, job_id)
+        bridge = make_bridge(job_id=job_id)
+
+        await bridge._handle(
+            {
+                "percent": 42,
+                "stage": "extract",
+                "message": "Extracting",
+                "step_index": 1,
+                "step_total": 4,
+            }
+        )
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == str(job_id)))
+        ).scalar_one()
+        assert refreshed.progress_stage == "extract"
+        assert refreshed.progress_step_index == 1
+        assert refreshed.progress_step_total == 4
+
+    @pytest.mark.asyncio
     async def test_first_event_updates_db_and_publishes(self, mock_db_session):
         job_id = uuid4()
         await make_job_row(mock_db_session, job_id)

@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor } from "@testing-library/react"
+import { render, screen, waitFor, act } from "@testing-library/react"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { QueuePage } from "./QueuePage"
 import { useJobsStore } from "@/lib/jobsStore"
@@ -48,6 +48,9 @@ const MOCK_JOB_QUEUED: JobResponse = {
   status: "queued",
   progress_percent: 0,
   progress_message: null,
+  progress_stage: null,
+  progress_step_index: null,
+  progress_step_total: null,
   source: "bazarr_movie",
   source_ref: "123",
   media_path: "/path/to/file1.mp4",
@@ -76,6 +79,9 @@ const MOCK_JOB_RUNNING: JobResponse = {
   status: "running",
   progress_percent: 50,
   progress_message: "Transcribing audio",
+  progress_stage: "transcribe",
+  progress_step_index: 2,
+  progress_step_total: 3,
   source: "bazarr_episode",
   source_ref: "456",
   media_path: "/path/to/file2.mp4",
@@ -104,6 +110,9 @@ const MOCK_JOB_DONE: JobResponse = {
   status: "done",
   progress_percent: 100,
   progress_message: null,
+  progress_stage: "done",
+  progress_step_index: null,
+  progress_step_total: null,
   source: "manual",
   source_ref: "789",
   media_path: "/path/to/file3.mp4",
@@ -184,7 +193,9 @@ describe("QueuePage", () => {
       await waitFor(() => {
         expect(screen.getByText(/50%/)).toBeInTheDocument()
       })
-      expect(screen.getByText(/Transcribing audio/)).toBeInTheDocument()
+      expect(
+        screen.getByText(/Step 2 of 3 — Transcribing/),
+      ).toBeInTheDocument()
     })
 
     it("displays jobs grouped by status", async () => {
@@ -327,6 +338,43 @@ describe("QueuePage", () => {
       })
       expect(screen.getByText(/Audio length:/i)).toBeInTheDocument()
       expect(screen.queryByText(/^Duration:/i)).not.toBeInTheDocument()
+    })
+  })
+
+  describe("Step-based UX (M5.8)", () => {
+    it("renders a step label for a running job with step fields", async () => {
+      useJobsStore.getState().seed([MOCK_JOB_RUNNING])
+
+      render(<QueuePage />, { wrapper })
+
+      await waitFor(() => {
+        expect(
+          screen.getByText(/Step 2 of 3 — Transcribing/),
+        ).toBeInTheDocument()
+      })
+    })
+
+    it("invalidates the jobs query when a 'new' SSE event arrives", async () => {
+      const client = new QueryClient({
+        defaultOptions: {
+          queries: { retry: false },
+          mutations: { retry: false },
+        },
+      })
+      const invalidate = vi.spyOn(client, "invalidateQueries")
+      const wrap = ({ children }: { children: React.ReactNode }) => (
+        <QueryClientProvider client={client}>{children}</QueryClientProvider>
+      )
+
+      render(<QueuePage />, { wrapper: wrap })
+
+      act(() => {
+        useJobsStore.getState().apply({ event: "new", job_id: "job-new-1" })
+      })
+
+      await waitFor(() => {
+        expect(invalidate).toHaveBeenCalledWith({ queryKey: ["jobs"] })
+      })
     })
   })
 })
