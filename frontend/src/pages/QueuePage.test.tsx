@@ -61,6 +61,7 @@ const MOCK_JOB_QUEUED: JobResponse = {
   finished_at: null,
   cancel_requested: false,
   audio_duration_seconds: null,
+  runtime_seconds: null,
   estimated_cost_usd: null,
   output_path: null,
   priority: 0,
@@ -88,6 +89,7 @@ const MOCK_JOB_RUNNING: JobResponse = {
   finished_at: null,
   cancel_requested: false,
   audio_duration_seconds: null,
+  runtime_seconds: null,
   estimated_cost_usd: null,
   output_path: null,
   priority: 0,
@@ -115,6 +117,7 @@ const MOCK_JOB_DONE: JobResponse = {
   finished_at: "2024-01-01T02:15:00Z",
   cancel_requested: false,
   audio_duration_seconds: 120,
+  runtime_seconds: 600,
   estimated_cost_usd: 0.01,
   output_path: "/path/to/output.srt",
   priority: 0,
@@ -309,6 +312,21 @@ describe("QueuePage", () => {
         expect(screen.getByText(/25%/)).toBeInTheDocument()
         expect(screen.getByText(/75%/)).toBeInTheDocument()
       })
+    })
+  })
+
+  describe("Terminal job details", () => {
+    it("shows Runtime and Audio length labels for completed jobs", async () => {
+      useJobsStore.getState().seed([MOCK_JOB_DONE])
+      useJobsStore.setState({ lastTerminalJobId: "job-3" })
+
+      render(<QueuePage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/Runtime:/i)).toBeInTheDocument()
+      })
+      expect(screen.getByText(/Audio length:/i)).toBeInTheDocument()
+      expect(screen.queryByText(/^Duration:/i)).not.toBeInTheDocument()
     })
   })
 })

@@ -201,11 +201,22 @@ function HistoryStatsDisplay({ stats }: HistoryStatsProps) {
 
       <Card>
         <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-          <CardTitle className="text-sm font-medium">Total Duration</CardTitle>
+          <CardTitle className="text-sm font-medium">Total Runtime</CardTitle>
         </CardHeader>
         <CardContent>
           <div className="text-2xl font-bold">
-            {formatDuration(stats.total_duration_seconds)}
+            {formatDuration(stats.total_runtime_seconds)}
+          </div>
+        </CardContent>
+      </Card>
+
+      <Card>
+        <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
+          <CardTitle className="text-sm font-medium">Total Audio Length</CardTitle>
+        </CardHeader>
+        <CardContent>
+          <div className="text-2xl font-bold">
+            {formatDuration(stats.total_audio_length_seconds)}
           </div>
         </CardContent>
       </Card>
@@ -374,7 +385,8 @@ export function HistoryPage() {
                       <TableHead className="p-3">Source</TableHead>
                       <TableHead className="p-3">Media Path</TableHead>
                       <TableHead className="p-3">Language</TableHead>
-                      <TableHead className="p-3">Duration</TableHead>
+                      <TableHead className="p-3">Runtime</TableHead>
+                      <TableHead className="p-3">Audio Length</TableHead>
                       <TableHead className="p-3">Cost</TableHead>
                       <TableHead className="p-3">Created</TableHead>
                     </TableRow>
@@ -433,7 +445,8 @@ export function HistoryPage() {
                               )}
                           </div>
                         </TableCell>
-                        <TableCell className="p-3">{formatDuration(job.audio_duration_seconds)}</TableCell>
+                        <TableCell className="p-3 whitespace-nowrap">{formatDuration(job.runtime_seconds)}</TableCell>
+                        <TableCell className="p-3 whitespace-nowrap">{formatDuration(job.audio_duration_seconds)}</TableCell>
                         <TableCell className="p-3">{formatCost(job.estimated_cost_usd)}</TableCell>
                         <TableCell className="p-3 whitespace-nowrap">
                           {new Date(job.created_at).toLocaleString()}

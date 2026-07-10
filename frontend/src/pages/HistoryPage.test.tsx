@@ -11,9 +11,11 @@ const EMPTY_HISTORY = {
   stats: {
     total_jobs: 0,
     total_cost_usd: 0,
-    total_duration_seconds: 0,
+    total_audio_length_seconds: 0,
+    total_runtime_seconds: 0,
     average_cost_usd: 0,
-    average_duration_seconds: 0,
+    average_audio_length_seconds: 0,
+    average_runtime_seconds: 0,
     count_by_status: {},
     count_by_language: {},
     count_by_source: {},
@@ -45,6 +47,7 @@ const BASE_JOB: JobResponse = {
   cancel_requested: false,
   worker_id: null,
   audio_duration_seconds: 60,
+  runtime_seconds: 60,
   mistral_usage_json: null,
   estimated_cost_usd: 0.01,
   error_message: null,
@@ -181,5 +184,28 @@ describe("HistoryPage", () => {
       expect(screen.getByText("fr")).toBeInTheDocument()
     })
     expect(screen.queryByTitle(/Mistral detected/)).not.toBeInTheDocument()
+  })
+
+  it("shows Runtime and Audio Length columns instead of Duration", async () => {
+    vi.mocked(api.get).mockResolvedValue(historyWith([BASE_JOB]))
+
+    render(<HistoryPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Runtime")).toBeInTheDocument()
+    })
+    expect(screen.getByText("Audio Length")).toBeInTheDocument()
+    expect(screen.queryByText("Duration")).not.toBeInTheDocument()
+  })
+
+  it("displays job runtime and audio length values in the table", async () => {
+    vi.mocked(api.get).mockResolvedValue(historyWith([BASE_JOB]))
+
+    render(<HistoryPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Runtime")).toBeInTheDocument()
+    })
+    expect(screen.getAllByText("1m 0s")).toHaveLength(2)
   })
 })
