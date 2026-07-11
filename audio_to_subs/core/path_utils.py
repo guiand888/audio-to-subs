@@ -7,8 +7,44 @@ Provides utilities for:
 """
 
 import os
-from pathlib import Path
+import re
+from pathlib import Path, PurePosixPath
 from typing import Literal
+
+# Control characters (including NUL) are never valid in a filesystem path and
+# are rejected outright to avoid injection into downstream ffmpeg/FFmpeg calls.
+_CONTROL_CHAR_RE = re.compile(r"[\x00-\x1f\x7f]")
+
+
+def _reject_malformed_path(path: str) -> str | None:
+    """Reject structurally unsafe paths before any root containment check.
+
+    Returns an error message when the path is unsafe, or ``None`` when it is
+    structurally acceptable (an absolute, control-character-free path with no
+    literal ``..`` segments). The ``..`` check is defense-in-depth on top of
+    ``os.path.realpath`` (which already collapses traversal); rejecting it
+    explicitly keeps the rule obvious and avoids depending on prefix matching
+    alone.
+
+    Args:
+        path: Path to inspect
+
+    Returns:
+        Error message if the path is malformed, otherwise ``None``
+    """
+    if not path or not path.strip():
+        return "Path must not be empty"
+
+    if "\x00" in path or _CONTROL_CHAR_RE.search(path):
+        return "Path contains invalid control characters"
+
+    if not os.path.isabs(path):
+        return f"Path '{path}' must be absolute"
+
+    if ".." in PurePosixPath(path).parts:
+        return f"Path '{path}' contains parent-directory ('..') references"
+
+    return None
 
 
 def _is_within(path: str, root: str) -> bool:
@@ -57,6 +93,10 @@ def validate_media_path(
         is_valid is True if path is valid or if no roots are configured
         error_message contains details if validation fails
     """
+    malformed = _reject_malformed_path(media_path)
+    if malformed:
+        return False, malformed
+
     if not movies_root and not tv_root:
         # No roots configured, allow any path
         return True, None
