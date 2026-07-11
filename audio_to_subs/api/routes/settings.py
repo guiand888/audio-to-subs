@@ -46,7 +46,7 @@ DEFAULT_SETTINGS = {
     "default_language": "en",
     "default_output_format": "srt",
     "movies_root_path": "/movies",
-    "tv_root_path": "/tv",
+    "series_root_path": "/tv",
     "subtitles_same_directory": True,
     "max_audio_length": 900,
     "timezone": "UTC",
@@ -86,8 +86,8 @@ class SettingsResponse(BaseModel):
     movies_root_path: str | None = Field(
         default="/movies", description="Root path for movie files"
     )
-    tv_root_path: str | None = Field(
-        default="/tv", description="Root path for TV series files"
+    series_root_path: str | None = Field(
+        default="/tv", description="Root path for series files"
     )
     subtitles_same_directory: bool = Field(
         default=True, description="Save subtitles alongside source video files"
@@ -165,8 +165,8 @@ class SettingsUpdate(BaseModel):
     movies_root_path: str | None = Field(
         default=None, description="Root path for movie files"
     )
-    tv_root_path: str | None = Field(
-        default=None, description="Root path for TV series files"
+    series_root_path: str | None = Field(
+        default=None, description="Root path for series files"
     )
     subtitles_same_directory: bool | None = Field(
         default=None, description="Save subtitles alongside source video files"

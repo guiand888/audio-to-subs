@@ -265,9 +265,11 @@ async def create_job_service(
     # Validate media_path against configured root paths (validate_media_path
     # also rejects path traversal, control characters, and relative paths).
     movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
-    tv_root = getattr(settings, "TV_ROOT_PATH", None)
+    series_root = getattr(settings, "SERIES_ROOT_PATH", None)
 
-    is_valid, error_msg = validate_media_path(resolved_media_path, movies_root, tv_root)
+    is_valid, error_msg = validate_media_path(
+        resolved_media_path, movies_root, series_root
+    )
     if not is_valid:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -297,7 +299,7 @@ async def create_job_service(
     elif final_output_path:
         # Validate provided output_path is within safe directory
         is_valid, error_msg = validate_media_path(
-            final_output_path, movies_root, tv_root
+            final_output_path, movies_root, series_root
         )
         if not is_valid:
             raise HTTPException(

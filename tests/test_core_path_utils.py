@@ -30,8 +30,8 @@ class TestValidateMediaPath:
         assert is_valid is True
         assert error is None
 
-    def test_path_within_tv_root(self) -> None:
-        """Path within TV root should be valid."""
+    def test_path_within_series_root(self) -> None:
+        """Path within series root should be valid."""
         is_valid, error = validate_media_path(
             "/tv/comedy/series/episode.mp4", None, "/tv"
         )
@@ -46,7 +46,7 @@ class TestValidateMediaPath:
         assert "not within configured root directories" in error
 
     def test_path_in_movies_when_both_roots_configured(self) -> None:
-        """Path in movies root should be valid even when TV root is also configured."""
+        """Path in movies root should be valid even when series root is also configured."""
         is_valid, error = validate_media_path(
             "/movies/sci-fi/film.mp4", "/movies", "/tv"
         )
@@ -135,10 +135,10 @@ class TestGetMediaType:
         media_type = get_media_type("/movies/action/film.mp4", "/movies", None)
         assert media_type == "movie"
 
-    def test_path_in_tv_root(self) -> None:
-        """Path in TV root should return tv."""
+    def test_path_in_series_root(self) -> None:
+        """Path in series root should return series."""
         media_type = get_media_type("/tv/comedy/series/ep1.mp4", None, "/tv")
-        assert media_type == "tv"
+        assert media_type == "series"
 
     def test_path_not_in_any_root(self) -> None:
         """Path not in any configured root should return unknown."""

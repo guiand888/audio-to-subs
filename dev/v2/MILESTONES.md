@@ -22,7 +22,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
-| M6 — Polish, coverage, security | 🔶 In Progress | - | M6.a-d done (2026-07-11); M6.e-h not started. Depends on M5.6, M5.7, M5.8 |
+| M6 — Polish, coverage, security | 🔶 In Progress | - | M6.a-f done (2026-07-11); M6.g-h not started. Depends on M5.6, M5.7, M5.8 |
 | M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6 |
 
 Every milestone ends with the same quality bar:
@@ -473,7 +473,7 @@ Acceptance:
 | [M6.c](#m6c--security-auth-session-and-log-hygiene) | Security: auth, session, log-hygiene | Parallel | — | `auth/{sessions,bootstrap,passwords,deps}.py`, `core/logging_config.py` | ✅ Done |
 | [M6.d](#m6d--security-path-traversal-validation) | Security: path-traversal validation | Parallel† | — | `core/path_utils.py`†, `bazarr/pathmap.py`, `api/{routes,services}/jobs.py` | ✅ Done |
 | [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ✅ Done |
-| [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ⏳ Not started |
+| [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ✅ Done |
 | [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ⏳ Not started |
 | [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ⏳ Not started |
 
@@ -581,6 +581,8 @@ M6.a, M6.b, M6.c, M6.d, M6.e, and M6.f have no dependencies on each other and no
 - `MediaType` values and `series_root_path` consistent across backend, frontend types, and tests.
 - Terminology sweep findings documented, including anything deferred to M7.
 
+**Done (2026-07-11)**: renamed `tv_root_path`/`TV_ROOT_PATH` → `series_root_path`/`SERIES_ROOT_PATH` across `api/settings.py`, `api/routes/settings.py`, `api/services/jobs.py`, and `frontend/src/lib/types.ts`/`useSettingsForm.ts`/`SettingsPage.tsx`; `MediaType` Literal `"tv"` → `"series"` in `core/path_utils.py::get_media_type`, with `validate_media_path`'s `tv_root` parameter renamed to `series_root` alongside it. UI copy ("TV Root Path" → "Series Root Path" label/placeholder/help text) updated. Tests updated: `test_core_path_utils.py`, `test_api_jobs_create.py`, `SettingsPage.test.tsx`. `docker-compose.yml`'s `/tv` volume/mount path was correctly left untouched (out of scope, per the task note above). The broader UI-terminology sweep beyond Series/TV (subtitle/subs, queue naming, toast tone, etc.) was not attempted this pass — deferred to M7's doc rewrite, as the acceptance criteria allow.
+
 ### M6.g — Overwrite & duplicate-job guards
 
 **Mode**: **Sequential** — do not start until M6.a, M6.d, and M6.f have landed; do not run in parallel with them. **Depends on**: M6.a, M6.d, M6.f. **Owns**: `audio_to_subs/api/services/jobs.py`, `audio_to_subs/api/routes/jobs.py`, `audio_to_subs/worker/runner.py`, `audio_to_subs/core/file_rename.py`, `audio_to_subs/core/subtitle_generator.py`, `audio_to_subs/db/models.py` + a new Alembic migration, `frontend/src/pages/WantedPage.tsx`, job-detail/History UI for a new "overwrite and retry" action, `frontend/src/lib/api.ts`/types for the new `overwrite` field and `subtitle_exists`/`job_already_active`/`output_exists` error codes, and all directly dependent tests.
@@ -626,7 +628,7 @@ Applies to the milestone as a whole, once every sub-track above has landed:
 - `pre-commit run --all-files` clean with no version drift against `pyproject.toml` (M6.e).
 - UI/API terminology consistently uses "Series", not "TV" (M6.f).
 
-**Status (2026-07-11)**: M6.a-d done — 677 passed, 4 skipped in the full backend suite; `black --check`/`ruff check` clean. `mypy --strict` could not be verified this pass: the nix flake's `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`) independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before these merges. M6.e done (pre-commit pin alignment, 2026-07-11); M6.f-h not started.
+**Status (2026-07-11)**: M6.a-f done. Full backend suite: 677 passed, 4 skipped; `black --check`/`ruff check` clean repo-wide. Frontend: `vitest` 99/99 passed, `tsc --noEmit` clean. `mypy --strict` could not be verified: the nix flake's native `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`), independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before any of this M6 work; `pre-commit run --all-files` confirms every other hook (`black`, `ruff`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, etc.) passes. M6.g-h not started.
 
 ## M7 — Documentation rewrite & dev-docs reorganization
 

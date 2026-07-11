@@ -128,7 +128,7 @@ export interface SettingsOut {
   default_language: string
   default_output_format: string
   movies_root_path: string | null
-  tv_root_path: string | null
+  series_root_path: string | null
   subtitles_same_directory: boolean
   max_audio_length: number
   timezone: string
@@ -148,7 +148,7 @@ export interface SettingsPatch {
   default_language?: string
   default_output_format?: string
   movies_root_path?: string | null
-  tv_root_path?: string | null
+  series_root_path?: string | null
   subtitles_same_directory?: boolean
   max_audio_length?: number
   timezone?: string
@@ -202,7 +202,7 @@ export interface SettingsFormData {
   default_language: string
   default_output_format: OutputFormat
   movies_root_path: string | null
-  tv_root_path: string | null
+  series_root_path: string | null
   subtitles_same_directory: boolean
   max_audio_length: number
   timezone: string
@@ -215,7 +215,7 @@ export interface PathMapping {
 }
 
 // Media type
-export type MediaType = "movie" | "tv" | "unknown"
+export type MediaType = "movie" | "series" | "unknown"
 
 // --------------- SSE events ---------------
 // The backend emits unnamed SSE `message` events. The JSON payload discriminates
