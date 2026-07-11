@@ -80,6 +80,57 @@ def test_create_job_explicit_mode_keeps_language_code(authenticated_client):
     assert data["output_path"] == "/movies/Test Movie (2024)/movie.fr.srt"
 
 
+def test_create_job_rejects_manual_path_traversal(authenticated_client):
+    """Manual media_path containing '..' must be rejected (M6.a)."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": "/movies/Test Movie (2024)/../escape.mkv",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "traversal" in response.text.lower()
+
+
+def test_create_job_rejects_manual_path_outside_roots(authenticated_client):
+    """Manual media_path outside configured roots must be rejected (M6.a)."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": "/etc/passwd",
+        },
+    )
+    assert response.status_code == 400, response.text
+
+
+def test_create_job_rejects_traversal_output_path(authenticated_client):
+    """A user-supplied output_path containing '..' must be rejected (M6.a)."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": MEDIA_PATH,
+            "output_path": "/movies/Test Movie (2024)/../evil.srt",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "traversal" in response.text.lower()
+
+
+def test_create_job_accepts_clean_manual_path(authenticated_client):
+    """A clean manual media_path under the configured root is accepted."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": MEDIA_PATH,
+        },
+    )
+    assert response.status_code == 201, response.text
+
+
 def test_create_job_auto_mode_does_not_apply_default_language(
     authenticated_client, sync_session
 ):

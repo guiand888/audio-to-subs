@@ -3,13 +3,16 @@
 import time
 
 import pytest
+from fastapi import Response
 from freezegun import freeze_time
 from itsdangerous import BadSignature, SignatureExpired
 
 from audio_to_subs.auth.sessions import (
     PLACEHOLDER_SECRET,
+    SESSION_COOKIE_NAME,
     SessionManager,
     get_session_manager,
+    set_session_cookie,
 )
 
 
@@ -177,6 +180,43 @@ class TestSessionManagerRenewal:
             assert new_token != token
             payload = manager.validate_session(new_token)
             assert payload["user_id"] == 123
+
+
+class TestSetSessionCookieFlags:
+    """Cookie flags must be correct (M6.a, security pass).
+
+    Cookies must be ``HttpOnly``, ``SameSite=Lax``, scoped to ``Path=/``, and
+    only ``Secure`` when the app is behind TLS.
+    """
+
+    def test_cookie_is_httponly_and_lax(self):
+        response = Response()
+        set_session_cookie(response, "token-value", secure=False)
+        cookie = response.headers["set-cookie"]
+        assert SESSION_COOKIE_NAME in cookie
+        assert "HttpOnly" in cookie
+        assert "SameSite=lax" in cookie
+        assert "Path=/" in cookie
+
+    def test_cookie_not_secure_without_tls(self):
+        response = Response()
+        set_session_cookie(response, "token-value", secure=False)
+        cookie = response.headers["set-cookie"]
+        assert "Secure" not in cookie
+
+    def test_cookie_secure_behind_tls(self):
+        response = Response()
+        set_session_cookie(response, "token-value", secure=True)
+        cookie = response.headers["set-cookie"]
+        assert "Secure" in cookie
+
+    def test_secure_flag_toggles(self):
+        insecure = Response()
+        set_session_cookie(insecure, "t", secure=False)
+        secure = Response()
+        set_session_cookie(secure, "t", secure=True)
+        assert "Secure" not in insecure.headers["set-cookie"]
+        assert "Secure" in secure.headers["set-cookie"]
 
 
 class TestGetSessionManager:

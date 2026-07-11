@@ -42,7 +42,7 @@ def _reject_malformed_path(path: str) -> str | None:
         return f"Path '{path}' must be absolute"
 
     if ".." in PurePosixPath(path).parts:
-        return f"Path '{path}' contains parent-directory ('..') references"
+        return f"Path '{path}' contains parent-directory ('..') references (path traversal)"
 
     return None
 

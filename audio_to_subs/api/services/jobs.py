@@ -262,7 +262,8 @@ async def create_job_service(
             ),
         )
 
-    # Validate media_path against configured root paths (handles symlinks and traversal)
+    # Validate media_path against configured root paths (validate_media_path
+    # also rejects path traversal, control characters, and relative paths).
     movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
     tv_root = getattr(settings, "TV_ROOT_PATH", None)
 
