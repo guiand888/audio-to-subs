@@ -471,7 +471,7 @@ Tasks:
   - Confirm secrets never appear in logs.
   - Verify cookie flags (`HttpOnly`, `SameSite=Lax`, `Secure` behind TLS).
   - Verify input validation rejects path traversal in `media_path` when `source=manual`.
-  - Verify the bootstrap refuses to start with default placeholder secrets.
+  - Verify the bootstrap refuses to start with default placeholder secrets. **[DONE M6.d]** Enforced at API bootstrap: `api/app.py` lifespan constructs `SessionManager` and raises `RuntimeError` on `SESSION_SECRET="changeme"` (the only defined placeholder). Covered by `tests/test_session_secret_bootstrap.py::TestBootstrapRefusesPlaceholderSecret`. Worker intentionally excluded (no session secret provisioned).
 - CI: align pre-commit pins with `pyproject.toml` pins (currently drift — known v1 issue).
 - Make a clean checkout `docker compose up` smoke from scratch on a fresh machine.
 
