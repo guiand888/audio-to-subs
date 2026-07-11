@@ -243,6 +243,8 @@ describe("QueuePage", () => {
         percent: 60,
         stage: "transcribing",
         message: "60% complete",
+        step_index: null,
+        step_total: null,
       })
 
       // Verify store was updated
@@ -305,6 +307,8 @@ describe("QueuePage", () => {
         percent: 25,
         stage: "starting",
         message: "Starting job 1",
+        step_index: null,
+        step_total: null,
       })
 
       // Update second job to 75% progress
@@ -314,6 +318,8 @@ describe("QueuePage", () => {
         percent: 75,
         stage: "finishing",
         message: "Finishing job 2",
+        step_index: null,
+        step_total: null,
       })
 
       rerender(<QueuePage />)

@@ -127,6 +127,8 @@ describe("jobsStore", () => {
         percent: 50,
         stage: "transcribing",
         message: "Processing audio",
+        step_index: null,
+        step_total: null,
       }
 
       useJobsStore.getState().apply(event)
@@ -145,6 +147,8 @@ describe("jobsStore", () => {
         percent: 50,
         stage: "transcribing",
         message: "Processing",
+        step_index: null,
+        step_total: null,
       }
 
       useJobsStore.getState().apply(event)
@@ -263,6 +267,8 @@ describe("jobsStore", () => {
         percent: 25,
         stage: "transcribing",
         message: "Processing",
+        step_index: null,
+        step_total: null,
       })
 
       job = useJobsStore.getState().jobs["job-1"]
@@ -295,6 +301,8 @@ describe("jobsStore", () => {
         percent: 50,
         stage: "transcribing",
         message: "Job 1 processing",
+        step_index: null,
+        step_total: null,
       })
 
       useJobsStore.getState().apply({
@@ -303,6 +311,8 @@ describe("jobsStore", () => {
         percent: 75,
         stage: "formatting",
         message: "Job 2 processing",
+        step_index: null,
+        step_total: null,
       })
 
       const job1 = useJobsStore.getState().jobs["job-1"]
@@ -321,6 +331,8 @@ describe("jobsStore", () => {
         percent: 100,
         stage: "done",
         message: "Completed",
+        step_index: null,
+        step_total: null,
       })
 
       useJobsStore.getState().apply({
