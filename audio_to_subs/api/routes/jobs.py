@@ -5,7 +5,7 @@ from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy import and_, desc, func, select, true
 
@@ -197,7 +197,12 @@ async def create_job(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
-    job_request: JobCreateRequest = ...,  # type: ignore
+    # Required request body. ``Annotated[JobCreateRequest, Body()]`` replaces the
+    # previous ``job_request: JobCreateRequest = ...`` idiom, which needed a
+    # ``# type: ignore`` under mypy --strict because ``...`` is not a
+    # ``JobCreateRequest`` (M5.7). ``Body()`` with no default marks it required,
+    # identical to the old behavior but type-clean.
+    job_request: Annotated[JobCreateRequest, Body()],
 ) -> JobResponse:
     """Create a new transcription job.
 

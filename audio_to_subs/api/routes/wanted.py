@@ -194,11 +194,12 @@ async def list_wanted(  # noqa: C901
     # Get paginated items
     offset = (page - 1) * page_size
     query = query.limit(page_size).offset(offset)
-    result = await db.execute(query)
-    # mypy misresolves db.execute()'s overload here (reuses the int-typed
-    # result from count_query above); runtime type is correctly
-    # Sequence[BazarrCache], confirmed by the passing test suite. See M5.7.
-    items: list[BazarrCache] = list(result.scalars().all())  # type: ignore[arg-type]
+    # Use ``db.scalars`` (not ``db.execute(query)`` + ``result.scalars().all()``):
+    # the latter made mypy unify the reused ``result`` variable's generic across
+    # the earlier int-typed count query, forcing a ``# type: ignore[arg-type]`` on
+    # the ``list[...]`` annotation (M5.7). ``db.scalars`` types the row type
+    # directly from the ``select(BazarrCache)`` so no ignore is needed.
+    items = list(await db.scalars(query))
 
     # Filter by language if specified (Python-side since SQLite lacks json_contains)
     if language:
