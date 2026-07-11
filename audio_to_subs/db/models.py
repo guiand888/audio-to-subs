@@ -124,6 +124,9 @@ class Job(Base):
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     progress_message: Mapped[str | None] = mapped_column(Text, nullable=True)
+    progress_stage: Mapped[str | None] = mapped_column(String(20), nullable=True)
+    progress_step_index: Mapped[int | None] = mapped_column(Integer, nullable=True)
+    progress_step_total: Mapped[int | None] = mapped_column(Integer, nullable=True)
     cancel_requested: Mapped[bool] = mapped_column(
         Boolean, nullable=False, default=False
     )

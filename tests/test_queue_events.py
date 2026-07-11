@@ -1,6 +1,7 @@
 """Tests for queue event publishing (pub/sub) and SSE observer registration."""
 
 import asyncio
+import json
 
 import fakeredis.aioredis
 import pytest
@@ -63,83 +64,66 @@ async def test_publish_progress_event():
 
 
 @pytest.mark.asyncio
-async def test_observer_registration():
-    """Test that SSE observers can be registered with the events module."""
-    # Clear any previous observers by importing fresh
-    import importlib
+async def test_new_event_delivered_once_to_global_subscriber():
+    """Regression (M5.8 #3): API-originated ``new`` events used to be
+    delivered twice to each SSE client — once via Redis ``_publish`` and once
+    via the in-process observer's own Redis publish to the same channel.
+    After removing the observer path, a single ``publish_new`` must produce
+    exactly one ``event: new`` on ``jobs:global``.
+    """
+    from audio_to_subs.queue_.events import publish_new
 
-    import audio_to_subs.queue_.events as events_module
-
-    importlib.reload(events_module)
-
-    from audio_to_subs.queue_.events import (
-        register_global_stream_observer,
-        register_job_stream_observer,
-    )
-
-    # Track calls to observers
-    job_events = []
-    global_events = []
-
-    async def job_observer(job_id: str, event_data: dict) -> None:
-        job_events.append((job_id, event_data))
-
-    async def global_observer(event_data: dict) -> None:
-        global_events.append(event_data)
-
-    # Register observers
-    register_job_stream_observer(job_observer)
-    register_global_stream_observer(global_observer)
-
-    # Create a new Redis and publish an event
     redis = fakeredis.aioredis.FakeRedis()
     try:
-        from audio_to_subs.queue_.events import publish_new
+        pubsub = redis.pubsub()
+        await pubsub.subscribe("jobs:global")
+        await pubsub.get_message()  # skip subscription confirmation
 
-        job_id = "test-job-789"
-        await publish_new(redis, job_id)
+        await publish_new(redis, "once-job-new")
 
-        # Give async callbacks time to execute
-        await asyncio.sleep(0.1)
+        seen = []
+        for _ in range(10):
+            msg = await asyncio.wait_for(pubsub.get_message(timeout=0.3), timeout=1.0)
+            if msg and msg.get("type") == "message":
+                data = json.loads(msg["data"])
+                if data.get("event") == "new":
+                    seen.append(data)
 
-        # Verify observers were called
-        assert len(job_events) > 0
-        assert job_events[0][0] == job_id
-        assert job_events[0][1]["event"] == "new"
-
-        assert len(global_events) > 0
-        assert global_events[0]["job_id"] == job_id
-        assert global_events[0]["event"] == "new"
-
+        assert len(seen) == 1
+        assert seen[0]["job_id"] == "once-job-new"
     finally:
+        await pubsub.unsubscribe()
         await redis.aclose()
 
 
 @pytest.mark.asyncio
-async def test_sse_observer_single_worker():
-    """Test SSE observer callbacks work in single-worker scenario."""
-    # Clear any previous subscribers
-    from audio_to_subs.api.routes import stream
+async def test_cancel_event_delivered_once_to_global_subscriber():
+    """Regression (M5.8 #3): same as the ``new`` case, for API-originated
+    ``cancel`` events — exactly one ``event: cancel`` on ``jobs:global``.
+    """
+    from audio_to_subs.queue_.events import publish_cancel
 
-    stream._job_subscribers.clear()
-    stream._global_subscribers.clear()
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        pubsub = redis.pubsub()
+        await pubsub.subscribe("jobs:global")
+        await pubsub.get_message()  # skip subscription confirmation
 
-    from audio_to_subs.api.routes.stream import (
-        _subscribe_job_stream,
-        publish_to_job_stream,
-    )
+        await publish_cancel(redis, "once-job-cancel")
 
-    # Simulate a client subscribing to a job stream
-    job_id = "test-job-single"
-    queue = _subscribe_job_stream(job_id, "client-1")
+        seen = []
+        for _ in range(10):
+            msg = await asyncio.wait_for(pubsub.get_message(timeout=0.3), timeout=1.0)
+            if msg and msg.get("type") == "message":
+                data = json.loads(msg["data"])
+                if data.get("event") == "cancel":
+                    seen.append(data)
 
-    # Publish an event (this would normally come from events.py observer)
-    await publish_to_job_stream(job_id, {"event": "progress", "percent": 50})
-
-    # Verify event is in queue
-    event = await asyncio.wait_for(queue.get(), timeout=1.0)
-    assert event["event"] == "progress"
-    assert event["percent"] == 50
+        assert len(seen) == 1
+        assert seen[0]["job_id"] == "once-job-cancel"
+    finally:
+        await pubsub.unsubscribe()
+        await redis.aclose()
 
 
 @pytest.mark.asyncio
@@ -199,4 +183,33 @@ async def test_multi_worker_sse_event_delivery():
         assert received_events[1]["percent"] == 75
 
     finally:
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_publish_progress_includes_step_fields():
+    """M5.8: progress payload must carry step_index/step_total."""
+    from audio_to_subs.queue_.events import publish_progress
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        pubsub = redis.pubsub()
+        job_id = "step-job"
+        await pubsub.subscribe(f"jobs:progress:{job_id}", "jobs:global")
+        await pubsub.get_message()
+        await pubsub.get_message()
+
+        await publish_progress(
+            redis, job_id, 42, "extract", "Extracting", step_index=1, step_total=4
+        )
+
+        # job-specific channel
+        msg = await asyncio.wait_for(pubsub.get_message(timeout=1.0), timeout=2.0)
+        assert msg is not None
+        payload = json.loads(msg["data"])
+        assert payload["step_index"] == 1
+        assert payload["step_total"] == 4
+        assert payload["stage"] == "extract"
+    finally:
+        await pubsub.unsubscribe()
         await redis.aclose()

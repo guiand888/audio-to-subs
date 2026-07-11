@@ -8,6 +8,9 @@ const MOCK_JOB: JobResponse = {
   status: "queued",
   progress_percent: 0,
   progress_message: null,
+  progress_stage: null,
+  progress_step_index: null,
+  progress_step_total: null,
   source: "bazarr_movie",
   source_ref: "123",
   media_path: "/path/to/file.mp4",
@@ -73,11 +76,31 @@ describe("jobsStore", () => {
       expect(job.percent).toBe(0)
       expect(job.stage).toBe("")
       expect(job.message).toBe("")
+      expect(job.step_index).toBeNull()
+      expect(job.step_total).toBeNull()
       expect(job.media_path).toBe("/path/to/file.mp4")
       expect(job.language_code).toBe("en")
       expect(job.output_format).toBe("srt")
       expect(job.audio_duration_seconds).toBeNull()
       expect(job.estimated_cost_usd).toBeNull()
+    })
+
+    it("maps progress_stage/step fields from JobResponse", () => {
+      const store = useJobsStore.getState()
+      store.seed([
+        {
+          ...MOCK_JOB,
+          status: "running",
+          progress_stage: "transcribe",
+          progress_step_index: 2,
+          progress_step_total: 3,
+        },
+      ])
+
+      const job = useJobsStore.getState().jobs["job-1"]
+      expect(job.stage).toBe("transcribe")
+      expect(job.step_index).toBe(2)
+      expect(job.step_total).toBe(3)
     })
 
     it("replaces previous jobs when seeding", () => {

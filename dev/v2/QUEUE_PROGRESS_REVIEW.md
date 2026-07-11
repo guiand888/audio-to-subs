@@ -1,6 +1,6 @@
 # Queue progress reporting — code review & redesign (M5.8)
 
-**Status**: review complete, design proposed, not yet implemented.
+**Status**: implemented (M5.8, 2026-07-10). All five root causes addressed; see "Implementation notes" at the bottom for what changed vs. the original design.
 **Trigger**: user-reported UI bug — the Queue page (`/queue`) appeared frozen on "Extracting audio from video…" / 10% for a running job, with no live updates unless manually refreshed. Screenshot showed `bazarr_episode #324`, `Auto · SRT`, pinned at 10%.
 
 This is the authoritative detail document for [`MILESTONES.md`](MILESTONES.md)'s M5.8 entry, per the convention set by `REFACTOR.md` (M5.3) and `MISTRAL_USAGE_PROBE.md` (M0.5): the milestone section stays a short summary, this doc carries the full root-cause analysis and design so it survives context compaction.
@@ -90,3 +90,44 @@ Not proposing a switch to polling as the primary transport. `dev/v2/QUEUE.md` al
 - A hard refresh mid-job shows the correct step index and stage label, not just percent/message, by reading the persisted `progress_stage` column.
 - `step_total` reflects whether splitting actually occurred for that job (3 vs 4), not a hardcoded constant.
 - Full `pytest`, `black --check`, `ruff check`, `mypy --strict` clean; frontend `vitest` and `tsc --noEmit` clean; new code ≥ 80% coverage — per this repo's standard milestone quality bar.
+
+## Implementation notes (M5.8)
+
+Shipped 2026-07-10. Mapping of each root cause to the change:
+
+1. **Interior progress for `extract`/`split`** — `Pipeline._subprogress_callback()`
+   (`core/pipeline.py`) builds a `Callable[[str], None]` that parses ffmpeg's own
+   trailing `(XX%)` out of the message and maps it into the stage's percent window
+   (10→25 for `extract`, 25→30 for `split`), forwarding through `_emit_progress`.
+   It is wired into `extract_audio`/`split_audio` whenever a structured callback is
+   set, **independent of `verbose_progress`** (the worker path). The legacy
+   `_single_arg_progress_callback` was removed as dead code. `transcribe` already
+   emitted per-segment progress and is unchanged.
+2. **New jobs appear live** — `QueuePage` now watches `pendingNewCount` from the
+   Zustand store and calls `queryClient.invalidateQueries({ queryKey: ["jobs"] })`,
+   mirroring the existing terminal-event `["wanted"]` invalidation. The seed effect
+   then re-seeds the store from the fresh `GET /api/jobs`. (Note: because
+   `ProgressBridge` debounces DB writes to ~1 Hz, a running job's live percent may
+   briefly reset to the last persisted value on each new-job invalidation — same
+   behaviour as before this change, accepted for the milestone.)
+3. **Duplicate SSE delivery** — the in-process observer path
+   (`register_job_stream_observer`/`register_global_stream_observer`,
+   `_notify_*_observers`, `publish_to_job_stream`/`publish_to_global_stream`,
+   `register_observers`) was removed from `queue_/events.py`, `api/routes/stream.py`,
+   and `api/app.py`. 100% of SSE delivery now flows through Redis pub/sub exactly as
+   `QUEUE.md` documents. Regression test added asserting `new`/`cancel` each arrive
+   exactly once on `jobs:global`.
+4. **Persisted stage/step** — migration `0004_add_progress_stage` adds
+   `progress_stage`, `progress_step_index`, `progress_step_total` (nullable) to
+   `jobs`. `ProgressBridge._update_job_progress` writes all three; `JobResponse`
+   exposes them; the SSE `progress` payload carries `step_index`/`step_total`.
+5. **Percent thresholds (magic numbers)** — left at 10/25/30/75/100; reweighting was
+   out of scope per the milestone.
+
+**Step numbering** (decided with the user): `init` is hidden, `done` is terminal, so
+`step_total` is 3 (no split) or 4 (split) and `extract = step 1`. Mapping:
+`extract→1, [split→2,] transcribe→2|3, generate→3|4`. The frontend `JobCard` renders
+`Step {i} of {n} — {label}` as the primary label, with the percent bar as the
+in-step indicator; stages without a sub-progress source (`generate`, and any stage
+before the first interior update) render an indeterminate (pulsing) bar instead of a
+frozen number.

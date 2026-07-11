@@ -21,51 +21,36 @@ logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["stream"])
 
-# Per-subscriber queues for fair event distribution
-# Maps job_id -> list of (queue, client_id) tuples
-# Each client gets its own queue so events aren't lost to other clients
-_job_subscribers: dict[str, list[tuple[asyncio.Queue[dict[str, Any]], str]]] = {}
-_global_subscribers: list[tuple[asyncio.Queue[dict[str, Any]], str]] = []
-
 
 def _subscribe_job_stream(job_id: str, client_id: str) -> asyncio.Queue[dict[str, Any]]:
     """Create a subscriber queue for a job stream.
 
-    Returns a queue that will receive all events for this job.
+    Returns a queue that will receive all events for this job from the
+    client's Redis listener. (Per-client delivery is handled by the
+    per-subscription queue created here, not a shared fan-out list.)
     """
-    global _job_subscribers
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    if job_id not in _job_subscribers:
-        _job_subscribers[job_id] = []
-    _job_subscribers[job_id].append((queue, client_id))
-    return queue
+    return asyncio.Queue()
 
 
 def _unsubscribe_job_stream(job_id: str, client_id: str) -> None:
-    """Remove a subscriber from a job stream."""
-    global _job_subscribers
-    if job_id in _job_subscribers:
-        _job_subscribers[job_id] = [
-            (q, cid) for q, cid in _job_subscribers[job_id] if cid != client_id
-        ]
-        if not _job_subscribers[job_id]:
-            del _job_subscribers[job_id]
+    """No-op: per-client queues are GC'd with the SSE connection."""
+    return None
 
 
 def _subscribe_global_stream(client_id: str) -> asyncio.Queue[dict[str, Any]]:
     """Create a subscriber queue for the global stream."""
-    global _global_subscribers
-    queue: asyncio.Queue[dict[str, Any]] = asyncio.Queue()
-    _global_subscribers.append((queue, client_id))
-    return queue
+    return asyncio.Queue()
 
 
 def _unsubscribe_global_stream(client_id: str) -> None:
-    """Remove a subscriber from the global stream."""
-    global _global_subscribers
-    _global_subscribers = [
-        (q, cid) for q, cid in _global_subscribers if cid != client_id
-    ]
+    """No-op: per-client queues are GC'd with the SSE connection.
+
+    M5.8 (#3, verified): the in-process observer fan-out
+    (register_*_observer / publish_to_*_stream) was removed. All SSE delivery now
+    goes through Redis pub/sub only, so each event reaches a client exactly once.
+    Do NOT reintroduce a duplicate in-process delivery path.
+    """
+    return None
 
 
 async def _redis_listener_coro(
@@ -222,51 +207,3 @@ async def job_stream(
         _event_generator(request, str(job_id), redis=redis),
         media_type="text/event-stream",
     )
-
-
-# Functions to publish events to SSE streams (used as observer callbacks)
-async def publish_to_job_stream(job_id: str, event_data: dict[str, Any]) -> None:
-    """Publish an event to all subscribers of a job-specific SSE stream.
-
-    This is registered as an observer callback with events.py.
-
-    Args:
-        job_id: Job ID to publish to
-        event_data: Event data as dict
-    """
-    global _job_subscribers
-    if job_id in _job_subscribers:
-        for queue, _ in _job_subscribers[job_id]:
-            try:
-                queue.put_nowait(event_data)
-            except asyncio.QueueFull:
-                logger.warning("SSE queue full for job %s, dropping event", job_id)
-
-
-async def publish_to_global_stream(event_data: dict[str, Any]) -> None:
-    """Publish an event to all subscribers of the global SSE stream.
-
-    This is registered as an observer callback with events.py.
-
-    Args:
-        event_data: Event data as dict
-    """
-    global _global_subscribers
-    for queue, _ in _global_subscribers:
-        try:
-            queue.put_nowait(event_data)
-        except asyncio.QueueFull:
-            logger.warning("SSE global queue full, dropping event")
-
-
-def register_observers() -> None:
-    """Register SSE callbacks with the events module.
-
-    Called during app startup to establish the observer callbacks
-    for SSE event publishing.
-    """
-    from audio_to_subs.queue_ import events
-
-    events.register_job_stream_observer(publish_to_job_stream)
-    events.register_global_stream_observer(publish_to_global_stream)
-    logger.info("Registered SSE observers with events module")

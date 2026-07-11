@@ -13,6 +13,9 @@ export interface LiveJob {
   percent: number
   stage: string
   message: string
+  // Step-based progress (persisted/forwarded from the pipeline)
+  step_index: number | null
+  step_total: number | null
   // fields seeded from the GET /api/jobs response
   source: string
   source_ref: string | null
@@ -63,6 +66,8 @@ export const useJobsStore = create<JobsState>()((set) => ({
               percent: data.percent,
               stage: data.stage,
               message: data.message,
+              step_index: data.step_index,
+              step_total: data.step_total,
             }
           }
           return { jobs }
@@ -101,8 +106,10 @@ export const useJobsStore = create<JobsState>()((set) => ({
           id: j.id,
           status: j.status,
           percent: j.progress_percent,
-          stage: j.progress_message ?? "",
+          stage: j.progress_stage ?? "",
           message: j.progress_message ?? "",
+          step_index: j.progress_step_index ?? null,
+          step_total: j.progress_step_total ?? null,
           source: j.source,
           source_ref: j.source_ref,
           media_path: j.media_path,

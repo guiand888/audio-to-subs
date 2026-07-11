@@ -35,6 +35,9 @@ export interface JobResponse {
   priority: number
   progress_percent: number
   progress_message: string | null
+  progress_stage: string | null
+  progress_step_index: number | null
+  progress_step_total: number | null
   cancel_requested: boolean
   worker_id: string | null
   audio_duration_seconds: number | null
@@ -226,6 +229,8 @@ export type SseEventData =
       percent: number
       stage: string
       message: string
+      step_index: number | null
+      step_total: number | null
     }
   | { event: "cancel"; job_id: string }
   | { event: "done"; job_id: string; status: string; error?: string }

@@ -76,6 +76,18 @@ async def test_migration_can_be_applied():
         expected_tables = {"users", "jobs", "job_logs", "settings", "bazarr_cache"}
         assert expected_tables.issubset(set(tables))
 
+        # M5.8: jobs table must carry the persisted progress stage/step columns
+        import sqlite3 as _sqlite3
+
+        conn2 = _sqlite3.connect(db_path)
+        cols = {r[1] for r in conn2.execute("PRAGMA table_info(jobs)")}
+        conn2.close()
+        assert {
+            "progress_stage",
+            "progress_step_index",
+            "progress_step_total",
+        }.issubset(cols)
+
     finally:
         # Cleanup
         os.unlink(db_path)
