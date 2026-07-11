@@ -1,5 +1,8 @@
 """Tests for path utilities."""
 
+import os
+import tempfile
+
 from audio_to_subs.core.path_utils import (
     generate_output_path,
     get_media_type,
@@ -49,6 +52,74 @@ class TestValidateMediaPath:
         )
         assert is_valid is True
         assert error is None
+
+    def test_relative_path_rejected(self) -> None:
+        """A relative path must be rejected (server paths must be absolute)."""
+        is_valid, error = validate_media_path("../etc/passwd", "/movies", "/tv")
+        assert is_valid is False
+        assert error is not None
+        assert "absolute" in error
+
+    def test_dotdot_escape_rejected(self) -> None:
+        """A '..' segment that escapes the root must be rejected."""
+        is_valid, error = validate_media_path(
+            "/movies/../../etc/passwd", "/movies", "/tv"
+        )
+        assert is_valid is False
+        assert error is not None
+
+    def test_null_byte_rejected(self) -> None:
+        """A NUL byte in the path must be rejected."""
+        is_valid, error = validate_media_path("/movies/film\x00.mp4", "/movies", "/tv")
+        assert is_valid is False
+        assert error is not None
+        assert "control" in error
+
+    def test_control_char_rejected(self) -> None:
+        """A control character in the path must be rejected."""
+        is_valid, error = validate_media_path("/movies/film\x1f.mp4", "/movies", "/tv")
+        assert is_valid is False
+        assert error is not None
+        assert "control" in error
+
+    def test_empty_path_rejected(self) -> None:
+        """An empty path must be rejected."""
+        is_valid, error = validate_media_path("", "/movies", "/tv")
+        assert is_valid is False
+        assert error is not None
+
+    def test_symlink_escape_rejected(self) -> None:
+        """A symlink inside the root pointing outside must be rejected.
+
+        ``os.path.realpath`` resolves the symlink, so the canonical path lands
+        outside the root and fails the containment prefix check.
+        """
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "movies")
+            outside = os.path.join(tmp, "secret")
+            os.makedirs(root)
+            os.makedirs(outside)
+            link = os.path.join(root, "escape")
+            os.symlink(outside, link)
+            is_valid, error = validate_media_path(
+                os.path.join(link, "film.mp4"), root, None
+            )
+            assert is_valid is False
+            assert error is not None
+
+    def test_within_root_symlink_allowed(self) -> None:
+        """A symlink that stays inside the root is accepted."""
+        with tempfile.TemporaryDirectory() as tmp:
+            root = os.path.join(tmp, "movies")
+            sub = os.path.join(root, "sub")
+            os.makedirs(sub)
+            link = os.path.join(root, "link")
+            os.symlink(sub, link)
+            is_valid, error = validate_media_path(
+                os.path.join(link, "film.mp4"), root, None
+            )
+            assert is_valid is True
+            assert error is None
 
 
 class TestGetMediaType:

@@ -167,3 +167,60 @@ def test_create_job_bazarr_source_empty_media_path_clear_error(
     assert response.status_code == 400, response.text
     detail = response.json()["detail"]
     assert "No media file path is available" in detail
+
+
+def test_create_job_manual_traversal_rejected(authenticated_client):
+    """M6.c: a manual source whose media_path escapes configured roots must be
+    rejected (path traversal protection)."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": "/etc/passwd",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "Invalid media path" in response.json()["detail"]
+
+
+def test_create_job_manual_dotdot_rejected(authenticated_client):
+    """M6.c: explicit '..' segments in a manual media_path must be rejected
+    even before root containment is checked."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": "/movies/../../etc/passwd",
+        },
+    )
+    assert response.status_code == 400, response.text
+
+
+def test_create_job_manual_relative_path_rejected(authenticated_client):
+    """M6.c: relative media paths are rejected at the request boundary.
+
+    Pydantic validation errors surface as 422 with the message in the body.
+    """
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": "../etc/passwd",
+        },
+    )
+    assert response.status_code == 422, response.text
+    assert "absolute" in response.text
+
+
+def test_create_job_manual_output_traversal_rejected(authenticated_client):
+    """M6.c: a provided output_path that escapes the roots must be rejected."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={
+            "source": "manual",
+            "media_path": MEDIA_PATH,
+            "output_path": "/etc/out.srt",
+        },
+    )
+    assert response.status_code == 400, response.text
+    assert "Invalid output path" in response.json()["detail"]

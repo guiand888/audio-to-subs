@@ -1,12 +1,14 @@
 """Job routes for managing transcription jobs."""
 
 import logging
+import os
+import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, desc, func, select, true
 
 from audio_to_subs.api.deps import SettingsDep, get_db
@@ -40,6 +42,28 @@ class JobCreateRequest(BaseModel):
     source: JobSource = Field(
         ..., description="Job source: manual, bazarr_movie, bazarr_episode"
     )
+
+    @field_validator("media_path", "output_path")
+    @classmethod
+    def _validate_path_fields(cls, v: str | None) -> str | None:
+        """Early rejection of malformed paths at the request boundary.
+
+        Root containment is enforced later in ``create_job_service`` (which has
+        access to configured roots), but control characters, NUL bytes, and
+        relative paths are rejected here so they never reach the service layer.
+
+        Empty strings are passed through: an empty ``media_path`` is a valid
+        signal for a Bazarr source without a resolvable file, and the service
+        layer returns a clearer, source-specific error for it.
+        """
+        if v is None or v == "":
+            return v
+        if "\x00" in v or re.search(r"[\x00-\x1f\x7f]", v):
+            raise ValueError("path contains invalid control characters")
+        if not os.path.isabs(v):
+            raise ValueError("path must be absolute")
+        return v
+
     source_ref: str | None = Field(
         default=None,
         description="Reference to external source (e.g., Bazarr ID)",
