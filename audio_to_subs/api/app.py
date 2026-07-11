@@ -78,6 +78,21 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     settings = get_settings()
 
+    # Refuse to start with a default placeholder session secret.
+    #
+    # SessionManager raises ValueError when SESSION_SECRET resolves to the
+    # placeholder ("changeme"). That check only ran lazily at request time
+    # before this; we force it here at bootstrap so the container exits
+    # non-zero on a misconfigured deploy instead of serving with a known
+    # secret. Reuses the existing PLACEHOLDER_SECRET constant.
+    from audio_to_subs.auth.sessions import get_session_manager
+
+    try:
+        get_session_manager()
+    except ValueError as e:
+        logger.error("Session secret bootstrap failed: %s", str(e))
+        raise RuntimeError(str(e)) from e
+
     # Startup
     logger.info("Starting up...")
 
