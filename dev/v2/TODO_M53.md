@@ -33,7 +33,7 @@
 - [ ] **B7** — `_publish` never awaits `redis.publish` (pub/sub dead)
 - [ ] **B8** — Reaper requeues every running job (timestamp format mismatch)
 - [ ] **B9** — Stage-transition job logs never written
-- [ ] **B10** — `has_any_subs` semantic inverted in poller
+- [x] **B10** — `has_any_subs` semantic inverted in poller
 - [ ] **B11** — `output_path` never validated (arbitrary file write)
 - [ ] **B12** — `_get_path_map` reads `.value_json` off scalar string (AttributeError)
 - [ ] **B13** — `list_jobs` returns `total = len(jobs)` (page size, not total)

@@ -580,6 +580,73 @@ class TestProcessMovie:
             "/movies/The Players (2012)/The Players 720p H264.mkv"
         )
 
+    @pytest.mark.asyncio
+    async def test_process_movie_has_any_subs_from_present_subtitles(self, mock_db_session):
+        """has_any_subs reflects PRESENT subtitle files, not the missing list (B10).
+
+        Mirrors the episode case: a movie still wanted for English but already
+        carrying a French subtitle file must report has_any_subs=True.
+        """
+
+        class MockSubtitle:
+            name = "French"
+            code2 = "fr"
+            code3 = "fre"
+            forced = False
+            hi = False
+
+        class MockWantedMovie:
+            title = "Mixed Movie"
+            radarrId = 4242
+            sceneName = "/bazarr/movies/Mixed Movie.mkv"
+            missing_subtitles = [MockSubtitle()]  # still missing English...
+
+        mock_movie = MockWantedMovie()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(
+            mock_db_session,
+            mock_movie,
+            path_map,
+            started_at,
+            subtitles=[MockSubtitle()],  # ...but a French sub file is present
+        )
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:4242")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.has_any_subs is True
+
+    @pytest.mark.asyncio
+    async def test_process_movie_has_any_subs_false_when_no_present_subs(
+        self, mock_db_session
+    ):
+        """Without any present subtitle file, has_any_subs is False."""
+
+        class MockWantedMovie:
+            title = "No Subs Movie"
+            radarrId = 4243
+            sceneName = "/bazarr/movies/No Subs Movie.mkv"
+            missing_subtitles = []
+
+        mock_movie = MockWantedMovie()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(mock_db_session, mock_movie, path_map, started_at)
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:4243")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.has_any_subs is False
+
 
 class TestProcessEpisode:
     """Test _process_episode function."""
@@ -625,25 +692,45 @@ class TestProcessEpisode:
         assert "Test Show - Pilot" in entry.title
 
     @pytest.mark.asyncio
-    async def test_process_episode_has_any_subs_empty_missing(self, mock_db_session):
-        """Test that empty missing_subtitles means has_any_subs=True (regression test for ed20d79)."""
-        # Regression: _process_episode used to incorrectly compute has_any_subs
-        # with the inverted formula `len(...) > 0` instead of `== 0`.
-        # This test ensures that when missing_subtitles is empty (all subs present),
-        # has_any_subs is correctly set to True, matching _process_movie's logic.
+    async def test_process_episode_has_any_subs_from_present_subtitles(self, mock_db_session):
+        """has_any_subs reflects PRESENT subtitle files, not the missing list (B10).
+
+        Regression for B10: _process_episode used to derive has_any_subs from
+        ``missing_subtitles == []`` (i.e. "fully satisfied"), which is the wrong
+        signal for the frontend's "No subtitles only" filter. The authoritative
+        source is the detail endpoint's ``subtitles`` list of files actually on
+        disk.
+
+        This pins that an episode which is still wanted for English but already
+        HAS a French subtitle is reported as has_any_subs=True (so the "No
+        subtitles only" filter correctly drops it).
+        """
+
+        class MockSubtitle:
+            name = "French"
+            code2 = "fr"
+            code3 = "fre"
+            forced = False
+            hi = False
 
         class MockWantedEpisode:
             seriesTitle = "Test Show"
-            episodeTitle = "Complete"
+            episodeTitle = "Mixed"
             sonarrEpisodeId = 999
-            sceneName = "/bazarr/tv/Test Show/Complete.mkv"
-            missing_subtitles = []  # Empty = has all subtitles
+            sceneName = "/bazarr/tv/Test Show/Mixed.mkv"
+            missing_subtitles = [MockSubtitle()]  # still missing English...
 
         mock_episode = MockWantedEpisode()
         path_map = PathMap([])
         started_at = datetime.now(timezone.utc)
 
-        await _process_episode(mock_db_session, mock_episode, path_map, started_at)
+        await _process_episode(
+            mock_db_session,
+            mock_episode,
+            path_map,
+            started_at,
+            subtitles=[MockSubtitle()],  # ...but a French sub file is present
+        )
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "episode:999")
@@ -651,9 +738,40 @@ class TestProcessEpisode:
         entry = result.scalar_one_or_none()
 
         assert entry is not None
-        assert (
-            entry.has_any_subs is True
-        )  # Must be True when missing_subtitles is empty
+        assert entry.has_any_subs is True
+
+    @pytest.mark.asyncio
+    async def test_process_episode_has_any_subs_false_when_no_present_subs(
+        self, mock_db_session
+    ):
+        """Without any present subtitle file, has_any_subs is False.
+
+        The detail fetch is the only source of truth for present subs; when it
+        yields nothing (or is unavailable), the item is conservatively reported
+        as having no subs - even if the wanted endpoint reports nothing missing.
+        """
+
+        class MockWantedEpisode:
+            seriesTitle = "Test Show"
+            episodeTitle = "Complete"
+            sonarrEpisodeId = 1000
+            sceneName = "/bazarr/tv/Test Show/Complete.mkv"
+            missing_subtitles = []
+
+        mock_episode = MockWantedEpisode()
+        path_map = PathMap([])
+        started_at = datetime.now(timezone.utc)
+
+        # No subtitles passed (None) -> conservatively reported as no subs.
+        await _process_episode(mock_db_session, mock_episode, path_map, started_at)
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "episode:1000")
+        )
+        entry = result.scalar_one_or_none()
+
+        assert entry is not None
+        assert entry.has_any_subs is False
 
     @pytest.mark.asyncio
     async def test_process_episode_stores_audio_language(self, mock_db_session):

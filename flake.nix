@@ -80,6 +80,14 @@
 
               # Backend service dependency (mirrors docker-compose redis service)
               redis
+
+              # Linters/type-checkers. The venv (requirements-dev.txt) also
+              # installs pinned ruff/mypy, which take PATH precedence once the
+              # shellHook activates it - these native copies guarantee `ruff`
+              # and `mypy` are runnable under `nix develop` even before the
+              # venv is bootstrapped, matching CI's `make lint`/`make typecheck`.
+              ruff
+              mypy
             ]);
 
             env = pythonEnv;

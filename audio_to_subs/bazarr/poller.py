@@ -256,6 +256,7 @@ async def poll_bazarr_manually(
                     started_at,
                     movie_detail.audio_language if movie_detail else None,
                     movie_detail.path if movie_detail else None,
+                    movie_detail.subtitles if movie_detail else None,
                 )
                 movies_processed += 1
 
@@ -274,6 +275,7 @@ async def poll_bazarr_manually(
                     started_at,
                     episode_detail.audio_language if episode_detail else None,
                     episode_detail.path if episode_detail else None,
+                    episode_detail.subtitles if episode_detail else None,
                 )
                 episodes_processed += 1
 
@@ -463,6 +465,7 @@ async def _process_movie(
     started_at: datetime,
     audio_language: list[Any] | None = None,
     media_path_detail: str | None = None,
+    subtitles: list[Any] | None = None,
 ) -> None:
     """Process a single wanted movie.
 
@@ -477,6 +480,12 @@ async def _process_movie(
             the full movie details endpoint. The wanted endpoint only
             carries sceneName (often null), so the authoritative path is
             joined in separately. Falls back to sceneName if unavailable.
+        subtitles: Present subtitle files for this movie, fetched from the
+            full movie details endpoint. This is the authoritative signal for
+            ``has_any_subs`` (whether the item actually has a subtitle file on
+            disk) - the wanted endpoint only knows what's *missing*, not what
+            exists. None means the detail fetch failed, in which case we
+            conservatively report no subs.
     """
     # Resolve media_path: prefer the full-detail path (authoritative),
     # fall back to the wanted endpoint's sceneName.
@@ -484,8 +493,11 @@ async def _process_movie(
     if media_path:
         media_path = path_map.translate(media_path)
 
-    # Check if this movie has any subtitles at all (no missing subtitles = has all)
-    has_any_subs = len(wanted_movie.missing_subtitles or []) == 0
+    # Whether this movie actually has any subtitle file present. Derived from
+    # the detail endpoint's `subtitles` list (the wanted endpoint only knows
+    # what's missing). A movie can be "wanted" for one language while already
+    # having a subtitle for another - only the present-file list reflects that.
+    has_any_subs = len(subtitles or []) > 0
 
     cache_id = BazarrCache.make_id("movie", wanted_movie.radarrId)
 
@@ -510,6 +522,7 @@ async def _process_episode(
     started_at: datetime,
     audio_language: list[Any] | None = None,
     media_path_detail: str | None = None,
+    subtitles: list[Any] | None = None,
 ) -> None:
     """Process a single wanted episode.
 
@@ -525,6 +538,12 @@ async def _process_episode(
             from the full episode details endpoint. The wanted endpoint
             only carries sceneName (often null), so the authoritative path
             is joined in separately. Falls back to sceneName if unavailable.
+        subtitles: Present subtitle files for this episode, fetched from the
+            full episode details endpoint. This is the authoritative signal
+            for ``has_any_subs`` (whether the item actually has a subtitle
+            file on disk) - the wanted endpoint only knows what's *missing*,
+            not what exists. None means the detail fetch failed, in which
+            case we conservatively report no subs.
     """
     # Resolve media_path: prefer the full-detail path (authoritative),
     # fall back to the wanted endpoint's sceneName.
@@ -532,8 +551,12 @@ async def _process_episode(
     if media_path:
         media_path = path_map.translate(media_path)
 
-    # Check if this episode has any subtitles at all (no missing subtitles = has all)
-    has_any_subs = len(wanted_episode.missing_subtitles or []) == 0
+    # Whether this episode actually has any subtitle file present. Derived
+    # from the detail endpoint's `subtitles` list (the wanted endpoint only
+    # knows what's missing). An episode can be "wanted" for one language while
+    # already having a subtitle for another - only the present-file list
+    # reflects that.
+    has_any_subs = len(subtitles or []) > 0
 
     cache_id = BazarrCache.make_id("episode", wanted_episode.sonarrEpisodeId)
 
