@@ -467,11 +467,11 @@ Tasks:
 - Coverage ≥ 80% on all new code paths; close gaps in worker error handling and SSE error paths.
 - Update root `README.md` with v2 quickstart pointing to `dev/v2/`.
 - Update v1 roadmap docs: mark Bazarr integration complete (M3+), add v2 web app as released.
-- Security pass:
-  - Confirm secrets never appear in logs.
-  - Verify cookie flags (`HttpOnly`, `SameSite=Lax`, `Secure` behind TLS).
-  - Verify input validation rejects path traversal in `media_path` when `source=manual`.
-  - Verify the bootstrap refuses to start with default placeholder secrets.
+- Security pass (M6.a — implemented):
+  - Confirm secrets never appear in logs. → `core/logging_config.py` `SecretsRedactingFilter` scrubs `MISTRAL_API_KEY`/`SESSION_SECRET`/`ADMIN_PASSWORD`/`BAZARR_API_KEY` from every record (registered lazily from `Settings`). `tests/test_logging_config.py` `TestSecretsRedaction`.
+  - Verify cookie flags (`HttpOnly`, `SameSite=Lax`, `Secure` behind TLS). → `auth/sessions.py:set_session_cookie` already correct; locked in by `tests/test_auth_sessions.py` `TestSetSessionCookieFlags`.
+  - Verify input validation rejects path traversal in `media_path` when `source=manual`. → `core/path_utils.contains_traversal` + `_validate_job_paths` in `api/services/jobs.py`; tests in `tests/test_core_path_utils.py` and `tests/test_api_jobs_create.py`.
+  - Verify the bootstrap refuses to start with default placeholder secrets. → `auth/secrets.refuse_placeholder_secrets` called at app startup (covers `SESSION_SECRET=changeme`, `MISTRAL_API_KEY=your_api_key_here`, `ADMIN_PASSWORD=changeme`); tests in `tests/test_auth_secrets.py`.
 - CI: align pre-commit pins with `pyproject.toml` pins (currently drift — known v1 issue).
 - Make a clean checkout `docker compose up` smoke from scratch on a fresh machine.
 
