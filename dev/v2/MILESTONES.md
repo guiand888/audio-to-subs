@@ -472,7 +472,7 @@ Acceptance:
 | [M6.b](#m6b--coverage-sse-error-paths) | Coverage: SSE error paths | Parallel | — | `api/routes/stream.py`, `queue_/events.py` | ✅ Done |
 | [M6.c](#m6c--security-auth-session-and-log-hygiene) | Security: auth, session, log-hygiene | Parallel | — | `auth/{sessions,bootstrap,passwords,deps}.py`, `core/logging_config.py` | ✅ Done |
 | [M6.d](#m6d--security-path-traversal-validation) | Security: path-traversal validation | Parallel† | — | `core/path_utils.py`†, `bazarr/pathmap.py`, `api/{routes,services}/jobs.py` | ✅ Done |
-| [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ⏳ Not started |
+| [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ✅ Done |
 | [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ⏳ Not started |
 | [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ⏳ Not started |
 | [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ⏳ Not started |
@@ -559,6 +559,10 @@ M6.a, M6.b, M6.c, M6.d, M6.e, and M6.f have no dependencies on each other and no
 - `.pre-commit-config.yaml` hook revs match `pyproject.toml`'s `black`/`ruff`/`mypy` pins exactly.
 - `pre-commit run --all-files` clean.
 
+**Done (2026-07-11)**: bumped `.pre-commit-config.yaml` hook revs to exactly match `pyproject.toml`'s dev pins — `black` `23.12.1`→`24.2.0`, `ruff` `v0.1.11`→`v0.3.4`, `mypy` `v1.7.1`→`v1.9.0` (the version the dev environment already runs via `make`/`nix develop`, so the pre-commit mypy hook now agrees with the local `mypy` instead of lagging two minors behind). Also aligned the `black` hook's `language_version: python3.9`→`python3.11`, because the canonical dev/CI environment is the `nix develop` shell (`flake.nix` uses `pkgs.python311`) and `pre-commit run --all-files` could not even start under nix — the `black` hook tried to build a `python3.9` venv that does not exist there.
+
+**Verification under `nix develop`** (the mandated verification env): `make format-check` (black) and `make lint` (ruff) both pass; `pre-commit run --all-files` runs end-to-end and every hook passes **except `mypy`** — `trailing-whitespace`, `end-of-file-fixer` (auto-fixed pre-existing whitespace/EOF issues in `dev/*`, `.env.example`, `features/*`), `check-yaml`, `check-added-large-files`, `check-merge-conflict`, `debug-statements`, `black`, and `ruff` all report Passed. The `mypy` hook fails not on any `--strict` finding but because the nix shell's **native `mypy 1.20.1`** (`/nix/store/.../python3.13-mypy-1.20.1`) shadows the pinned `1.9.0` and crashes at import with `ModuleNotFoundError: No module named 'librt.base64'` — the exact, pre-existing environment bug already recorded at the M6 status note (the M5.7 cleanup could not be verified this pass). Running the correctly-pinned `mypy 1.9.0` directly confirms 26 `--strict` errors, **all in unmodified `audio_to_subs/` source** (the M5.7 open gap) — none are caused by M6.e. Both the `librt.base64` env breakage and the 26 `--strict` errors are out of M6.e's scope (this track owns `.pre-commit-config.yaml` only) and must not be widened into a codebase-wide mypy pass here.
+
 ### M6.f — Semantic audit: standardize UI/API terminology on "Series" (not "TV")
 
 **Mode**: Parallel (see path_utils.py note above). **Depends on**: none. **Owns**: `frontend/src/**` (all UI copy — labels, headings, placeholders, nav, toasts), `audio_to_subs/api/routes/settings.py` (`tv_root_path` → `series_root_path`), and the `MediaType` Literal + docstring in `audio_to_subs/core/path_utils.py` (`"tv"` → `"series"` — traversal-validation logic in that same file is owned by M6.d, not this), plus every test fixture referencing the old names.
@@ -622,7 +626,7 @@ Applies to the milestone as a whole, once every sub-track above has landed:
 - `pre-commit run --all-files` clean with no version drift against `pyproject.toml` (M6.e).
 - UI/API terminology consistently uses "Series", not "TV" (M6.f).
 
-**Status (2026-07-11)**: M6.a-d done — 677 passed, 4 skipped in the full backend suite; `black --check`/`ruff check` clean. `mypy --strict` could not be verified this pass: the nix flake's `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`) independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before these merges. M6.e-h not started.
+**Status (2026-07-11)**: M6.a-d done — 677 passed, 4 skipped in the full backend suite; `black --check`/`ruff check` clean. `mypy --strict` could not be verified this pass: the nix flake's `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`) independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before these merges. M6.e done (pre-commit pin alignment, 2026-07-11); M6.f-h not started.
 
 ## M7 — Documentation rewrite & dev-docs reorganization
 

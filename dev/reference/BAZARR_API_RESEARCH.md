@@ -188,10 +188,10 @@ class BazarrMonitor:
         self.bazarr_url = bazarr_url.rstrip('/')
         self.api_key = api_key
         self.headers = {'X-API-Key': api_key}
-        
+
     def get_missing_subtitles(self) -> Dict[str, List[Dict]]:
         """Get all movies and episodes missing subtitles"""
-        
+
         # Get movies missing subtitles
         movies_response = requests.get(
             f'{self.bazarr_url}/api/movies/wanted',
@@ -199,7 +199,7 @@ class BazarrMonitor:
             params={'length': -1}  # Get all
         )
         movies_response.raise_for_status()
-        
+
         # Get episodes missing subtitles
         episodes_response = requests.get(
             f'{self.bazarr_url}/api/episodes/wanted',
@@ -207,7 +207,7 @@ class BazarrMonitor:
             params={'length': -1}  # Get all
         )
         episodes_response.raise_for_status()
-        
+
         return {
             'movies': movies_response.json()['data'],
             'episodes': episodes_response.json()['data']
@@ -221,7 +221,7 @@ class SubtitleAgeTracker:
     def __init__(self, state_file: str = 'subtitle_state.json'):
         self.state_file = state_file
         self.state = self._load_state()
-        
+
     def _load_state(self) -> Dict:
         """Load tracking state from file"""
         try:
@@ -229,16 +229,16 @@ class SubtitleAgeTracker:
                 return json.load(f)
         except (FileNotFoundError, json.JSONDecodeError):
             return {'movies': {}, 'episodes': {}}
-        
+
     def _save_state(self):
         """Save tracking state to file"""
         with open(self.state_file, 'w') as f:
             json.dump(self.state, f, indent=2)
-        
+
     def track_missing_subtitles(self, missing_items: Dict[str, List[Dict]]):
         """Track when subtitles were first detected as missing"""
         now = datetime.now().isoformat()
-        
+
         # Track movies
         for movie in missing_items['movies']:
             movie_id = str(movie['radarrId'])
@@ -248,7 +248,7 @@ class SubtitleAgeTracker:
                     'title': movie['title'],
                     'missing_languages': [lang['code2'] for lang in movie['missing_subtitles']]
                 }
-        
+
         # Track episodes
         for episode in missing_items['episodes']:
             episode_id = str(episode['sonarrEpisodeId'])
@@ -260,21 +260,21 @@ class SubtitleAgeTracker:
                     'episode_title': episode['episodeTitle'],
                     'missing_languages': [lang['code2'] for lang in episode['missing_subtitles']]
                 }
-        
+
         self._save_state()
-        
+
     def get_subtitle_age(self, item_id: str, item_type: str = 'movie') -> Optional[float]:
         """Get how long subtitles have been missing in hours"""
         if item_type == 'movie':
             item = self.state['movies'].get(item_id)
         else:
             item = self.state['episodes'].get(item_id)
-            
+
         if item and 'first_detected' in item:
             first_detected = datetime.fromisoformat(item['first_detected'])
             age = datetime.now() - first_detected
             return age.total_seconds() / 3600  # Hours
-            
+
         return None
 ```
 
@@ -283,16 +283,16 @@ class SubtitleAgeTracker:
 ```python
 def get_video_file_path(item: Dict, item_type: str) -> Optional[str]:
     """Get the video file path for a movie or episode"""
-    
+
     # First try to get from sceneName (often contains path info)
     scene_name = item.get('sceneName', '')
-    
+
     # If sceneName doesn't contain path, use files browser API
     if not scene_name or not any(char in scene_name for char in ['/', '\\']):
         # This would need integration with Sonarr/Radarr APIs
         # or additional Bazarr API calls to resolve paths
         return None
-        
+
     return scene_name
 ```
 
@@ -304,21 +304,21 @@ class SubtitleAutomation:
         self.bazarr = BazarrMonitor(bazarr_url, api_key)
         self.tracker = SubtitleAgeTracker()
         self.subtitle_generator = YourSubtitleGenerator()  # Your implementation
-        
+
     def monitor_and_generate(self, min_age_hours: float = 24.0):
         """Monitor for missing subtitles and generate if conditions met"""
-        
+
         # Get all missing subtitles
         missing_items = self.bazarr.get_missing_subtitles()
-        
+
         # Track age of missing subtitles
         self.tracker.track_missing_subtitles(missing_items)
-        
+
         # Process movies
         for movie in missing_items['movies']:
             movie_id = str(movie['radarrId'])
             age_hours = self.tracker.get_subtitle_age(movie_id, 'movie')
-            
+
             if age_hours and age_hours >= min_age_hours:
                 video_path = get_video_file_path(movie, 'movie')
                 if video_path:
@@ -326,20 +326,20 @@ class SubtitleAutomation:
                     print(f"Missing languages: {[lang['code2'] for lang in movie['missing_subtitles']]}")
                     print(f"Video path: {video_path}")
                     print(f"Missing for: {age_hours:.1f} hours")
-                    
+
                     # Generate subtitles using your pipeline
                     # self.subtitle_generator.generate(video_path, target_languages)
-                    
+
                     # After generation, you could optionally:
                     # 1. Use Bazarr's subtitle processing API to apply mods
                     # 2. Trigger a rescan in Bazarr
                     # 3. Update your tracking state
-        
+
         # Process episodes (similar logic)
         for episode in missing_items['episodes']:
             episode_id = str(episode['sonarrEpisodeId'])
             age_hours = self.tracker.get_subtitle_age(episode_id, 'episode')
-            
+
             if age_hours and age_hours >= min_age_hours:
                 video_path = get_video_file_path(episode, 'episode')
                 if video_path:
@@ -347,7 +347,7 @@ class SubtitleAutomation:
                     print(f"Missing languages: {[lang['code2'] for lang in episode['missing_subtitles']]}")
                     print(f"Video path: {video_path}")
                     print(f"Missing for: {age_hours:.1f} hours")
-                    
+
                     # Generate subtitles using your pipeline
                     # self.subtitle_generator.generate(video_path, target_languages)
 ```
@@ -358,22 +358,22 @@ class SubtitleAutomation:
 def run_scheduled_monitoring(bazarr_url: str, api_key: str, interval_hours: float = 6.0):
     """Run monitoring on a schedule"""
     automation = SubtitleAutomation(bazarr_url, api_key)
-    
+
     print(f"Starting Bazarr subtitle automation monitor (interval: {interval_hours} hours)")
-    
+
     while True:
         try:
             print(f"\n{'='*50}")
             print(f"Running monitoring cycle: {datetime.now()}")
             print('='*50)
-            
+
             automation.monitor_and_generate()
-            
+
             # Sleep until next cycle
             sleep_seconds = interval_hours * 3600
             print(f"Next cycle in {interval_hours} hours...")
             time.sleep(sleep_seconds)
-            
+
         except KeyboardInterrupt:
             print("Monitoring stopped by user")
             break
@@ -386,7 +386,7 @@ if __name__ == "__main__":
     # Configuration
     BAZARR_URL = "http://localhost:6767"
     BAZARR_API_KEY = "your-api-key-here"
-    
+
     # Run with 6-hour monitoring interval
     run_scheduled_monitoring(BAZARR_URL, BAZARR_API_KEY, interval_hours=6.0)
 ```
@@ -412,7 +412,7 @@ def safe_api_call(self, endpoint: str, **kwargs):
             headers=self.headers,
             **kwargs
         )
-        
+
         if response.status_code == 401:
             raise AuthenticationError("Invalid Bazarr API key")
         elif response.status_code == 404:
@@ -421,10 +421,10 @@ def safe_api_call(self, endpoint: str, **kwargs):
             raise RateLimitError("API rate limit exceeded")
         elif response.status_code >= 500:
             raise ServerError(f"Bazarr server error: {response.status_code}")
-            
+
         response.raise_for_status()
         return response
-        
+
     except requests.exceptions.RequestException as e:
         raise APIConnectionError(f"Failed to connect to Bazarr: {e}")
 ```

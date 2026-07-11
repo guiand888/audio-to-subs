@@ -189,7 +189,7 @@ def compute_cost(
     output_token_rate_usd: float | None = None,
 ) -> CostBreakdown:
     """Compute cost using both duration-based and optional token-based billing.
-    
+
     Args:
         audio_duration_seconds: Total audio duration for fallback calculation
         mistral_usage: Raw usage dict from Mistral response (or None)
@@ -200,7 +200,7 @@ def compute_cost(
     duration_cost = 0.0
     token_cost = 0.0
     source: Literal["mistral_usage", "duration_fallback"] = "duration_fallback"
-    
+
     if mistral_usage:
         # Mistral provides billed duration via prompt_audio_seconds
         # Use this for precise billing (accounts for model-side processing)
@@ -208,7 +208,7 @@ def compute_cost(
         if billed_seconds is not None:
             duration_cost = (billed_seconds / 60.0) * rate_usd_per_minute
             source = "mistral_usage"
-        
+
         # Token-based billing (optional)
         if input_token_rate_usd is not None:
             prompt_tokens = mistral_usage.get("prompt_tokens", 0)
@@ -219,9 +219,9 @@ def compute_cost(
     else:
         # Fallback: pure duration × rate
         duration_cost = (audio_duration_seconds / 60.0) * rate_usd_per_minute
-    
+
     total_cost = duration_cost + token_cost
-    
+
     return CostBreakdown(
         audio_duration_seconds=audio_duration_seconds,
         usage=mistral_usage,

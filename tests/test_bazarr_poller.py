@@ -581,7 +581,9 @@ class TestProcessMovie:
         )
 
     @pytest.mark.asyncio
-    async def test_process_movie_has_any_subs_from_present_subtitles(self, mock_db_session):
+    async def test_process_movie_has_any_subs_from_present_subtitles(
+        self, mock_db_session
+    ):
         """has_any_subs reflects PRESENT subtitle files, not the missing list (B10).
 
         Mirrors the episode case: a movie still wanted for English but already
@@ -692,7 +694,9 @@ class TestProcessEpisode:
         assert "Test Show - Pilot" in entry.title
 
     @pytest.mark.asyncio
-    async def test_process_episode_has_any_subs_from_present_subtitles(self, mock_db_session):
+    async def test_process_episode_has_any_subs_from_present_subtitles(
+        self, mock_db_session
+    ):
         """has_any_subs reflects PRESENT subtitle files, not the missing list (B10).
 
         Regression for B10: _process_episode used to derive has_any_subs from
