@@ -30,6 +30,7 @@ from audio_to_subs.api.routes.stream import router as stream_router  # noqa: E40
 from audio_to_subs.api.routes.wanted import router as wanted_router  # noqa: E402
 from audio_to_subs.api.settings import get_settings  # noqa: E402
 from audio_to_subs.auth.bootstrap import bootstrap_admin  # noqa: E402
+from audio_to_subs.auth.secrets import refuse_placeholder_secrets  # noqa: E402
 from audio_to_subs.bazarr.poller import start_poller, stop_poller  # noqa: E402
 from audio_to_subs.queue_.reaper import reap_stale_running  # noqa: E402
 
@@ -77,6 +78,11 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     import subprocess
 
     settings = get_settings()
+
+    # Fail fast if any secret is still a known placeholder/default. This is the
+    # bootstrap-level gate required by M6.a (security pass): a misconfigured
+    # deploy must never start with public-knowledge credentials.
+    refuse_placeholder_secrets(settings)
 
     # Startup
     logger.info("Starting up...")
