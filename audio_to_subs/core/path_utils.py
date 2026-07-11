@@ -7,7 +7,7 @@ Provides utilities for:
 """
 
 import os
-from pathlib import Path
+from pathlib import Path, PurePosixPath
 from typing import Literal
 
 
@@ -73,6 +73,29 @@ def validate_media_path(
         f"Path '{media_path}' is not within configured root directories "
         f"(movies: {movies_root}, tv: {tv_root})",
     )
+
+
+def contains_traversal(path: str) -> bool:
+    """Detect path-traversal attempts in a media/output path.
+
+    Returns ``True`` if ``path`` contains parent-directory (``..``) references
+    such as ``../../etc/passwd`` or ``/movies/../secret``. The check is purely
+    lexical so it works whether or not the referenced files exist, and is
+    independent of the configured root directories.
+
+    Args:
+        path: The path to inspect.
+
+    Returns:
+        ``True`` if the path references a parent directory (traversal), else
+        ``False``.
+    """
+    try:
+        parts = PurePosixPath(path).parts
+    except (OSError, ValueError):
+        # Unparseable path is treated as a traversal attempt.
+        return True
+    return ".." in parts
 
 
 def get_media_type(

@@ -1,6 +1,7 @@
 """Tests for path utilities."""
 
 from audio_to_subs.core.path_utils import (
+    contains_traversal,
     generate_output_path,
     get_media_type,
     normalize_path,
@@ -73,6 +74,29 @@ class TestGetMediaType:
         """Path not in any configured root should return unknown."""
         media_type = get_media_type("/other/path.mp4", "/movies", "/tv")
         assert media_type == "unknown"
+
+
+class TestContainsTraversal:
+    """Tests for contains_traversal (M6.a, security pass)."""
+
+    def test_simple_traversal_detected(self) -> None:
+        assert contains_traversal("../../etc/passwd") is True
+
+    def test_rooted_traversal_detected(self) -> None:
+        assert contains_traversal("/movies/../secret.txt") is True
+
+    def test_traversal_in_subdir_detected(self) -> None:
+        # Still lexically under /movies, but uses ".." to escape.
+        assert contains_traversal("/movies/show/../escape.mkv") is True
+
+    def test_clean_absolute_path_allowed(self) -> None:
+        assert contains_traversal("/movies/show/episode.mkv") is False
+
+    def test_clean_relative_path_allowed(self) -> None:
+        assert contains_traversal("movies/show/episode.mkv") is False
+
+    def test_empty_path_allowed(self) -> None:
+        assert contains_traversal("") is False
 
 
 class TestGenerateOutputPath:

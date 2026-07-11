@@ -9,7 +9,11 @@ from fastapi import HTTPException, status
 from sqlalchemy import select
 
 from audio_to_subs.bazarr.pathmap import PathMap
-from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
+from audio_to_subs.core.path_utils import (
+    contains_traversal,
+    generate_output_path,
+    validate_media_path,
+)
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import (
     BazarrCache,
@@ -185,6 +189,64 @@ async def _apply_language_and_format_defaults(
     return final_language_code, final_output_format
 
 
+def _validate_job_paths(
+    source: JobSource,
+    media_path: str,
+    output_path: str | None,
+    movies_root: str | None,
+    tv_root: str | None,
+) -> None:
+    """Validate media_path and output_path against traversal and root bounds.
+
+    Rejects path-traversal (``..``) attempts and any path outside the
+    configured ``MOVIES_ROOT_PATH``/``TV_ROOT_PATH`` roots. The traversal check
+    is applied to manual-source media paths unconditionally (even when no roots
+    are configured, in which case the root check below is a no-op) so operator-
+    supplied ``../`` escapes are always blocked. See M6.a security pass.
+
+    Args:
+        source: The job source (manual vs Bazarr).
+        media_path: Resolved media file path.
+        output_path: Caller-supplied output path (may be ``None``).
+        movies_root: Configured movies root directory (or ``None``).
+        tv_root: Configured TV root directory (or ``None``).
+
+    Raises:
+        HTTPException: 400 if a path contains traversal or escapes the roots.
+    """
+    if source == JobSource.MANUAL and contains_traversal(media_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Invalid media path: path traversal is not allowed " f"('{media_path}')"
+            ),
+        )
+
+    is_valid, error_msg = validate_media_path(media_path, movies_root, tv_root)
+    if not is_valid:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=f"Invalid media path: {error_msg}",
+        )
+
+    if output_path and contains_traversal(output_path):
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail=(
+                "Invalid output path: path traversal is not allowed "
+                f"('{output_path}')"
+            ),
+        )
+
+    if output_path:
+        is_valid, error_msg = validate_media_path(output_path, movies_root, tv_root)
+        if not is_valid:
+            raise HTTPException(
+                status_code=status.HTTP_400_BAD_REQUEST,
+                detail=f"Invalid output path: {error_msg}",
+            )
+
+
 async def create_job_service(
     db: "AsyncSession",
     settings: "Settings",
@@ -262,16 +324,16 @@ async def create_job_service(
             ),
         )
 
-    # Validate media_path against configured root paths (handles symlinks and traversal)
+    # Reject path-traversal and out-of-root media paths (M6.a security pass).
     movies_root = getattr(settings, "MOVIES_ROOT_PATH", None)
     tv_root = getattr(settings, "TV_ROOT_PATH", None)
-
-    is_valid, error_msg = validate_media_path(resolved_media_path, movies_root, tv_root)
-    if not is_valid:
-        raise HTTPException(
-            status_code=status.HTTP_400_BAD_REQUEST,
-            detail=f"Invalid media path: {error_msg}",
-        )
+    _validate_job_paths(
+        source,
+        resolved_media_path,
+        output_path,
+        movies_root,
+        tv_root,
+    )
 
     # Apply defaults from settings if not provided.
     final_language_code, final_output_format = (
@@ -294,15 +356,9 @@ async def create_job_service(
             subtitles_same_dir,
         )
     elif final_output_path:
-        # Validate provided output_path is within safe directory
-        is_valid, error_msg = validate_media_path(
-            final_output_path, movies_root, tv_root
-        )
-        if not is_valid:
-            raise HTTPException(
-                status_code=status.HTTP_400_BAD_REQUEST,
-                detail=f"Invalid output path: {error_msg}",
-            )
+        # A caller-supplied output_path was already validated for traversal and
+        # root containment in _validate_job_paths above.
+        pass
 
     # Create job
     job = Job(
