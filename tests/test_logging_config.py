@@ -11,8 +11,11 @@ from io import StringIO
 import pytest
 
 from audio_to_subs.core.logging_config import (
+    clear_registered_secrets,
     configure_logging,
     configure_logging_from_env,
+    redact_message,
+    register_secret,
 )
 
 
@@ -22,12 +25,15 @@ def reset_logging():
     # Store original handlers and config
     original_handlers = logging.root.handlers[:]
     original_level = logging.root.level
+    original_filters = logging.root.filters[:]
 
     yield
 
     # Restore original state
     logging.root.handlers = original_handlers
     logging.root.level = original_level
+    logging.root.filters = original_filters
+    clear_registered_secrets()
 
 
 class TestConfigureLogging:
@@ -258,3 +264,64 @@ class TestConfigureLoggingFromEnv:
         monkeypatch.setenv("LOG_LEVEL", "bogus")
         configure_logging_from_env()
         assert logging.root.level == logging.INFO
+
+
+class TestSecretsRedaction:
+    """Secret values must never appear in log output (M6.a, security pass)."""
+
+    def test_redact_message_replaces_registered_secret(self):
+        register_secret("super-secret-mistral-key-12345")
+        out = redact_message("using key=super-secret-mistral-key-12345 for call")
+        assert "super-secret-mistral-key-12345" not in out
+        assert "***REDACTED***" in out
+
+    def test_redact_message_leaves_benign_text_unchanged(self):
+        register_secret("super-secret-mistral-key-12345")
+        out = redact_message("job created for /movies/foo.mp4")
+        assert out == "job created for /movies/foo.mp4"
+
+    def test_short_secrets_are_not_registered(self):
+        register_secret("pw")
+        out = redact_message("password is pw, fine")
+        assert out == "password is pw, fine"
+
+    def test_filter_redacts_secret_logged_via_args(self):
+        from audio_to_subs.core.logging_config import SecretsRedactingFilter
+
+        register_secret("long-admin-password-98765")
+        logger = logging.getLogger("secrets_test")
+        captured = StringIO()
+        handler = logging.StreamHandler(captured)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.addFilter(SecretsRedactingFilter())
+        logger.addHandler(handler)
+        logger.info("login with password=%s", "long-admin-password-98765")
+
+        output = captured.getvalue()
+        assert "long-admin-password-98765" not in output
+        assert "***REDACTED***" in output
+
+    def test_filter_redacts_secret_logged_via_fstring(self):
+        from audio_to_subs.core.logging_config import SecretsRedactingFilter
+
+        register_secret("long-session-token-aaaa-1111")
+        logger = logging.getLogger("secrets_test")
+        captured = StringIO()
+        handler = logging.StreamHandler(captured)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.addFilter(SecretsRedactingFilter())
+        logger.addHandler(handler)
+        secret = "long-session-token-aaaa-1111"
+        logger.warning(f"token={secret}")
+
+        output = captured.getvalue()
+        assert "long-session-token-aaaa-1111" not in output
+        assert "***REDACTED***" in output
+
+    def test_multiple_secrets_redacted(self):
+        register_secret("first-secret-value-abc")
+        register_secret("second-secret-value-xyz")
+        out = redact_message("a=first-secret-value-abc b=second-secret-value-xyz")
+        assert "first-secret-value-abc" not in out
+        assert "second-secret-value-xyz" not in out
+        assert out.count("***REDACTED***") == 2
