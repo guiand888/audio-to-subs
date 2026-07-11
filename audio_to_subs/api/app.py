@@ -80,7 +80,7 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     settings = get_settings()
 
     # Fail fast if any secret is still a known placeholder/default. This is the
-    # bootstrap-level gate required by M6.a (security pass): a misconfigured
+    # bootstrap-level gate required by M6.c (security pass): a misconfigured
     # deploy must never start with public-knowledge credentials.
     refuse_placeholder_secrets(settings)
 

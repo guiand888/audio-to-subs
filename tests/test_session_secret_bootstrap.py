@@ -4,9 +4,58 @@ relaxed Settings validator.
 These guard against the first-boot crash where SESSION_SECRET_FILE points to a
 non-existent file on a fresh volume, SESSION_SECRET is not set, and the old
 model_validator raised ValueError before the lifespan could generate the file.
+
+The M6.d security check (M6.d: "Verify the bootstrap refuses to start with
+default placeholder secrets") lives here too: the FastAPI lifespan must refuse
+to start when SESSION_SECRET resolves to the placeholder value, not just when
+the first login request is served.
 """
 
+from types import SimpleNamespace
+from unittest.mock import patch
+
 import pytest
+from fastapi.testclient import TestClient
+
+
+class TestBootstrapRefusesPlaceholderSecret:
+    """M6.d: the bootstrap (lifespan) refuses a placeholder session secret."""
+
+    def test_lifespan_refuses_changeme_secret(self, tmp_path, monkeypatch):
+        """SESSION_SECRET=changeme → lifespan raises RuntimeError."""
+        import audio_to_subs.api.settings as api_settings
+        import audio_to_subs.auth.sessions as auth_sessions
+        from audio_to_subs.api.app import create_app
+
+        # Isolate from the autouse test env: force placeholder + no file.
+        monkeypatch.setenv("SESSION_SECRET", "changeme")
+        monkeypatch.delenv("SESSION_SECRET_FILE", raising=False)
+        api_settings._settings = None
+        auth_sessions._session_manager = None
+
+        app = create_app()
+        with pytest.raises(RuntimeError, match="placeholder"):
+            with TestClient(app):
+                pass  # entering the context runs the lifespan
+
+    def test_lifespan_accepts_real_secret(self, tmp_path, monkeypatch):
+        """A real (non-placeholder) secret lets the lifespan run."""
+        import audio_to_subs.api.settings as api_settings
+        import audio_to_subs.auth.sessions as auth_sessions
+        from audio_to_subs.api.app import create_app
+
+        monkeypatch.setenv("SESSION_SECRET", "a-real-secret-not-a-placeholder")
+        monkeypatch.delenv("SESSION_SECRET_FILE", raising=False)
+        api_settings._settings = None
+        auth_sessions._session_manager = None
+
+        app = create_app()
+        with patch(
+            "subprocess.run",
+            return_value=SimpleNamespace(returncode=0, stderr="", stdout=""),
+        ):
+            with TestClient(app):
+                pass  # no raise → bootstrap accepted the secret
 
 
 class TestEnsureSessionSecretFile:

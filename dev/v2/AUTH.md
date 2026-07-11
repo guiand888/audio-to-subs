@@ -30,6 +30,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 - Cookie flags: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` when `BEHIND_TLS=true` (env-controlled — the homelab default is `false`).
 - TTL: 30 days with sliding renewal: on every authenticated request, if the cookie is older than 1 hour, re-sign with the same `user_id` and a fresh `iat`.
 - `SESSION_SECRET` from env (or `SESSION_SECRET_FILE` → secret file). On first boot, if no secret is set, generate one and write it to `/data/session_secret` (chmod 600). Refuse to start with a default placeholder.
+- The placeholder refusal (`PLACEHOLDER_SECRET = "changeme"`) is enforced at **bootstrap** time: `api/app.py`'s lifespan calls `auth/secrets.refuse_placeholder_secrets(settings)` on startup, which raises `RuntimeError` if `SESSION_SECRET` (or `MISTRAL_API_KEY`/`ADMIN_PASSWORD`) is still set to its placeholder value, so the API container exits non-zero on a misconfigured deploy rather than serving with a known secret. `SessionManager` itself also refuses the placeholder lazily at first use, as a second layer. The worker does not create sessions and is not provisioned a session secret, so it intentionally skips this check (M6.c).
 
 ### Why no `sessions` table
 
