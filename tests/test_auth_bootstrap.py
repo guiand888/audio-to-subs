@@ -95,3 +95,30 @@ async def test_bootstrap_admin_refuses_without_password():
     async with get_async_session(_TEST_DSN) as session:
         with pytest.raises(ValueError, match="ADMIN_USERNAME/ADMIN_PASSWORD not set"):
             await bootstrap_admin(session, username="admin")
+
+
+async def test_bootstrap_admin_refuses_placeholder_password():
+    """M6 security: bootstrap must refuse a default/placeholder admin password
+    (the shipped docker-compose uses ADMIN_PASSWORD=admin)."""
+    import audio_to_subs.db.base as db_base
+
+    db_base._async_engines.pop(_TEST_DSN, None)
+
+    await init_db(_TEST_DSN)
+
+    async with get_async_session(_TEST_DSN) as session:
+        with pytest.raises(ValueError, match="placeholder admin password"):
+            await bootstrap_admin(session, username="admin", password="admin")
+
+
+async def test_bootstrap_admin_refuses_empty_password():
+    """M6 security: an empty admin password is also rejected as a placeholder."""
+    import audio_to_subs.db.base as db_base
+
+    db_base._async_engines.pop(_TEST_DSN, None)
+
+    await init_db(_TEST_DSN)
+
+    async with get_async_session(_TEST_DSN) as session:
+        with pytest.raises(ValueError, match="placeholder admin password"):
+            await bootstrap_admin(session, username="admin", password="")

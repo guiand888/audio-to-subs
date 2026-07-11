@@ -22,7 +22,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
-| M6 — Polish + docs | ⏳ Not Started | - | Depends on M5.6, M5.7, M5.8 |
+| M6 — Polish + docs | 🔶 In Progress | 2026-07-11 | M6.b (security pass + worker/SSE error-path coverage) done; M6.a (docs/CI/smoke) pending | Depends on M5.6, M5.7, M5.8 |
 
 Every milestone ends with the same quality bar:
 
@@ -479,6 +479,52 @@ Acceptance:
 - Clean checkout → run the first-run procedure in [`DEPLOYMENT.md`](DEPLOYMENT.md) → working app, no manual fixes needed.
 - All tests green, coverage report attached, lints clean.
 - v2.0 release notes drafted.
+
+### M6.b — Security pass + worker/SSE error-path coverage (2026-07-11)
+
+M6 was split into two branches: `address-milestone-6-a` (docs, README
+quickstart, v1 roadmap, CI pre-commit pins, clean `docker compose up` smoke)
+and this branch, `implement-milestone-6-b` (the Security pass items from the
+M6 task list plus the coverage-gap item scoped to worker error handling and
+SSE error paths).
+
+Implementation notes:
+
+- **Secrets never appear in logs** (line 471): audited every `logger.*` call
+  across `api/`, `worker/`, `core/`, `bazarr/`. Confirmed no secret (Mistral
+  key, Bazarr key, session secret, admin password) is logged; Bazarr client
+  uses the `X-API-Key` header (never a URL query). Added regression test
+  `tests/test_no_secret_leak.py` asserting no sentinel secret reaches logs or
+  the `GET /api/settings` body, and that failed-login attempts never log the
+  password.
+- **Cookie flags** (line 472): `set_session_cookie` already sets
+  `HttpOnly`, `SameSite=Lax`, and `Secure=settings.BEHIND_TLS`. Added
+  `tests/test_api_auth.py::TestSessionCookieFlags` asserting the exact flags
+  with and without TLS.
+- **Path traversal on `source=manual`** (line 473): added an always-on
+  `rejects_traversal()` check in `core/path_utils.py` (rejects any `..`
+  component regardless of configured roots) and wired it into
+  `api/services/jobs.py::_validate_job_paths` for both `media_path` and a
+  caller-supplied `output_path`. `docker-compose.yml`'s placeholder
+  `ADMIN_PASSWORD=admin` lines were removed so the file-based docker secret is
+  authoritative. Tests: `tests/test_core_path_utils.py::TestRejectsTraversal`,
+  `tests/test_api_jobs_create.py::test_manual_job_rejects_traversal_*`.
+- **Bootstrap refuses default placeholder secrets** (line 474): extended
+  `auth/bootstrap.py` with `PLACEHOLDER_ADMIN_PASSWORDS`; `bootstrap_admin`
+  now refuses to create the admin with a placeholder/empty password (the
+  shipped compose used `admin`). The session-secret `changeme` refusal was
+  already in place. Tests: `tests/test_auth_bootstrap.py::
+  test_bootstrap_admin_refuses_placeholder_password` /
+  `test_bootstrap_admin_refuses_empty_password`.
+- **Worker error handling + SSE error paths coverage** (line 467): added
+  `tests/test_worker_runner.py` (Bazarr rescan happy + failure paths,
+  `_get_db_settings` failure, `persist_result` IntegrityError) and
+  `tests/test_sse_error_paths.py` (disconnect, unexpected exception, listener
+  cleanup, malformed Redis message, Redis transport error).
+
+Quality bar: `pytest` green (80 new M6.b tests), `black --check`,
+`ruff check`, `mypy --strict` clean on all touched modules; total backend
+coverage 85%.
 
 ## Parallelisation notes
 

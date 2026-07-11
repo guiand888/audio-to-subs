@@ -11,7 +11,6 @@ services:
       - SESSION_SECRET_FILE=/data/session_secret
       - REDIS_URL=redis://redis:6379/0
       - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - BEHIND_TLS=false
       - DEBUG=true
@@ -91,7 +90,7 @@ services:
       - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
       - SESSION_SECRET_FILE=/data/session_secret
       - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD=admin
+      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - DEBUG=true
       - LOG_LEVEL=INFO
     secrets:

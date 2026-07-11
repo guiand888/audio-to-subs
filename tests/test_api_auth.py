@@ -1,8 +1,48 @@
 """Tests for auth API routes."""
 
+import pytest
 from sqlalchemy import select
 
 from audio_to_subs.db.models import JobLog, LogLevel
+
+
+@pytest.fixture
+def behind_tls(monkeypatch):
+    """Force BEHIND_TLS=true before the app is built by ``api_client``.
+
+    Listed before ``api_client`` in test signatures so the env var is in place
+    when the settings singleton (and thus the Secure cookie flag) is resolved.
+    """
+    monkeypatch.setenv("BEHIND_TLS", "true")
+    yield
+
+
+class TestSessionCookieFlags:
+    """Verify M6 security item: cookie flags (HttpOnly, SameSite=Lax, Secure)."""
+
+    def test_cookie_flags_without_tls(self, api_client):
+        """Without TLS, the cookie is HttpOnly + SameSite=Lax but not Secure."""
+        response = api_client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "test-secure-password-12345"},
+        )
+        assert response.status_code == 200
+        set_cookie = response.headers.get("set-cookie", "").lower()
+        assert "httponly" in set_cookie
+        assert "samesite=lax" in set_cookie
+        assert "secure" not in set_cookie
+
+    def test_cookie_secure_when_behind_tls(self, behind_tls, api_client):
+        """Behind TLS, the cookie additionally carries the Secure flag."""
+        response = api_client.post(
+            "/api/auth/login",
+            json={"username": "admin", "password": "test-secure-password-12345"},
+        )
+        assert response.status_code == 200
+        set_cookie = response.headers.get("set-cookie", "").lower()
+        assert "httponly" in set_cookie
+        assert "samesite=lax" in set_cookie
+        assert "secure" in set_cookie
 
 
 class TestHealthz:

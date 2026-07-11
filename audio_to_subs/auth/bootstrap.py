@@ -15,6 +15,20 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Default/placeholder admin passwords that must never be used in production.
+# The shipped docker-compose sets ADMIN_PASSWORD=admin as a placeholder; the
+# bootstrap must refuse to start with any of these so a real secret is set.
+PLACEHOLDER_ADMIN_PASSWORDS: frozenset[str] = frozenset(
+    {
+        "changeme",
+        "password",
+        "admin",
+        "root",
+        "123456",
+        "",
+    }
+)
+
 
 async def bootstrap_admin(
     db: "AsyncSession",
@@ -49,6 +63,15 @@ async def bootstrap_admin(
         raise ValueError(
             "No users exist and ADMIN_USERNAME/ADMIN_PASSWORD not set. "
             "Run 'python -m audio_to_subs.admin set-password' to create admin."
+        )
+
+    # Refuse to bootstrap with a default/placeholder admin password (M6
+    # security pass). The shipped docker-compose uses ADMIN_PASSWORD=admin as
+    # a placeholder; starting with it would expose the app with known creds.
+    if password in PLACEHOLDER_ADMIN_PASSWORDS:
+        raise ValueError(
+            "Refusing to bootstrap with a default or placeholder admin password. "
+            "Set ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE) to a strong secret."
         )
 
     # Create admin user.

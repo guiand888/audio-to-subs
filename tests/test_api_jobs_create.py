@@ -12,6 +12,7 @@ generation are pure string operations that don't require the file to exist.
 import json
 from datetime import datetime, timezone
 
+import pytest
 from sqlalchemy import select
 
 from audio_to_subs.db.models import BazarrCache, Job, JobLog, LogLevel, Setting
@@ -275,3 +276,39 @@ def test_create_job_manual_output_traversal_rejected(authenticated_client):
     )
     assert response.status_code == 400, response.text
     assert "Invalid output path" in response.json()["detail"]
+
+
+@pytest.fixture
+def no_media_roots(monkeypatch):
+    """Unset media roots before the app is built by ``authenticated_client``.
+
+    With no roots configured, ``validate_media_path`` would otherwise allow
+    any path; the always-on traversal check must still reject ``..``.
+    """
+    monkeypatch.setenv("MOVIES_ROOT_PATH", "")
+    monkeypatch.setenv("TV_ROOT_PATH", "")
+    yield
+
+
+def test_manual_job_rejects_traversal_without_configured_roots(
+    no_media_roots, authenticated_client
+):
+    """M6 security: a manual job whose media_path contains '..' must be
+    rejected even when no media roots are configured."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={"source": "manual", "media_path": "/movies/../../etc/passwd"},
+    )
+    assert response.status_code == 400, response.text
+    assert "traversal" in response.text.lower()
+
+
+def test_manual_job_rejects_traversal_with_configured_roots(authenticated_client):
+    """The always-on check also catches '..' that would otherwise resolve
+    inside a configured root (proving it is not merely the root gate)."""
+    response = authenticated_client.post(
+        "/api/jobs",
+        json={"source": "manual", "media_path": "/movies/show/../other.mkv"},
+    )
+    assert response.status_code == 400, response.text
+    assert "traversal" in response.text.lower()

@@ -5,6 +5,7 @@ from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.core.cancel import Cancelled
 from audio_to_subs.core.pipeline import PipelineResult
@@ -566,3 +567,99 @@ class TestRunJob:
 
         assert result.status == JobStatus.DONE
         assert result.output_path == "/test/video.fr.srt"
+
+
+class TestRunJobBazarrRescan:
+    """Cover the best-effort Bazarr rescan branch (M6 error-path coverage)."""
+
+    @pytest.mark.asyncio
+    async def test_run_job_bazarr_movie_triggers_rescan(self, mock_db_session):
+        claimed = make_claimed_job(source=JobSource.BAZARR_MOVIE.value, source_ref="42")
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/test/output.srt",
+            audio_duration_seconds=30.0,
+            mistral_usage=None,
+            segments_count=1,
+        )
+
+        with (
+            patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class,
+            patch(
+                "audio_to_subs.worker.runner._rescan_bazarr_movie",
+                new=AsyncMock(return_value=True),
+            ) as mock_rescan,
+        ):
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.DONE
+        mock_rescan.assert_awaited_once()
+
+    @pytest.mark.asyncio
+    async def test_run_job_bazarr_rescan_failure_still_completes(self, mock_db_session):
+        """A failing Bazarr rescan must not fail the job (best-effort)."""
+        claimed = make_claimed_job(
+            source=JobSource.BAZARR_EPISODE.value, source_ref="7"
+        )
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/test/output.srt",
+            audio_duration_seconds=30.0,
+            mistral_usage=None,
+            segments_count=1,
+        )
+
+        with (
+            patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class,
+            patch(
+                "audio_to_subs.worker.runner._rescan_bazarr_episode",
+                new=AsyncMock(side_effect=RuntimeError("bazarr down")),
+            ),
+        ):
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.DONE
+
+
+class TestGetDbSettingsError:
+    """Cover the settings-fetch failure branch (M6 error-path coverage)."""
+
+    @pytest.mark.asyncio
+    async def test_get_db_settings_failure_returns_empty(self, monkeypatch):
+        """If the DB session raises, _get_db_settings must swallow it and
+        return an empty dict rather than propagate."""
+        import audio_to_subs.worker.runner as runner_module
+
+        def _boom(*args, **kwargs):
+            raise RuntimeError("db unreachable")
+
+        monkeypatch.setattr(runner_module, "get_async_session", _boom)
+
+        assert await _get_db_settings("sqlite+aiosqlite:///:memory:") == {}
+
+
+class TestPersistResultErrors:
+    """Cover persist_result's error branches (M6 error-path coverage)."""
+
+    @pytest.mark.asyncio
+    async def test_persist_result_integrity_error_is_swallowed(self, monkeypatch):
+        """An IntegrityError during commit must be caught and logged, not
+        raised to the caller."""
+        session = AsyncMock()
+        job = MagicMock()
+        session.get.return_value = job
+        session.commit.side_effect = IntegrityError("stmt", "params", "orig")
+
+        await persist_result(session, "job-1", JobResult(status=JobStatus.DONE))
+
+        session.rollback.assert_awaited()
