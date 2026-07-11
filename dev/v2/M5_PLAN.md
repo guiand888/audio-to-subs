@@ -26,7 +26,7 @@ Deliver feature-complete v2 with History page, Logs page, Settings page, cost di
 - ✅ Types: Full TypeScript mirrors in `lib/types.ts`
 - ✅ API client: Thin fetch wrapper with credentials
 - ❌ Missing: `/history` page
-- ❌ Missing: `/logs` page  
+- ❌ Missing: `/logs` page
 - ❌ Missing: `/settings` page
 - ❌ ComingSoonPage placeholders exist for all three
 
@@ -56,7 +56,7 @@ Deliver feature-complete v2 with History page, Logs page, Settings page, cost di
 - Filters work correctly
 - Pagination works
 
-#### 1.2 `/api/logs` Endpoint  
+#### 1.2 `/api/logs` Endpoint
 **File**: `audio_to_subs/api/routes/logs.py` (EXTEND)
 **Tasks**:
 - Add `GET /api/logs` - List logs across all jobs (or filtered)
@@ -242,7 +242,7 @@ For each sub-task and overall milestone:
 
 - [ ] `pytest` passes (all new tests green)
 - [ ] `black --check` clean
-- [ ] `ruff check` clean  
+- [ ] `ruff check` clean
 - [ ] `mypy --strict` clean
 - [ ] New code >= 80% coverage
 - [ ] Conventional commit messages with `Signed-off-by: Guillaume Andre <mail@guillaumea.fr>`

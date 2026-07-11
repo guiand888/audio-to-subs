@@ -616,6 +616,6 @@ GPLv3 - All code must comply with license requirements.
 
 ---
 
-**Document Version**: 1.0  
-**Last Updated**: 2025-11-15  
+**Document Version**: 1.0
+**Last Updated**: 2025-11-15
 **Maintainer**: Guillaume Andre (@guiand888)
