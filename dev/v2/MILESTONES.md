@@ -22,7 +22,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
-| M6 — Polish + docs | 🔶 In Progress | 2026-07-11 | M6.b (security pass + worker/SSE error-path coverage) done; M6.a (docs/CI/smoke) pending | Depends on M5.6, M5.7, M5.8 |
+| M6 — Polish, coverage, security | 🔶 In Progress | - | M6.a-d done (2026-07-11); M6.e-h not started. Depends on M5.6, M5.7, M5.8 |
+| M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6 |
 
 Every milestone ends with the same quality bar:
 
@@ -459,73 +460,191 @@ Acceptance:
 - `step_total` reflects whether splitting actually occurred for that job (3 vs 4), not a hardcoded constant.
 - `pytest`, `black --check`, `ruff check`, `mypy --strict` clean; frontend `vitest` and `tsc --noEmit` clean; new code ≥ 80% coverage.
 
-## M6 — Polish, docs, coverage, security pass
+## M6 — Polish, coverage, security pass
 
-**Goal**: shippable v2.0.
+**Goal**: shippable v2.0 codebase (functional bar only — documentation rewrite and dev-docs reorganization are split out to [M7](#m7--documentation-rewrite--dev-docs-reorganization) since they're a separate, larger body of work once the full scope of the v2 rewrite is known).
+
+**How to read this section**: M6 is split into 8 sub-tracks (M6.a–M6.h), each its own `###` heading below with a self-contained **Mode**, **Depends on**, **Owns**, **Goal**, **Tasks**, and **Acceptance**. An agent handed a single sub-track (e.g. "do M6.c") should only need to read that one heading — everything needed to start is there; nothing critical is left in this shared intro. The dispatch table below is a map for whoever is *assigning* work across sub-tracks; it is not itself a source of task detail.
+
+| ID | Name | Mode | Depends on | Owns (short) | Status |
+|----|------|------|------------|---------------|--------|
+| [M6.a](#m6a--coverage-worker-error-handling) | Coverage: worker error handling | Parallel | — | `worker/{runner,progress,helpers,__main__}.py` | ✅ Done |
+| [M6.b](#m6b--coverage-sse-error-paths) | Coverage: SSE error paths | Parallel | — | `api/routes/stream.py`, `queue_/events.py` | ✅ Done |
+| [M6.c](#m6c--security-auth-session-and-log-hygiene) | Security: auth, session, log-hygiene | Parallel | — | `auth/{sessions,bootstrap,passwords,deps}.py`, `core/logging_config.py` | ✅ Done |
+| [M6.d](#m6d--security-path-traversal-validation) | Security: path-traversal validation | Parallel† | — | `core/path_utils.py`†, `bazarr/pathmap.py`, `api/{routes,services}/jobs.py` | ✅ Done |
+| [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ⏳ Not started |
+| [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ⏳ Not started |
+| [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ⏳ Not started |
+| [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ⏳ Not started |
+
+†M6.d and M6.f both touch `core/path_utils.py` (different functions — traversal-validation vs. the `MediaType` literal). They can still run in parallel, but land as two small, non-overlapping diffs rather than editing simultaneously without coordinating.
+
+M6.a, M6.b, M6.c, M6.d, M6.e, and M6.f have no dependencies on each other and no dependencies on M6.g/M6.h — run them as separate sub-agents in parallel. M6.g must wait for M6.a, M6.d, and M6.f specifically (it edits files those own). M6.h must wait for everything else — it verifies the fully-merged result.
+
+**M6.a–d dispatch note (2026-07-11)**: the four sub-tracks were dispatched to separate agent branches (`address-milestone-6-a`, `implement-milestone-6-b`, `implement-milestone-6c`, `implement-m6d-specificati`) before this sub-track breakdown was committed to `dev`, so each agent worked from ambiguous scope and the branches ended up crossing lines: `address-milestone-6-a` actually delivered M6.c+M6.d work, `implement-milestone-6-b` delivered a bit of everything (true M6.a/M6.b coverage plus a second M6.c/M6.d implementation), `implement-milestone-6c` delivered M6.d's path-traversal fix, and `implement-m6d-specificati` delivered a slice of M6.c's bootstrap-refusal fix. All four branches were merged into `dev` and the overlapping/duplicate security implementations (three separate path-traversal checks, three separate placeholder-secret-refusal call sites) were reconciled down to one implementation per concern, keeping the most robust version of each and re-running the full suite after each merge. The **Owns** and implementation notes below describe where each concern actually landed, not which branch it came from.
+
+### M6.a — Coverage: worker error handling
+
+**Mode**: Parallel. **Depends on**: none. **Owns**: `audio_to_subs/worker/{runner.py,progress.py,helpers.py,__main__.py}`, `tests/test_worker_*.py`. Do not edit files outside this list — if closing a gap needs a change elsewhere (e.g. a shared `tests/conftest.py` fixture), stop and flag it instead of editing it directly.
+
+**Goal**: close coverage gaps in worker exception paths.
+
+**Tasks**: add/extend tests for claim failures, mid-job crash + reap interaction, cancellation races, and the M5.7 SIGINT/SIGTERM handler path.
+
+**Acceptance**:
+- Coverage on `audio_to_subs/worker/*` ≥ 80%, including the exception branches above.
+- Tests only — no behavior change, unless a genuine bug is found in the process (fix it and note it explicitly in the PR/commit).
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+
+**Done (2026-07-11)**: `tests/test_worker_runner.py` adds coverage for the Bazarr rescan best-effort failure path, `_get_db_settings` fetch failure, and `persist_result` `IntegrityError` handling. Tests only, no behavior change.
+
+### M6.b — Coverage: SSE error paths
+
+**Mode**: Parallel. **Depends on**: none. **Owns**: `audio_to_subs/api/routes/stream.py`, `audio_to_subs/queue_/events.py`, `tests/test_api_stream.py`, `tests/test_queue_events.py`.
+
+**Goal**: close coverage gaps in SSE error paths, post-M5.8's move to Redis-only delivery.
+
+**Tasks**: add/extend tests for client disconnect mid-stream, Redis pub/sub failure/reconnect, and malformed/oversized event payloads.
+
+**Acceptance**:
+- Coverage on `api/routes/stream.py` and `queue_/events.py` ≥ 80%, including the branches above.
+- Tests reflect the current Redis-only delivery path — no leftover assertions about the dual in-process+Redis delivery M5.8 removed.
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+
+**Done (2026-07-11)**: `tests/test_sse_error_paths.py` adds coverage for client disconnect, an unexpected exception mid-stream, listener cleanup, a malformed Redis message, and a Redis transport error.
+
+### M6.c — Security: auth, session, and log-hygiene
+
+**Mode**: Parallel. **Depends on**: none. **Owns**: `audio_to_subs/auth/{sessions.py,bootstrap.py,passwords.py,deps.py}`, `audio_to_subs/core/logging_config.py`, `tests/test_auth_*.py`.
+
+**Goal**: verify and, if needed, fix cookie hardening, secret-placeholder bootstrap refusal, and log hygiene in the auth path.
+
+**Tasks**: verify cookie flags (`HttpOnly`, `SameSite=Lax`, `Secure` behind TLS); verify the bootstrap refuses to start with default/placeholder secrets; confirm no secret values (API keys, passwords, session tokens) ever reach log output anywhere in the auth path.
+
+**Acceptance**:
+- A test asserts the actual `Set-Cookie` header carries `HttpOnly`, `SameSite=Lax`, and `Secure` (behind TLS).
+- A test asserts bootstrap refuses to start with a default/placeholder secret.
+- A test or targeted grep confirms no secret value reaches `logger` output anywhere under `auth/`.
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+
+**Done (2026-07-11)**:
+- **Log hygiene**: `core/logging_config.py`'s `SecretsRedactingFilter` scrubs `MISTRAL_API_KEY`/`SESSION_SECRET`/`ADMIN_PASSWORD`/`BAZARR_API_KEY` from every log record (registered lazily from `Settings`, applied to every root-logger handler). Unit coverage in `tests/test_logging_config.py::TestSecretsRedaction`; an end-to-end regression test in `tests/test_no_secret_leak.py` drives real auth/settings surfaces with sentinel secrets and asserts none reach logs or the `GET /api/settings` body.
+- **Cookie flags**: `auth/sessions.py:set_session_cookie` was already setting `HttpOnly`, `SameSite=Lax`, `Path=/`, and `Secure` behind TLS; locked in by a unit test on the cookie-setting function (`tests/test_auth_sessions.py::TestSetSessionCookieFlags`) and an integration test through the real `/api/auth/login` endpoint with and without `BEHIND_TLS` (`tests/test_api_auth.py::TestSessionCookieFlags`).
+- **Bootstrap refuses placeholder secrets**: `auth/secrets.py` (new module) adds `refuse_placeholder_secrets(settings)`, called from the FastAPI lifespan in `api/app.py` at startup — raises `RuntimeError` if `SESSION_SECRET`, `MISTRAL_API_KEY`, or `ADMIN_PASSWORD` still equals its known placeholder value. `auth/bootstrap.py`'s `bootstrap_admin` additionally denylists a broader set of placeholder admin passwords (`changeme`, `password`, `admin`, `root`, `123456`, empty) at the point the admin account is actually created, as defense-in-depth beyond the startup gate. `docker-compose.yml`'s hardcoded `ADMIN_PASSWORD=admin` default was removed so the file-backed secret is authoritative. Tests: `tests/test_auth_secrets.py`, `tests/test_auth_bootstrap.py::test_bootstrap_admin_refuses_placeholder_password`/`test_bootstrap_admin_refuses_empty_password`, `tests/test_session_secret_bootstrap.py`.
+
+### M6.d — Security: path-traversal validation
+
+**Mode**: Parallel (see path_utils.py note above). **Depends on**: none. **Owns**: `audio_to_subs/core/path_utils.py` (traversal-validation functions only — not the `MediaType` literal, owned by M6.f), `audio_to_subs/bazarr/pathmap.py`, `audio_to_subs/api/routes/jobs.py`, `audio_to_subs/api/services/jobs.py`, `tests/test_api_jobs.py`, `tests/test_core_path_utils.py`, `tests/test_bazarr_pathmap.py`.
+
+**Goal**: verify and, if needed, harden input validation against path traversal.
+
+**Tasks**: verify `media_path` traversal is rejected for `source=manual` (`../`, absolute paths outside configured roots); verify Bazarr-resolved paths stay within `movies_root_path`/`series_root_path` — note the latter is renamed from `tv_root_path` by M6.f; if M6.f hasn't landed yet, write tests against whichever name is current and don't duplicate the rename here.
+
+**Acceptance**:
+- A test rejects `media_path` traversal attempts (`../`, absolute-outside-root) for `source=manual`.
+- A test confirms Bazarr-resolved paths stay within the configured root(s).
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+
+**Done (2026-07-11)**: `core/path_utils.py::validate_media_path` now rejects control characters, non-absolute paths, and literal `..` segments internally (via `_reject_malformed_path`, checked before the root-containment check and independent of whether roots are configured), so every existing and future caller is protected without needing a separate wrapper. `api/routes/jobs.py`'s `JobCreateRequest` adds an early Pydantic `field_validator` on `media_path`/`output_path` rejecting control characters and non-absolute paths at the request boundary, as defense-in-depth on top of the service-layer check. Three independent reimplementations of this same fix arrived across the dispatched branches (a `contains_traversal()`/`_validate_job_paths()` wrapper in `api/services/jobs.py`, and a `rejects_traversal()` variant of the same); both were dropped in favor of the single lower-level fix, which subsumes them. Tests: `tests/test_core_path_utils.py::TestValidateMediaPath`, `tests/test_api_jobs_create.py` (traversal, outside-root, and no-roots-configured cases for both `media_path` and `output_path`).
+
+### M6.e — CI: pre-commit pin alignment
+
+**Mode**: Parallel. **Depends on**: none. **Owns**: `.pre-commit-config.yaml` only — read `pyproject.toml`'s `black`/`ruff`/`mypy` pins as the source of truth; don't edit `pyproject.toml` unless it's the one actually out of date.
+
+**Goal**: eliminate the known drift between `.pre-commit-config.yaml`'s hook revisions and `pyproject.toml`'s pinned versions.
+
+**Tasks**: bump `.pre-commit-config.yaml`'s `black`/`ruff`/`mypy` hook revs to match `pyproject.toml`.
+
+**Acceptance**:
+- `.pre-commit-config.yaml` hook revs match `pyproject.toml`'s `black`/`ruff`/`mypy` pins exactly.
+- `pre-commit run --all-files` clean.
+
+### M6.f — Semantic audit: standardize UI/API terminology on "Series" (not "TV")
+
+**Mode**: Parallel (see path_utils.py note above). **Depends on**: none. **Owns**: `frontend/src/**` (all UI copy — labels, headings, placeholders, nav, toasts), `audio_to_subs/api/routes/settings.py` (`tv_root_path` → `series_root_path`), and the `MediaType` Literal + docstring in `audio_to_subs/core/path_utils.py` (`"tv"` → `"series"` — traversal-validation logic in that same file is owned by M6.d, not this), plus every test fixture referencing the old names.
+
+**Rationale**: "TV" is the outlier — Bazarr's own API is `/api/series`/`/api/episodes` (confirmed against `../bazarr` source during M5.5/M5.6) and Sonarr's own domain noun is "Series"; neither system this app integrates with uses "tv" anywhere in its wire format. Standardizing the UI *and* the Settings API contract on "Series" removes a translation step at the one integration boundary that matters, not just a cosmetic UI fix.
+
+**Tasks**:
+- Frontend: nav label/copy (`AppLayout.tsx`), `SettingsPage.tsx` ("TV Root Path" → "Series Root Path" label/placeholder/help text), `lib/types.ts` (`MediaType`), `useWanted.ts`, `WantedPage.tsx`, `HistoryPage.tsx` — every "TV"/"Tv" occurrence.
+- Backend: `tv_root_path` setting field (defaults dict, `SettingsOut`/`SettingsPatch` schemas) → `series_root_path`; `MediaType` Literal `"tv"` → `"series"` in `path_utils.py`. This is a settings-key/API-contract rename, not a DB column (settings aren't stored one-column-per-field), so no Alembic migration is needed — update the defaults dict and any place that reads the old key.
+- Update dependent tests: `test_api_settings.py`, `test_core_path_utils.py`, frontend `SettingsPage.test.tsx`, and any other fixture using the old field/value names.
+- Broader sweep beyond Series/TV: check for other duplicate terms describing the same concept across the UI (e.g. "subtitle" vs "subs", "queue" vs "job queue", inconsistent capitalization of page names, toast/error message tone). Fix what's in scope; note anything deferred for M7 to pick up during the doc rewrite.
+- Explicitly out of scope: the `docker-compose.yml` named volume (`audio-to-subs-tv`) and container mount path (`/tv`). Renaming those doesn't migrate existing users' volumes/bind-mounts and is a separate, higher-risk infra decision — leave them as-is; the container-internal path being named `/tv` is invisible to users since it's driven by the (now-renamed) `series_root_path` setting, not the other way around.
+
+**Acceptance**:
+- No remaining case-insensitive "TV" as a media-type descriptor in UI copy or API field/type names; "Series" used consistently end-to-end.
+- `MediaType` values and `series_root_path` consistent across backend, frontend types, and tests.
+- Terminology sweep findings documented, including anything deferred to M7.
+
+### M6.g — Overwrite & duplicate-job guards
+
+**Mode**: **Sequential** — do not start until M6.a, M6.d, and M6.f have landed; do not run in parallel with them. **Depends on**: M6.a, M6.d, M6.f. **Owns**: `audio_to_subs/api/services/jobs.py`, `audio_to_subs/api/routes/jobs.py`, `audio_to_subs/worker/runner.py`, `audio_to_subs/core/file_rename.py`, `audio_to_subs/core/subtitle_generator.py`, `audio_to_subs/db/models.py` + a new Alembic migration, `frontend/src/pages/WantedPage.tsx`, job-detail/History UI for a new "overwrite and retry" action, `frontend/src/lib/api.ts`/types for the new `overwrite` field and `subtitle_exists`/`job_already_active`/`output_exists` error codes, and all directly dependent tests.
+
+This genuinely overlaps `worker/runner.py` (M6.a), `services/jobs.py`/`routes/jobs.py` (M6.d), and `WantedPage.tsx` (M6.f) — rather than force false independence, this track runs after those three merge so it isn't rebasing on moving files.
+
+**Background** — two confirmed gaps, traced against the actual code: (1) no duplicate-job guard, so two simultaneous submissions for the same media+language+format race with nothing stopping either; the frontend already has a dead 409 "job already active" toast handler with no backend path that raises it. (2) no overwrite guard anywhere a subtitle gets written or renamed — `SubtitleGenerator.generate_srt/vtt/sbv` blind-writes, and `rename_subtitle_language`'s `os.rename` silently replaces an existing destination. Gap 2 is subtler than "explicit language collides with an existing file": in auto-detect mode the final filename isn't known at job-creation time — `worker/runner.py` resolves it to the detected language or `"und"` only after transcription completes (`needs_language_review` is set when detection fails) — and the real collision usually surfaces later, when the user manually corrects a `.und.` job's language via `PATCH /api/jobs/{id}/language`, which renames on disk with no existence check at all today.
+
+**Policy** (confirmed): soft block + explicit override everywhere — never a silent overwrite, but never more friction than an explicit confirm/retry for the legitimate re-transcribe case.
+
+**Tasks**:
+1. **Duplicate/concurrent-job guard**: new migration adding a SQLite partial unique index on `jobs(media_path, language_code, output_format)` WHERE `status IN ('queued','running')`; `create_job_service` surfaces the resulting conflict as `409 job_already_active` — the code path the frontend's existing dead toast handler expects.
+2. **Write-time overwrite guard (authoritative — the only point that's correct for both explicit-language and auto-detect/`und` jobs)**: in the worker, immediately before `SubtitleGenerator.generate_srt/vtt/sbv` writes to the fully-resolved `output_path`, check whether the file already exists. Default: refuse — job transitions to `FAILED` with a distinct, UI-recognizable error (`output_exists`), not a silent truncate. `JobCreateRequest` gains `overwrite: bool = False`, threaded through the DB to the worker, which skips the check when set. Frontend: a `FAILED`/`output_exists` job gets an explicit "Overwrite and retry" action in Queue/History that resubmits with `overwrite=true`.
+3. **Fast-path pre-flight check (UX nicety layered on #2, not a replacement)**: for jobs with an explicit (non-auto) `language_code`, `create_job_service` computes the deterministic `output_path` and checks existence before enqueuing, returning `409 subtitle_exists` (with the existing file's path + mtime) immediately instead of waiting for the job to run and fail. Frontend (`WantedPage.tsx`/manual-job form) catches this and shows a confirm dialog ("A [en] subtitle already exists here, last modified X — overwrite?"), resubmitting with `overwrite=true` on confirm.
+4. **Language-correction rename guard**: `update_job_language` checks whether the post-rename target path already exists *before* calling `rename_subtitle_language` (the check must happen strictly before `os.rename`, which would otherwise replace the destination silently). Add `overwrite: bool = False` to `JobLanguagePatchRequest`; on collision without it, return `409 subtitle_exists`; frontend shows the same confirm-dialog pattern.
+5. Tests: true-concurrency duplicate-job rejection (not just sequential); worker write-time refusal for both explicit-language and auto-detect/`und` paths, and successful overwrite when `overwrite=true`; `update_job_language` collision rejection and override; frontend confirm-dialog and post-hoc retry flows.
+
+**Acceptance**:
+- Two simultaneous `POST /api/jobs` for the same `(media_path, language_code, output_format)` yield exactly one queued/running job; the second gets `409 job_already_active`.
+- A job whose resolved output path collides with an existing file never overwrites it without explicit `overwrite=true` — verified for an explicit-language job and for an auto-detect job that resolves to a colliding language or `und`.
+- `PATCH /api/jobs/{id}/language` refuses to clobber an existing file at the target path without `overwrite=true`; succeeds and renames correctly when explicitly overridden.
+- Every collision path is an explicit, informed choice in the UI (pre-flight confirm dialog or post-hoc "overwrite and retry") — no code path silently destroys an existing subtitle file.
+- Full `pytest`/`black`/`ruff`/`mypy` and frontend `vitest`/`tsc` clean; new code ≥ 80% coverage.
+
+### M6.h — Clean-checkout smoke test
+
+**Mode**: **Sequential** — the last M6 sub-track, after everything above has landed. **Depends on**: M6.a–M6.g. **Owns**: nothing by default — `docker-compose.yml`/`testing.docker-compose.yaml` only if the smoke test surfaces a real bug worth fixing.
+
+**Goal**: prove the fully-merged M6 result actually works end-to-end on a clean machine.
+
+**Tasks**: fresh-machine `docker compose up` from a clean checkout; fix anything that breaks the golden path.
+
+**Acceptance**:
+- Clean checkout → `docker compose up` → working app, no manual fixes needed (verified against whatever deployment doc exists at the time; the doc itself gets rewritten in M7).
+
+### M6 milestone-level acceptance
+
+Applies to the milestone as a whole, once every sub-track above has landed:
+
+- All tests green, coverage report attached, lints clean.
+- No known secret-leak, cookie, path-traversal, or bootstrap-hardening gaps outstanding (M6.c, M6.d).
+- No silent-overwrite or duplicate-job-race gaps outstanding (M6.g).
+- `pre-commit run --all-files` clean with no version drift against `pyproject.toml` (M6.e).
+- UI/API terminology consistently uses "Series", not "TV" (M6.f).
+
+**Status (2026-07-11)**: M6.a-d done — 677 passed, 4 skipped in the full backend suite; `black --check`/`ruff check` clean. `mypy --strict` could not be verified this pass: the nix flake's `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`) independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before these merges. M6.e-h not started.
+
+## M7 — Documentation rewrite & dev-docs reorganization
+
+**Goal**: bring documentation in line with reality after the full v2 rewrite, and give dev-facing docs a proper home. Most of `dev/v2/*.md` was written as a **pre-implementation spec** during M0–M5 planning (see `dev/v2/README.md`'s "meant to be read by a developer... about to implement the v2 architecture from scratch"); after M0–M6 shipped — including several rounds of structural refactor (M5.3), unplanned stabilization work (M5.6.1), and feature work not anticipated in the original plan (M5.8's step-based progress UX, B10, etc.) — that framing is stale. Root-level docs (`README.md`, `README_v2.md`, `CONTAINER_GUIDE.md`) still describe v1 as the only surface.
+
+**Depends on**: M6
 
 Tasks:
-- Coverage ≥ 80% on all new code paths; close gaps in worker error handling and SSE error paths.
-- Update root `README.md` with v2 quickstart pointing to `dev/v2/`.
-- Update v1 roadmap docs: mark Bazarr integration complete (M3+), add v2 web app as released.
-- Security pass (M6.a-d — implemented, see full sub-track breakdown below):
-  - Confirm secrets never appear in logs. → `core/logging_config.py` `SecretsRedactingFilter` scrubs `MISTRAL_API_KEY`/`SESSION_SECRET`/`ADMIN_PASSWORD`/`BAZARR_API_KEY` from every record (registered lazily from `Settings`). `tests/test_logging_config.py` `TestSecretsRedaction`; regression test in `tests/test_no_secret_leak.py`.
-  - Verify cookie flags (`HttpOnly`, `SameSite=Lax`, `Secure` behind TLS). → `auth/sessions.py:set_session_cookie` already correct; locked in by `tests/test_auth_sessions.py` `TestSetSessionCookieFlags` and `tests/test_api_auth.py` `TestSessionCookieFlags`.
-  - Verify input validation rejects path traversal in `media_path` when `source=manual`. → `core/path_utils.validate_media_path` rejects control characters, non-absolute paths, and `..` segments internally (protects every caller); `api/routes/jobs.py` adds an early Pydantic boundary check. Tests in `tests/test_core_path_utils.py` and `tests/test_api_jobs_create.py`.
-  - Verify the bootstrap refuses to start with default placeholder secrets. → `auth/secrets.refuse_placeholder_secrets` called at app startup (covers `SESSION_SECRET=changeme`, `MISTRAL_API_KEY=your_api_key_here`, `ADMIN_PASSWORD=changeme`); `auth/bootstrap.bootstrap_admin` additionally denylists a broader set of placeholder admin passwords. Tests in `tests/test_auth_secrets.py`, `tests/test_auth_bootstrap.py`, `tests/test_session_secret_bootstrap.py`.
-  - Close coverage gaps in worker error handling and SSE error paths. → `tests/test_worker_runner.py`, `tests/test_sse_error_paths.py`.
-- CI: align pre-commit pins with `pyproject.toml` pins (currently drift — known v1 issue).
-- Make a clean checkout `docker compose up` smoke from scratch on a fresh machine.
+- **Root docs**: rewrite `README.md` as the v2 quickstart (web app + CLI, not CLI-only); fold `README_v2.md`'s ad-hoc Bazarr-workflow and `bazarr_track_no_subs` Q&A content into proper prose sections of the reorganized dev docs (`BAZARR_INTEGRATION.md`), then retire the standalone file; review `CONTAINER_GUIDE.md` for v1-only assumptions that no longer hold now that `worker`/`frontend`/`redis` services exist alongside the backend.
+- **Reorganize dev docs into `docs/`**: create a root `docs/` directory and move `dev/` under it (e.g. `docs/dev/v1/`, `docs/dev/v2/`, `docs/dev/reference/`), or an equivalent structure — a clear, browsable subcategory instead of a flat `dev/` folder mixing specs, plans, and reference material. Fix every relative link broken by the move (`dev/v2/README.md`'s reading-order list, `MILESTONES.md`'s links to `MIGRATION.md`/`QUEUE_PROGRESS_REVIEW.md`/etc., and any cross-links from root-level docs).
+- **Rewrite the shipped-system docs** so they describe what v2 *is*, not what it was planned to be: `ARCHITECTURE.md`, `API.md`, `DATABASE.md`, `QUEUE.md`, `FRONTEND.md`, `BAZARR_INTEGRATION.md`, `AUTH.md`, `DEPLOYMENT.md`, `TESTING.md`. Reconcile against the actual structural refactor outcome (`REFACTOR.md` in the sibling `audio_to_subs_plans/` repo — verify whether that plan doc should be linked from here or considered out of scope), the M5.8 progress/SSE architecture change (Redis-only delivery, `progress_stage`/`step_index`/`step_total`), and the M5.6.1 fixes (path resolution, logging, subtitle-naming idempotency) that changed behavior without a corresponding spec update.
+- **Archive planning-only artifacts** that are no longer live specs but are worth keeping for history: `M5_PLAN.md`, `TODO_M53.md`, `MISTRAL_USAGE_PROBE.md`, `QUEUE_PROGRESS_REVIEW.md` — move to a clearly-labeled historical/archive subfolder rather than delete or leave mixed in with current docs.
+- **`MIGRATION.md` and `PIPELINE_CHANGES.md`**: fold into `ARCHITECTURE.md` or mark explicitly as historical (M0/M2-era one-off migration records), since the migration they describe is long complete.
+- Keep `dev/v2/v3/WIP.md` (or wherever it lands post-move) clearly separated as forward-looking v3 material, distinct from the now-current v2 docs.
+- Update `.agent/` rule files if any reference the old `dev/v2/` paths directly.
 
 Acceptance:
-- Clean checkout → run the first-run procedure in [`DEPLOYMENT.md`](DEPLOYMENT.md) → working app, no manual fixes needed.
-- All tests green, coverage report attached, lints clean.
-- v2.0 release notes drafted.
-
-### M6.b — Security pass + worker/SSE error-path coverage (2026-07-11)
-
-M6 was split into two branches: `address-milestone-6-a` (docs, README
-quickstart, v1 roadmap, CI pre-commit pins, clean `docker compose up` smoke)
-and this branch, `implement-milestone-6-b` (the Security pass items from the
-M6 task list plus the coverage-gap item scoped to worker error handling and
-SSE error paths).
-
-Implementation notes:
-
-- **Secrets never appear in logs** (line 471): audited every `logger.*` call
-  across `api/`, `worker/`, `core/`, `bazarr/`. Confirmed no secret (Mistral
-  key, Bazarr key, session secret, admin password) is logged; Bazarr client
-  uses the `X-API-Key` header (never a URL query). Added regression test
-  `tests/test_no_secret_leak.py` asserting no sentinel secret reaches logs or
-  the `GET /api/settings` body, and that failed-login attempts never log the
-  password.
-- **Cookie flags** (line 472): `set_session_cookie` already sets
-  `HttpOnly`, `SameSite=Lax`, and `Secure=settings.BEHIND_TLS`. Added
-  `tests/test_api_auth.py::TestSessionCookieFlags` asserting the exact flags
-  with and without TLS.
-- **Path traversal on `source=manual`** (line 473): added an always-on
-  `rejects_traversal()` check in `core/path_utils.py` (rejects any `..`
-  component regardless of configured roots) and wired it into
-  `api/services/jobs.py::_validate_job_paths` for both `media_path` and a
-  caller-supplied `output_path`. `docker-compose.yml`'s placeholder
-  `ADMIN_PASSWORD=admin` lines were removed so the file-based docker secret is
-  authoritative. Tests: `tests/test_core_path_utils.py::TestRejectsTraversal`,
-  `tests/test_api_jobs_create.py::test_manual_job_rejects_traversal_*`.
-- **Bootstrap refuses default placeholder secrets** (line 474): extended
-  `auth/bootstrap.py` with `PLACEHOLDER_ADMIN_PASSWORDS`; `bootstrap_admin`
-  now refuses to create the admin with a placeholder/empty password (the
-  shipped compose used `admin`). The session-secret `changeme` refusal was
-  already in place. Tests: `tests/test_auth_bootstrap.py::
-  test_bootstrap_admin_refuses_placeholder_password` /
-  `test_bootstrap_admin_refuses_empty_password`.
-- **Worker error handling + SSE error paths coverage** (line 467): added
-  `tests/test_worker_runner.py` (Bazarr rescan happy + failure paths,
-  `_get_db_settings` failure, `persist_result` IntegrityError) and
-  `tests/test_sse_error_paths.py` (disconnect, unexpected exception, listener
-  cleanup, malformed Redis message, Redis transport error).
-
-Quality bar: `pytest` green (80 new M6.b tests), `black --check`,
-`ruff check`, `mypy --strict` clean on all touched modules; total backend
-coverage 85%.
+- A root `docs/` directory exists with dev-related markdown organized into a clear subcategory (e.g. `docs/dev/`); no stray planning/spec `.md` files left loose at repo root or scattered outside `docs/` (README.md and CLAUDE.md excepted).
+- Every doc under `docs/` describes the *current* shipped v2 system — no "to be implemented" language for features that have since shipped (Bazarr integration, worker/queue, frontend, step-based progress UX, etc.).
+- All internal markdown links (within moved docs and from root-level docs into `docs/`) resolve.
+- `README.md` gives an accurate, current v2 quickstart; `README_v2.md` is retired (content merged or removed).
+- v2.0 release notes drafted, reflecting the actual M0–M6 scope (including unplanned batches like M5.6.1 and notable fixes like B10) rather than only the originally-planned milestones.
 
 ## Parallelisation notes
 
@@ -537,6 +656,7 @@ The milestones are serial as listed. The following sub-tasks within a milestone 
 - M4: frontend pages are independent of each other once Login + Layout + auth flow exist.
 - M5: history + logs + settings pages are independent.
 - M5.1: cleanup tasks are independent.
+- M6: sub-tracks M6.a–M6.f have disjoint (or coordinated, for the shared `path_utils.py` case) file ownership and can run fully in parallel; M6.g (overwrite/duplicate-job guards) and M6.h (smoke test) are sequential, in that order, and must run after the parallel batch lands — see M6's dispatch table for the full breakdown.
 
 ## Definition of done (per milestone)
 
