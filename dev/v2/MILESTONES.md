@@ -473,7 +473,7 @@ Acceptance:
 | [M6.c](#m6c--security-auth-session-and-log-hygiene) | Security: auth, session, log-hygiene | Parallel | — | `auth/{sessions,bootstrap,passwords,deps}.py`, `core/logging_config.py` | ✅ Done |
 | [M6.d](#m6d--security-path-traversal-validation) | Security: path-traversal validation | Parallel† | — | `core/path_utils.py`†, `bazarr/pathmap.py`, `api/{routes,services}/jobs.py` | ✅ Done |
 | [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ✅ Done |
-| [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ⏳ Not started |
+| [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ✅ Done |
 | [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ⏳ Not started |
 | [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ⏳ Not started |
 
@@ -581,6 +581,24 @@ M6.a, M6.b, M6.c, M6.d, M6.e, and M6.f have no dependencies on each other and no
 - `MediaType` values and `series_root_path` consistent across backend, frontend types, and tests.
 - Terminology sweep findings documented, including anything deferred to M7.
 
+**Done (2026-07-11)**: renamed end-to-end in a single commit (`4d6dd2f`):
+- **Backend settings contract**: `tv_root_path` → `series_root_path` in `DEFAULT_SETTINGS`, `SettingsResponse`, and `SettingsUpdate` (`api/routes/settings.py`); `TV_ROOT_PATH` → `SERIES_ROOT_PATH` in the pydantic `Settings` class (`api/settings.py`); the `getattr(settings, "SERIES_ROOT_PATH", None)` consumer in `api/services/jobs.py`.
+- **`MediaType` literal**: `"tv"` → `"series"` in `core/path_utils.py` (`get_media_type` return type, the `tv_root` parameter → `series_root`, both docstrings, and the "not within configured root directories" error message in `validate_media_path`) and in `frontend/src/lib/types.ts`.
+- **Frontend copy**: `SettingsPage.tsx` ("TV Root Path" label/`id`/placeholder/help → "Series Root Path", card description "movies and TV shows" → "movies and series"), `useSettingsForm.ts` (form-data mapping + dirty-field list), `SettingsPage.test.tsx` fixture.
+- **Tests**: `tests/test_core_path_utils.py` (test names + assertions), `tests/test_api_jobs_create.py` (`SERIES_ROOT_PATH` env var in the `no_media_roots` fixture).
+
+`/tv` as a *filesystem path* (the `series_root_path` default and the `docker-compose.yml` volume/mount) is intentionally left as-is per this sub-track's explicit out-of-scope note — the container-internal path is invisible to users. Bazarr's `tvdbId` field (a TheTVDB external ID — a third-party proper noun in Bazarr's wire format) and `/bazarr/tv` path strings in Bazarr-wire-format fixtures are also correctly untouched, since they model real upstream data.
+
+**`AppLayout.tsx` `Tv` icon — kept deliberately**: the lucide `Tv` icon is still imported and used as the `/wanted` nav-item icon (`AppLayout.tsx:15,26`). It's an icon identifier, not user-visible copy, and the Wanted page is the wanted-subtitles queue rather than a series listing — so swapping it for e.g. `MonitorPlay` would be a pure cosmetic call outside this audit's "TV as a media-type descriptor" charter. Noted here so M7 (doc rewrite) can revisit if desired; the commit message's "all frontend copy" should be read as "all user-visible TV copy", not icon identifiers.
+
+**Broader terminology sweep findings**:
+- *"subs" vs "subtitle"*: the project/product name itself is `audio-to-subs` (repo dir, docker image, container, named volume `audio-to-subs-tv`, python package `audio_to_subs`), while internal code uses the full form (`subtitle_generator.py`, `SubtitleGenerator`, `generate_srt`/`vtt`/`sbv`, `missing_subtitles`). **Deferred to M7** — unifying these would mean renaming the product itself, which is a brand decision far beyond a semantic-audit sub-track and outside this audit's "media-type descriptor" scope. UI copy already uses "subtitle" consistently (SettingsPage help text, toasts, dialog copy), so there's no user-visible inconsistency today, only a code/product-naming one.
+- *"queue" vs "job queue"*: no inconsistency found — the `/queue` nav item and `QueuePage` are the only user-facing uses of the word; the backend uses "job" for the entity and "queue" for the data structure, which is conventional and not a duplicate-term problem.
+- *Page-name capitalization*: consistent — Wanted, Queue, History, Logs, Settings are all Title Case in both nav (`AppLayout.tsx`) and page headings.
+- *Toast/error tone*: spot-checked SettingsPage, WantedPage, and the auth toasts — tone is consistent (factual, no mixed "Error!" / "Oops" / "Sorry" registers).
+
+**Verification**: backend `pytest` 700 passed, 4 skipped, 1 xfailed; `black --check`/`ruff check` clean; frontend `vitest` 99 passed (9 files); `tsc -b && vite build` clean. `mypy --strict` could not be run for the same pre-existing nix-toolchain reason recorded in the M6 status note below (`ModuleNotFoundError: No module named 'librt.base64'`); confirmed reproducible on `dev` and not a regression introduced here.
+
 ### M6.g — Overwrite & duplicate-job guards
 
 **Mode**: **Sequential** — do not start until M6.a, M6.d, and M6.f have landed; do not run in parallel with them. **Depends on**: M6.a, M6.d, M6.f. **Owns**: `audio_to_subs/api/services/jobs.py`, `audio_to_subs/api/routes/jobs.py`, `audio_to_subs/worker/runner.py`, `audio_to_subs/core/file_rename.py`, `audio_to_subs/core/subtitle_generator.py`, `audio_to_subs/db/models.py` + a new Alembic migration, `frontend/src/pages/WantedPage.tsx`, job-detail/History UI for a new "overwrite and retry" action, `frontend/src/lib/api.ts`/types for the new `overwrite` field and `subtitle_exists`/`job_already_active`/`output_exists` error codes, and all directly dependent tests.
@@ -626,7 +644,7 @@ Applies to the milestone as a whole, once every sub-track above has landed:
 - `pre-commit run --all-files` clean with no version drift against `pyproject.toml` (M6.e).
 - UI/API terminology consistently uses "Series", not "TV" (M6.f).
 
-**Status (2026-07-11)**: M6.a-d done — 677 passed, 4 skipped in the full backend suite; `black --check`/`ruff check` clean. `mypy --strict` could not be verified this pass: the nix flake's `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`) independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before these merges. M6.e done (pre-commit pin alignment, 2026-07-11); M6.f-h not started.
+**Status (2026-07-11)**: M6.a-d done — 677 passed, 4 skipped in the full backend suite; `black --check`/`ruff check` clean. `mypy --strict` could not be verified this pass: the nix flake's `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`) independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before these merges. M6.e done (pre-commit pin alignment, 2026-07-11). M6.f done (Series/TV terminology audit, 2026-07-11) — backend suite re-run on the M6.f branch reports 700 passed, 4 skipped, 1 xfailed; frontend `vitest` 99 passed, `tsc` clean; broader terminology-sweep findings recorded in the M6.f section above. M6.g-h not started.
 
 ## M7 — Documentation rewrite & dev-docs reorganization
 
