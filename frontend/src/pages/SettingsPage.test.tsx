@@ -57,7 +57,7 @@ const MOCK_SETTINGS = {
   default_language: "en",
   default_output_format: "srt",
   movies_root_path: "/movies",
-  tv_root_path: "/tv",
+  series_root_path: "/tv",
   subtitles_same_directory: true,
   max_audio_length: 900,
   timezone: "UTC",

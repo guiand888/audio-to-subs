@@ -249,7 +249,7 @@ export function SettingsPage() {
           <CardHeader>
             <CardTitle>Media Paths</CardTitle>
             <CardDescription>
-              Configure root directories for movies and TV shows (aligned with Radarr/Sonarr/Bazarr)
+              Configure root directories for movies and series (aligned with Radarr/Sonarr/Bazarr)
             </CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
@@ -268,16 +268,16 @@ export function SettingsPage() {
                 </p>
               </div>
               <div className="space-y-2">
-                <Label htmlFor="tv-root-path">TV Root Path</Label>
+                <Label htmlFor="series-root-path">Series Root Path</Label>
                 <Input
-                  id="tv-root-path"
+                  id="series-root-path"
                   type="text"
                   placeholder="/tv"
-                  value={formData.tv_root_path ?? ""}
-                  onChange={(e) => updateFormData({ tv_root_path: e.target.value })}
+                  value={formData.series_root_path ?? ""}
+                  onChange={(e) => updateFormData({ series_root_path: e.target.value })}
                 />
                 <p className="text-sm text-muted-foreground">
-                  Root directory for TV series files (e.g., /tv)
+                  Root directory for series files (e.g., /tv)
                 </p>
               </div>
             </div>

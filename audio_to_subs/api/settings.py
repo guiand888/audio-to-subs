@@ -108,9 +108,9 @@ class Settings(BaseSettings):
         default="/movies",
         description="Root path for movie files (Sonarr/Radarr aligned)",
     )
-    TV_ROOT_PATH: str | None = Field(
+    SERIES_ROOT_PATH: str | None = Field(
         default="/tv",
-        description="Root path for TV series files (Sonarr/Radarr aligned)",
+        description="Root path for series files (Sonarr/Radarr aligned)",
     )
     SUBTITLES_SAME_DIRECTORY: bool = Field(
         default=True,

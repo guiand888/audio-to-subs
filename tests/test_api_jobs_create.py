@@ -286,7 +286,7 @@ def no_media_roots(monkeypatch):
     any path; the always-on traversal check must still reject ``..``.
     """
     monkeypatch.setenv("MOVIES_ROOT_PATH", "")
-    monkeypatch.setenv("TV_ROOT_PATH", "")
+    monkeypatch.setenv("SERIES_ROOT_PATH", "")
     yield
 
 

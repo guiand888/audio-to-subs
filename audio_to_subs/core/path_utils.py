@@ -3,7 +3,7 @@
 Provides utilities for:
 - Path validation against configured root directories
 - Output path generation based on source media paths
-- Media type detection (movie vs TV)
+- Media type detection (movie vs series)
 """
 
 import os
@@ -79,14 +79,14 @@ def _is_within(path: str, root: str) -> bool:
 def validate_media_path(
     media_path: str,
     movies_root: str | None = None,
-    tv_root: str | None = None,
+    series_root: str | None = None,
 ) -> tuple[bool, str | None]:
     """Validate that a media path is within allowed root directories.
 
     Args:
         media_path: The path to validate
         movies_root: Root path for movies (e.g., "/movies")
-        tv_root: Root path for TV series (e.g., "/tv")
+        series_root: Root path for series (e.g., "/tv")
 
     Returns:
         Tuple of (is_valid, error_message)
@@ -97,7 +97,7 @@ def validate_media_path(
     if malformed:
         return False, malformed
 
-    if not movies_root and not tv_root:
+    if not movies_root and not series_root:
         # No roots configured, allow any path
         return True, None
 
@@ -105,41 +105,41 @@ def validate_media_path(
     if movies_root and _is_within(media_path, movies_root):
         return True, None
 
-    if tv_root and _is_within(media_path, tv_root):
+    if series_root and _is_within(media_path, series_root):
         return True, None
 
     return (
         False,
         f"Path '{media_path}' is not within configured root directories "
-        f"(movies: {movies_root}, tv: {tv_root})",
+        f"(movies: {movies_root}, series: {series_root})",
     )
 
 
 def get_media_type(
     media_path: str,
     movies_root: str | None = None,
-    tv_root: str | None = None,
-) -> Literal["movie", "tv", "unknown"]:
+    series_root: str | None = None,
+) -> Literal["movie", "series", "unknown"]:
     """Determine media type based on path.
 
     Args:
         media_path: Path to analyze
         movies_root: Root path for movies
-        tv_root: Root path for TV series
+        series_root: Root path for series
 
     Returns:
         "movie" if path is under movies_root
-        "tv" if path is under tv_root
+        "series" if path is under series_root
         "unknown" if path doesn't match either or roots aren't configured
     """
-    if not movies_root and not tv_root:
+    if not movies_root and not series_root:
         return "unknown"
 
     if movies_root and _is_within(media_path, movies_root):
         return "movie"
 
-    if tv_root and _is_within(media_path, tv_root):
-        return "tv"
+    if series_root and _is_within(media_path, series_root):
+        return "series"
 
     return "unknown"
 
