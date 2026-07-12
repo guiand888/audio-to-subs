@@ -32,3 +32,13 @@ Practical Impact:
 
 - OFF: Conservative - only shows items Bazarr thinks need subtitles
 - ON: Comprehensive - shows ALL items with no subtitles, even if Bazarr isn't configured to want them
+
+Security: first-boot admin bootstrap refuses default/placeholder passwords
+
+On first boot (empty database), the app creates an initial admin user from the
+`ADMIN_USERNAME` / `ADMIN_PASSWORD` (or `ADMIN_PASSWORD_FILE`) env vars. Before
+doing so, it checks the password against a blocklist (`PLACEHOLDER_ADMIN_PASSWORDS`
+in `audio_to_subs/auth/bootstrap.py`) that forbids weak values: `changeme`,
+`password`, `admin`, `root`, `123456`, and the empty string. The shipped
+docker-compose uses `ADMIN_PASSWORD=admin` as a placeholder, so the app will
+refuse to start until a real secret is set.
