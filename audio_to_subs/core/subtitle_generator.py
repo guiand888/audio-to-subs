@@ -18,6 +18,22 @@ class SubtitleFormatError(Exception):
     pass
 
 
+class SubtitleFileExistsError(Exception):
+    """Raised when the resolved output file already exists.
+
+    M6.g (write-time overwrite guard, authoritative for both explicit-language
+    and auto-detect/`und` jobs): the fully-resolved output path is only known
+    here, after the language suffix is applied (explicit mode) or detected
+    (auto mode). The caller (Pipeline -> worker) surfaces this as a FAILED
+    job with an `output_exists` error rather than silently truncating an
+    existing subtitle. Pass ``overwrite=True`` to allow replacement.
+    """
+
+    def __init__(self, path: str) -> None:
+        self.path = path
+        super().__init__(f"Subtitle file already exists: {path}")
+
+
 def _fit_words_to_lines(words: list[str], max_chars: int) -> list[str]:
     """Helper to fit words into lines respecting max_chars limit.
 
@@ -192,6 +208,7 @@ class SubtitleGenerator:
         output_path: str,
         output_format: str = "srt",
         language_code: Optional[str] = None,
+        overwrite: bool = False,
     ) -> str:
         """Generate subtitle file in specified format.
 
@@ -200,12 +217,17 @@ class SubtitleGenerator:
             output_path: Path to write subtitle file
             output_format: Format to generate (srt, vtt, webvtt, sbv)
             language_code: Optional language code for filename (e.g., 'en', 'fr')
+            overwrite: When False (default), refuse to write if the resolved
+                output file already exists (raises SubtitleFileExistsError).
+                When True, replace an existing file. M6.g write-time guard.
 
         Returns:
             Path to generated subtitle file
 
         Raises:
             SubtitleFormatError: If format is unsupported or data is invalid
+            SubtitleFileExistsError: If the resolved output file exists and
+                ``overwrite`` is False
         """
         if output_format not in self.SUPPORTED_FORMATS:
             raise SubtitleFormatError(
@@ -217,6 +239,13 @@ class SubtitleGenerator:
         final_output_path = self._generate_output_filename(
             output_path, output_format, language_code
         )
+
+        # M6.g write-time overwrite guard: the resolved path is authoritative
+        # (covers both explicit-language and auto-detect/`und` jobs, since the
+        # language suffix is only applied here). Refuse to clobber an existing
+        # subtitle unless the caller explicitly opted into overwrite.
+        if not overwrite and Path(final_output_path).exists():
+            raise SubtitleFileExistsError(final_output_path)
 
         if output_format == "srt":
             return self.generate_srt(segments, final_output_path)

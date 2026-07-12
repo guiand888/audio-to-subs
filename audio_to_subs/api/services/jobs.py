@@ -2,11 +2,14 @@
 
 import json
 import logging
+from datetime import datetime, timezone
+from pathlib import Path
 from typing import TYPE_CHECKING
 from uuid import uuid4
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
@@ -185,6 +188,43 @@ async def _apply_language_and_format_defaults(
     return final_language_code, final_output_format
 
 
+async def _preflight_subtitle_exists(
+    final_language_code: str | None,
+    final_output_path: str | None,
+    overwrite: bool,
+) -> None:
+    """M6.g fast-path pre-flight (UX nicety, layered on the authoritative
+    write-time guard in the worker): for an explicit-language job we already
+    know the deterministic output path, so check for an existing subtitle
+    before enqueuing and surface a 409 subtitle_exists (with the existing
+    file's path + mtime) instead of waiting for the job to run and fail.
+    Auto-detect jobs can't be checked here (the language/final path are only
+    resolved after transcription), so they rely on the worker guard.
+    """
+    if (
+        not overwrite
+        and final_language_code is not None
+        and final_output_path
+        and Path(final_output_path).exists()
+    ):
+        existing_mtime = datetime.fromtimestamp(
+            Path(final_output_path).stat().st_mtime, tz=timezone.utc
+        ).isoformat()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "subtitle_exists",
+                "message": (
+                    f"A {final_language_code} subtitle already exists at "
+                    f"{final_output_path}"
+                ),
+                "existing_path": final_output_path,
+                "existing_mtime": existing_mtime,
+                "language_code": final_language_code,
+            },
+        )
+
+
 async def create_job_service(
     db: "AsyncSession",
     settings: "Settings",
@@ -196,6 +236,7 @@ async def create_job_service(
     output_format: OutputFormat,
     priority: int,
     language_mode: str = "explicit",
+    overwrite: bool = False,
 ) -> Job:
     """Create a new transcription job.
 
@@ -216,12 +257,18 @@ async def create_job_service(
             ignored (forced to None) - the real language isn't known until
             the worker finishes transcribing, and auto mode must never pick
             up the default-language setting.
+        overwrite: When True, allow the worker to replace an existing output
+            subtitle (M6.g overwrite guard). Default False.
 
     Returns:
         Created Job object
 
     Raises:
         HTTPException: If validation fails or source resolution fails
+        HTTPException(409): If an active (queued/running) job already exists
+            for the same (media_path, language_code, output_format), or if a
+            subtitle already exists at the resolved output path for an explicit
+            language job (subtitle_exists).
     """
     if language_mode == "auto":
         language_code = None
@@ -307,6 +354,9 @@ async def create_job_service(
                 detail=f"Invalid output path: {error_msg}",
             )
 
+    # M6.g fast-path pre-flight subtitle_exists check (explicit language only).
+    await _preflight_subtitle_exists(final_language_code, final_output_path, overwrite)
+
     # Create job
     job = Job(
         id=str(uuid4()),
@@ -319,13 +369,25 @@ async def create_job_service(
         language_mode=language_mode,
         output_format=final_output_format,
         priority=priority,
+        overwrite=overwrite,
         progress_percent=0,
         progress_message="Job created, waiting for worker",
         cancel_requested=False,
     )
 
     db.add(job)
-    await db.commit()
+    try:
+        await db.commit()
+    except IntegrityError as err:
+        # M6.g duplicate guard: the partial unique index
+        # (ix_jobs_active_dupguard) rejects a second active job for the same
+        # (media_path, language_code, output_format). Roll back and surface a
+        # clean 409 the frontend's existing dead toast handler expects.
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={"code": "job_already_active"},
+        ) from err
     await db.refresh(job)
 
     await write_job_log(

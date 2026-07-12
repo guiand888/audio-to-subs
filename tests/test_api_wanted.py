@@ -106,9 +106,25 @@ class TestListWantedEndpoint:
         """
         from tests.conftest import make_job
 
-        queued_job = make_job(status=JobStatus.QUEUED, progress_percent=0)
-        running_job = make_job(status=JobStatus.RUNNING, progress_percent=42)
-        done_job = make_job(status=JobStatus.DONE, progress_percent=100)
+        # Distinct media paths so the M6.g duplicate-active guard (unique
+        # index on media_path+language_code+output_format for active jobs)
+        # doesn't reject the seed rows; the test validates per-item active
+        # job status mapping, which is independent of media_path.
+        queued_job = make_job(
+            status=JobStatus.QUEUED,
+            progress_percent=0,
+            media_path="/test/video-queued.mp4",
+        )
+        running_job = make_job(
+            status=JobStatus.RUNNING,
+            progress_percent=42,
+            media_path="/test/video-running.mp4",
+        )
+        done_job = make_job(
+            status=JobStatus.DONE,
+            progress_percent=100,
+            media_path="/test/video-done.mp4",
+        )
         sync_session.add_all([queued_job, running_job, done_job])
         sync_session.flush()
 

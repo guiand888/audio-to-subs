@@ -31,6 +31,8 @@ class ClaimedJob:
         output_format: Output subtitle format
         source: Job source (manual, bazarr_movie, bazarr_episode)
         source_ref: Optional reference to external source (e.g., Bazarr ID)
+        overwrite: Whether an existing output subtitle may be replaced
+            (M6.g overwrite guard); threaded to the pipeline at write time.
     """
 
     id: str
@@ -41,6 +43,7 @@ class ClaimedJob:
     output_format: str
     source: str
     source_ref: Optional[str]
+    overwrite: bool = False
 
 
 async def claim_one(
@@ -86,7 +89,7 @@ async def claim_one(
                 ORDER BY priority DESC, created_at ASC
                 LIMIT 1
             )
-            RETURNING id, media_path, output_path, language_code, language_mode, output_format, source, source_ref
+            RETURNING id, media_path, output_path, language_code, language_mode, output_format, source, source_ref, overwrite
         """
         )
 
@@ -115,6 +118,7 @@ async def claim_one(
             output_format=row[5],
             source=row[6],
             source_ref=row[7],
+            overwrite=bool(row[8]) if row[8] is not None else False,
         )
 
     except IntegrityError as e:

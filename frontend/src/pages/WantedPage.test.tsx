@@ -24,10 +24,15 @@ vi.mock("@/lib/api", () => ({
   ApiError: class ApiError extends Error {
     constructor(
       public readonly status: number,
-      public readonly detail: string,
+      public readonly detail: string | Record<string, unknown>,
     ) {
-      super(detail)
+      super(typeof detail === "string" ? detail : JSON.stringify(detail))
       this.name = "ApiError"
+    }
+    get conflict() {
+      return this.status === 409 && typeof this.detail === "object"
+        ? (this.detail as Record<string, unknown>)
+        : null
     }
   },
 }))
@@ -527,5 +532,50 @@ describe("WantedPage - Transcribe error handling", () => {
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalledWith("A job for this item is already active")
     })
+  })
+
+  it("shows overwrite confirm dialog on subtitle_exists and retries with overwrite", async () => {
+    // First attempt collides with an existing subtitle; the second (after
+    // confirming) succeeds with overwrite=true.
+    vi.mocked(api.post)
+      .mockRejectedValueOnce(
+        new ApiError(409, {
+          code: "subtitle_exists",
+          message: "An en subtitle already exists at /movies/foo.en.srt",
+          existing_path: "/movies/foo.en.srt",
+          language_code: "en",
+        }),
+      )
+      .mockResolvedValueOnce({ id: "new-job", status: "queued" } as never)
+
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Queue job")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Queue job"))
+
+    // Confirm dialog appears instead of an error toast.
+    await waitFor(() => {
+      expect(screen.getByText("Subtitle already exists")).toBeInTheDocument()
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+
+    await user.click(screen.getByText("Overwrite and retry"))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenLastCalledWith(
+        "/api/jobs",
+        expect.objectContaining({ overwrite: true }),
+      )
+    })
+    expect(toast.success).toHaveBeenCalledWith("Job queued")
   })
 })

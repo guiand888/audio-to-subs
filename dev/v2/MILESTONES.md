@@ -22,7 +22,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
-| M6 — Polish, coverage, security | 🔶 In Progress | - | M6.a-f done (2026-07-11); M6.g-h not started. Depends on M5.6, M5.7, M5.8 |
+| M6 — Polish, coverage, security | 🔶 In Progress | - | M6.a-f done (2026-07-11); M6.g done (2026-07-12); M6.h not started. Depends on M5.6, M5.7, M5.8 |
 | M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6 |
 
 Every milestone ends with the same quality bar:
@@ -474,7 +474,7 @@ Acceptance:
 | [M6.d](#m6d--security-path-traversal-validation) | Security: path-traversal validation | Parallel† | — | `core/path_utils.py`†, `bazarr/pathmap.py`, `api/{routes,services}/jobs.py` | ✅ Done |
 | [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ✅ Done |
 | [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ✅ Done |
-| [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ⏳ Not started |
+| [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ✅ Done |
 | [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ⏳ Not started |
 
 †M6.d and M6.f both touch `core/path_utils.py` (different functions — traversal-validation vs. the `MediaType` literal). They can still run in parallel, but land as two small, non-overlapping diffs rather than editing simultaneously without coordinating.
@@ -623,6 +623,17 @@ This genuinely overlaps `worker/runner.py` (M6.a), `services/jobs.py`/`routes/jo
 - Every collision path is an explicit, informed choice in the UI (pre-flight confirm dialog or post-hoc "overwrite and retry") — no code path silently destroys an existing subtitle file.
 - Full `pytest`/`black`/`ruff`/`mypy` and frontend `vitest`/`tsc` clean; new code ≥ 80% coverage.
 
+**Done (2026-07-12)**: implemented all four task groups and their tests.
+
+- **Duplicate/concurrent-job guard (Task 1)**: new migration `0005_overwrite_and_dupguard.py` adds a partial unique index `ix_jobs_active_dupguard` on `jobs(media_path, COALESCE(language_code,''), output_format)` WHERE `status IN ('queued','running')` — declared on the ORM model so `Base.metadata.create_all` (tests) enforces it too. `create_job_service` surfaces the resulting `IntegrityError` as `409 job_already_active` (raised `from err`, not swallowed).
+- **Write-time overwrite guard (Task 2)**: `SubtitleGenerator.generate_*` raises a new `SubtitleFileExistsError` when the fully-resolved `output_path` already exists; `overwrite: bool = False` flows `JobCreateRequest` → `Pipeline` → `_generate_subtitles`. The worker catches `SubtitleFileExistsError` and transitions the job to `FAILED` with a distinct `output_exists` sentinel in `error_message` (no new status string). Queue/History render an "Overwrite & retry" action that resubmits with `overwrite=true`.
+- **Fast-path pre-flight (Task 3)**: for explicit-language jobs, `create_job_service` computes the deterministic `output_path` via `_preflight_subtitle_exists` and returns `409 subtitle_exists` (structured detail: `existing_path`, `existing_mtime`, `language_code`) before enqueuing. `WantedPage` catches it and shows a confirm dialog ("Subtitle already exists … Overwrite?"), resubmitting with `overwrite=true`.
+- **Language-correction rename guard (Task 4)**: `update_job_language` computes the rename target via the new pure `compute_rename_target` in `core/file_rename.py` and refuses (409 `subtitle_exists`) *before* `rename_subtitle_language`'s `os.rename`; `JobLanguagePatchRequest.overwrite` allows the override.
+- **Frontend**: `lib/types.ts` (`JobCreate.overwrite`, `JobLanguagePatch.overwrite`, `JobConflictDetail`/`JobConflictCode`), `lib/api.ts` (`ApiError.detail: string | JobConflictDetail` + `conflict` getter), `lib/jobsStore.ts` (`LiveJob.error_message`, carried through `seed`/`done`), `WantedPage.tsx` (confirm dialog + retry), `HistoryPage.tsx` and `QueuePage.tsx` ("Overwrite & retry" buttons).
+- **Tests**: `tests/test_job_overwrite_dupguard.py` (concurrent rejection + overwrite override), `tests/test_subtitle_generator.py` (write-time refusal + overwrite), `tests/test_worker_runner.py` (FAILED/`output_exists` + override), `tests/test_api_jobs_language_patch.py` rename guard (via `compute_rename_target`), `tests/test_api_wanted.py` distinct media paths, `tests/test_queue_claim.py` 9-tuple row. Frontend: `WantedPage.test.tsx` (pre-flight confirm-dialog retry + legacy 409 toast), `QueuePage.test.tsx` ("Overwrite & retry" present for `output_exists` failures, absent for ordinary failures).
+
+**Verification (under `nix develop`, the mandated env)**: backend `pytest` 704 passed, 4 skipped, 1 xfailed, 12 deselected (the 2 previously-environmental modules — `test_db_migrations`, `test_queue_events` — now pass once `alembic`/`redis` from the nix shell are present). `black --check` and `ruff check` clean repo-wide. Frontend `vitest` 102 passed (9 files) and `tsc --noEmit` clean. `mypy --strict` still could not be run for the pre-existing nix-toolchain reason (`ModuleNotFoundError: No module named 'librt.base64'`, recorded at M6 status note below) — confirmed unrelated to this work; the Python changes are type-straightforward and mirror existing signatures, so no new `mypy` errors are expected.
+
 ### M6.h — Clean-checkout smoke test
 
 **Mode**: **Sequential** — the last M6 sub-track, after everything above has landed. **Depends on**: M6.a–M6.g. **Owns**: nothing by default — `docker-compose.yml`/`testing.docker-compose.yaml` only if the smoke test surfaces a real bug worth fixing.
@@ -644,7 +655,7 @@ Applies to the milestone as a whole, once every sub-track above has landed:
 - `pre-commit run --all-files` clean with no version drift against `pyproject.toml` (M6.e).
 - UI/API terminology consistently uses "Series", not "TV" (M6.f).
 
-**Status (2026-07-11)**: M6.a-f done. Full backend suite: 677 passed, 4 skipped; `black --check`/`ruff check` clean repo-wide. Frontend: `vitest` 99/99 passed, `tsc --noEmit` clean. `mypy --strict` could not be verified: the nix flake's native `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`), independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before any of this M6 work; `pre-commit run --all-files` confirms every other hook (`black`, `ruff`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, etc.) passes. M6.g-h not started.
+**Status (2026-07-12)**: M6.a-f done (2026-07-11); M6.g done (2026-07-12). Full backend suite: 704 passed, 4 skipped, 1 xfailed (the 2 prior environmental failures — `test_db_migrations`, `test_queue_events` — now pass under `nix develop` with `alembic`/`redis` present). `black --check`/`ruff check` clean repo-wide. Frontend: `vitest` 102 passed (9 files); `tsc --noEmit` clean. `mypy --strict` could not be verified: the nix flake's native `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`), independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before any of this M6 work; `pre-commit run --all-files` confirms every other hook (`black`, `ruff`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, etc.) passes. M6.h not started.
 
 ## M7 — Documentation rewrite & dev-docs reorganization
 

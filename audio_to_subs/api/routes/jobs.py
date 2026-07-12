@@ -18,7 +18,10 @@ from audio_to_subs.api.routes._helpers import (
     publish_job_event,
 )
 from audio_to_subs.api.services.jobs import create_job_service
-from audio_to_subs.core.file_rename import rename_subtitle_language
+from audio_to_subs.core.file_rename import (
+    compute_rename_target,
+    rename_subtitle_language,
+)
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import (
     Job,
@@ -92,6 +95,13 @@ class JobCreateRequest(BaseModel):
         default=0,
         ge=0,
         description="Job priority (higher = processed first)",
+    )
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "When True, allow the worker to replace an existing output "
+            "subtitle if one already exists (M6.g overwrite guard)."
+        ),
     )
 
 
@@ -252,6 +262,7 @@ async def create_job(
         language_mode=job_request.language_mode,
         output_format=job_request.output_format,
         priority=job_request.priority,
+        overwrite=job_request.overwrite,
     )
 
     # Publish new job notification
@@ -329,6 +340,13 @@ class JobLanguagePatchRequest(BaseModel):
     language_code: str = Field(
         ..., min_length=2, max_length=3, description="New ISO 639-1/2 language code"
     )
+    overwrite: bool = Field(
+        default=False,
+        description=(
+            "When True, allow renaming onto an existing output file instead "
+            "of refusing with a 409 subtitle_exists (M6.g overwrite guard)."
+        ),
+    )
 
 
 @router.patch("/{job_id}/language", response_model=JobResponse)
@@ -362,8 +380,23 @@ async def update_job_language(
             detail="Invalid language code",
         )
 
-    new_path = rename_subtitle_language(job.output_path, job.language_code, new_code)
+    # M6.g language-correction rename guard: compute the target path WITHOUT
+    # renaming first, and check for an existing file strictly BEFORE the rename
+    # (which would otherwise replace the destination silently). Refuse with 409
+    # subtitle_exists unless the caller explicitly opted into overwrite.
+    new_path = compute_rename_target(job.output_path, job.language_code, new_code)
+    if not patch.overwrite and os.path.exists(new_path):
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail={
+                "code": "subtitle_exists",
+                "message": (f"A subtitle already exists at the target path {new_path}"),
+                "existing_path": new_path,
+                "language_code": new_code,
+            },
+        )
 
+    new_path = rename_subtitle_language(job.output_path, job.language_code, new_code)
     job.output_path = new_path
     job.language_code = new_code
     job.needs_language_review = False

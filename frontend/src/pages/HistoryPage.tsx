@@ -6,12 +6,14 @@ import { AlertTriangle, ChevronLeft, ChevronRight, Filter, Info } from "lucide-r
 import { toast } from "sonner"
 
 import { useHistory } from "@/hooks/useHistory"
-import { useUpdateJobLanguage } from "@/hooks/useJobs"
+import { useCreateJob, useUpdateJobLanguage } from "@/hooks/useJobs"
 import { useTimezoneSetting, formatDateTime } from "@/lib/datetime"
 import { formatCost, formatDuration } from "@/lib/utils"
+import { ApiError } from "@/lib/api"
 import type {
   HistoryFilters,
   HistoryResponse,
+  JobCreate,
   JobResponse,
   JobStatus,
   JobSource,
@@ -58,6 +60,31 @@ const SOURCE_OPTIONS: { value: JobSource; label: string }[] = [
   { value: "bazarr_episode", label: "Bazarr Episode" },
   { value: "manual", label: "Manual" },
 ]
+
+// M6.g: a FAILED job whose error carries the `output_exists` sentinel was
+// refused by the worker's write-time overwrite guard. Such jobs can be retried
+// with overwrite=true from the History page.
+function isOutputExists(job: JobResponse): boolean {
+  return (
+    job.status === "failed" &&
+    job.error_message != null &&
+    job.error_message.includes("output_exists")
+  )
+}
+
+// Build a JobCreate that re-runs an existing job (used for the overwrite retry).
+function buildRetry(job: JobResponse): JobCreate {
+  return {
+    source: job.source,
+    source_ref: job.source_ref,
+    media_path: job.media_path,
+    output_path: job.output_path,
+    language_code: job.language_mode === "auto" ? null : job.language_code,
+    language_mode: job.language_mode,
+    output_format: job.output_format,
+    overwrite: true,
+  }
+}
 
 // Truncate a path for display
 function truncatePath(path: string, maxLength: number = 50): string {
@@ -308,6 +335,7 @@ export function HistoryPage() {
   const [reviewJob, setReviewJob] = useState<JobResponse | null>(null)
 
   const { data, isLoading, isError } = useHistory(filters)
+  const createJob = useCreateJob()
 
   const timezone = useTimezoneSetting()
 
@@ -392,6 +420,7 @@ export function HistoryPage() {
                       <TableHead className="p-3">Audio Length</TableHead>
                       <TableHead className="p-3">Cost</TableHead>
                       <TableHead className="p-3">Created</TableHead>
+                      <TableHead className="p-3">Actions</TableHead>
                     </TableRow>
                   </TableHeader>
                   <TableBody>
@@ -450,6 +479,30 @@ export function HistoryPage() {
                         <TableCell className="p-3">{formatCost(job.estimated_cost_usd)}</TableCell>
                         <TableCell className="p-3 whitespace-nowrap">
                           {formatDateTime(job.created_at, timezone ?? undefined)}
+                        </TableCell>
+                        <TableCell className="p-3 whitespace-nowrap">
+                          {/* M6.g: "Overwrite and retry" for jobs the worker
+                              refused to overwrite. */}
+                          {isOutputExists(job) && (
+                            <Button
+                              size="sm"
+                              variant="outline"
+                              disabled={createJob.isPending}
+                              onClick={() =>
+                                createJob.mutate(buildRetry(job), {
+                                  onSuccess: () => toast.success("Job queued"),
+                                  onError: (err) =>
+                                    toast.error(
+                                      err instanceof ApiError
+                                        ? err.detail
+                                        : "Failed to queue job",
+                                    ),
+                                })
+                              }
+                            >
+                              {createJob.isPending ? "Queuing…" : "Overwrite & retry"}
+                            </Button>
+                          )}
                         </TableCell>
                       </TableRow>
                     ))}

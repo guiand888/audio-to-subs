@@ -15,10 +15,12 @@ from sqlalchemy import (
     DateTime,
     Float,
     ForeignKey,
+    Index,
     Integer,
     String,
     Text,
     func,
+    text,
 )
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
@@ -121,6 +123,7 @@ class Job(Base):
     output_format: Mapped[OutputFormat] = mapped_column(
         String(20), nullable=False, default=OutputFormat.SRT
     )
+    overwrite: Mapped[bool] = mapped_column(Boolean, nullable=False, default=False)
     priority: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     progress_percent: Mapped[int] = mapped_column(Integer, nullable=False, default=0)
     progress_message: Mapped[str | None] = mapped_column(Text, nullable=True)
@@ -163,6 +166,19 @@ class Job(Base):
         CheckConstraint(
             "source IN ('bazarr_movie','bazarr_episode','manual')",
             name="jobs_source_check",
+        ),
+        # M6.g duplicate-active guard. Declared on the model so `create_all`
+        # (tests) builds it; the alembic migration 0005 creates the same index
+        # in production. COALESCE collapses NULL language_code (auto-detect
+        # jobs) to '' so they participate in the guard. Partial: only active
+        # (queued/running) jobs are constrained.
+        Index(
+            "ix_jobs_active_dupguard",
+            "media_path",
+            text("COALESCE(language_code, '')"),
+            "output_format",
+            unique=True,
+            sqlite_where=text("status IN ('queued','running')"),
         ),
     )
 
