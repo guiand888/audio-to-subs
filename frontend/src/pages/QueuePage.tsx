@@ -226,7 +226,7 @@ export function QueuePage() {
     cancelJob.mutate(jobId, {
       onError: (err) => {
         if (err instanceof ApiError) {
-          toast.error(err.detail)
+          toast.error(err.message)
         } else {
           toast.error("Cancel failed")
         }
@@ -239,7 +239,7 @@ export function QueuePage() {
       onSuccess: () => toast.success("Job queued"),
       onError: (err) => {
         if (err instanceof ApiError) {
-          toast.error(err.detail)
+          toast.error(err.message)
         } else {
           toast.error("Failed to queue job")
         }

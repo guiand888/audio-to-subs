@@ -127,7 +127,7 @@ function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
         if (err instanceof ApiError && err.status === 409) {
           toast.error("A job for this item is already active")
         } else {
-          toast.error(err instanceof ApiError ? err.detail : "Failed to queue job")
+          toast.error(err instanceof ApiError ? err.message : "Failed to queue job")
         }
         setPendingSubmit(null)
         setConflict(null)
