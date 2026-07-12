@@ -1,3 +1,20 @@
+# Standalone env-file alternative to docker-compose.yml.
+#
+# Use this INSTEAD of docker-compose.yml for deployments that supply
+# credentials via a plaintext `.env` file (e.g. Docker, where native secrets
+# are not managed the way Podman does). Do NOT merge this with
+# docker-compose.yml — run it on its own; docker-compose.override.yml
+# (the optional Sonarr/Radarr/Bazarr stack) is auto-included by both engines.
+#
+#   cp .env.example .env          # then set ADMIN_PASSWORD and MISTRAL_API_KEY
+#   docker compose -f docker-compose.docker.yml up -d --build
+#   # or, to validate the same mechanism under Podman:
+#   podman compose -f docker-compose.docker.yml up -d --build
+#
+# The application prefers the direct ADMIN_PASSWORD / MISTRAL_API_KEY env vars
+# over the *_FILE variants (see audio_to_subs/api/settings.py), so no secret
+# files are required here.
+
 services:
   backend:
     build:
@@ -11,27 +28,17 @@ services:
       - SESSION_SECRET_FILE=/data/session_secret
       - REDIS_URL=redis://redis:6379/0
       - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
       - BEHIND_TLS=false
       - DEBUG=true
       - LOG_LEVEL=INFO
-
-    # Secrets for sensitive data
-    secrets:
-      - admin_password
+    env_file: ${ENV_FILE:-.env}
     volumes:
-      # Database and session data (shared with worker)
       - audio-to-subs-data:/data:z
-      # Movie files (aligned with Radarr/Bazarr)
       - audio-to-subs-movies:/movies:z
-      # TV series files (aligned with Sonarr/Bazarr)
       - audio-to-subs-tv:/tv:z
-      # Temporary processing
       - audio-to-subs-tmp:/tmp/audio-to-subs:z
     ports:
       - "8000:8000"
-    # Health check (defined here, not in the Dockerfile: Podman builds OCI
-    # images and silently drops Dockerfile HEALTHCHECK instructions)
     healthcheck:
       test:
         - CMD
@@ -63,7 +70,6 @@ services:
     container_name: audio-to-subs-redis
     ports:
       - "6379:6379"
-    # Persistence (optional, Redis can be stateless for our use case)
     volumes:
       - audio-to-subs-redis-data:/data:z
     healthcheck:
@@ -87,14 +93,12 @@ services:
       - PYTHONUNBUFFERED=1
       - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
       - REDIS_URL=redis://redis:6379/0
-      - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
       - SESSION_SECRET_FILE=/data/session_secret
       - ADMIN_USERNAME=admin
-      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
+      - BEHIND_TLS=false
       - DEBUG=true
       - LOG_LEVEL=INFO
-    secrets:
-      - mistral_api_key
+    env_file: ${ENV_FILE:-.env}
     volumes:
       - audio-to-subs-data:/data:z
       - audio-to-subs-movies:/movies:z
@@ -117,10 +121,6 @@ services:
     security_opt:
       - no-new-privileges:true
     user: "1000:1000"
-
-    # Entrypoint override: the image's ENTRYPOINT runs uvicorn (the API).
-    # The worker must replace it entirely, so override entrypoint (not command,
-    # which would just be appended to the uvicorn entrypoint as arguments).
     entrypoint: ["python", "-m", "audio_to_subs.worker"]
 
   frontend:
@@ -150,16 +150,3 @@ volumes:
     driver: local
   audio-to-subs-tmp:
     driver: local
-
-# Native Podman secrets (prioritized provisioning path). The secret NAMES are
-# fixed defaults and must match these exactly — podman-compose cannot honor a
-# custom `name` on external secrets (it errors unless name == compose key).
-# Create them once on the host before `podman compose up`:
-#   echo -n "yourStrongPass!" | podman secret create admin_password -
-#   echo -n "your-mistral-key" | podman secret create mistral_api_key -
-# The env-file fallback (docker-compose.docker.yml) can replace these.
-secrets:
-  admin_password:
-    external: true
-  mistral_api_key:
-    external: true

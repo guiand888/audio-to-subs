@@ -494,7 +494,7 @@ export function HistoryPage() {
                                   onError: (err) =>
                                     toast.error(
                                       err instanceof ApiError
-                                        ? err.detail
+                                        ? err.message
                                         : "Failed to queue job",
                                     ),
                                 })

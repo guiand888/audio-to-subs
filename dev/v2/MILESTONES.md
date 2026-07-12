@@ -475,7 +475,7 @@ Acceptance:
 | [M6.e](#m6e--ci-pre-commit-pin-alignment) | CI: pre-commit pin alignment | Parallel | — | `.pre-commit-config.yaml` | ✅ Done |
 | [M6.f](#m6f--semantic-audit-standardize-uiapi-terminology-on-series-not-tv) | Semantic audit: "Series" not "TV" | Parallel† | — | `frontend/src/**`, `api/routes/settings.py`, `core/path_utils.py`† | ✅ Done |
 | [M6.g](#m6g--overwrite--duplicate-job-guards) | Overwrite & duplicate-job guards | **Sequential** | M6.a, M6.d, M6.f | `api/{routes,services}/jobs.py`, `worker/runner.py`, `core/file_rename.py`, `frontend/.../WantedPage.tsx` | ✅ Done |
-| [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ⏳ Not started |
+| [M6.h](#m6h--clean-checkout-smoke-test) | Clean-checkout smoke test | **Sequential** | all of the above | none by default | ✅ Done |
 
 †M6.d and M6.f both touch `core/path_utils.py` (different functions — traversal-validation vs. the `MediaType` literal). They can still run in parallel, but land as two small, non-overlapping diffs rather than editing simultaneously without coordinating.
 
@@ -644,6 +644,8 @@ This genuinely overlaps `worker/runner.py` (M6.a), `services/jobs.py`/`routes/jo
 
 **Acceptance**:
 - Clean checkout → `docker compose up` → working app, no manual fixes needed (verified against whatever deployment doc exists at the time; the doc itself gets rewritten in M7).
+
+**Done (2026-07-12)**: ran a real clean-machine `podman compose up` from a fresh checkout and verified the full golden path on **both** provisioning paths — (A) native Podman secrets (`external: true` `admin_password`/`mistral_api_key`, fixed default names; podman-compose cannot honor a custom `name`) and (B) the env-file fallback (`docker-compose.docker.yml`, a standalone file run on its own, with credentials from a plaintext `.env`). In each case: `GET /api/healthz` → `{status:ok,…}`, `POST /api/auth/login` → 200 with `Set-Cookie: …; HttpOnly; SameSite=lax`, the SPA serves on `:8080`, `GET /api/auth/me` returns the admin, the worker comes up and consumes its mounted `/run/secrets/mistral_api_key`, and `GET /api/jobs/stream` opens as `text/event-stream`. The smoke test surfaced one real golden-path break that was **not** caught by the dev `tsc --noEmit`: the Docker `npm run build` runs `tsc -b` (project-references build), which rejects rendering `JobConflictDetail` (a structured object) as JSX at `HistoryPage.tsx:497`, `QueuePage.tsx:229/242`, `WantedPage.tsx:130`. Fixed by rendering `ApiError.message` (already the stringified form) instead of `err.detail` at those four sites; `tsc -b && vite build` now passes. Provisioning docs added as a tight `DEPLOY_QUICKSTART.md` (podman-secret + env-file paths); `.env.example` gained `ADMIN_PASSWORD`/`ADMIN_USERNAME`. No backend/Python changes, so `pytest`/`black`/`ruff`/`mypy` are unaffected; frontend `tsc -b` is now clean (was the latent break).
 
 ### M6 milestone-level acceptance
 
