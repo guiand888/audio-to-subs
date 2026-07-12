@@ -73,10 +73,26 @@ export interface JobCreate {
   language_mode?: LanguageMode
   output_format?: OutputFormat
   priority?: number
+  // M6.g: allow replacing an existing output subtitle (overwrite guard)
+  overwrite?: boolean
 }
 
 export interface JobLanguagePatch {
   language_code: string
+  // M6.g: allow renaming onto an existing target file (overwrite guard)
+  overwrite?: boolean
+}
+
+// M6.g: structured 409 conflict detail returned by the backend when a job
+// creation / language correction collides with an existing or active job.
+export type JobConflictCode = "job_already_active" | "subtitle_exists"
+
+export interface JobConflictDetail {
+  code: JobConflictCode
+  message: string
+  existing_path?: string
+  existing_mtime?: string
+  language_code?: string
 }
 
 // --------------- Wanted ---------------

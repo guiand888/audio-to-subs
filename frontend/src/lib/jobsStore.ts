@@ -31,6 +31,9 @@ export interface LiveJob {
   audio_duration_seconds: number | null
   runtime_seconds: number | null
   estimated_cost_usd: number | null
+  // M6.g: populated for FAILED jobs so the UI can offer an "Overwrite & retry"
+  // action when the worker refused to overwrite an existing subtitle.
+  error_message: string | null
 }
 
 interface JobsState {
@@ -87,6 +90,7 @@ export const useJobsStore = create<JobsState>()((set) => ({
               ...jobs[data.job_id],
               status: data.status,
               percent: 100,
+              error_message: data.error ?? null,
             }
           }
           return { jobs, lastTerminalJobId: data.job_id }
@@ -123,6 +127,7 @@ export const useJobsStore = create<JobsState>()((set) => ({
           audio_duration_seconds: j.audio_duration_seconds,
           runtime_seconds: j.runtime_seconds,
           estimated_cost_usd: j.estimated_cost_usd,
+          error_message: j.error_message,
         }
       }
       return { jobs }

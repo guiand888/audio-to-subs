@@ -722,3 +722,44 @@ class TestFilenameIdempotency:
         result = generator._generate_output_filename("movie.fr.fr.fr.srt", "srt", "fr")
 
         assert result == "movie.fr.srt"
+
+    def test_generate_refuses_when_output_exists(self, tmp_path):
+        """M6.g write-time guard: generate raises SubtitleFileExistsError (and
+        does NOT truncate the existing file) when the resolved output already
+        exists and overwrite is not requested."""
+        from audio_to_subs.core.subtitle_generator import SubtitleFileExistsError
+
+        existing = tmp_path / "movie.en.srt"
+        existing.write_text("do not destroy me")
+        segments = [{"start": 0.0, "end": 1.0, "text": "hello"}]
+
+        generator = SubtitleGenerator()
+        with pytest.raises(SubtitleFileExistsError):
+            generator.generate(segments, str(existing), "srt", "en")
+
+        # The existing file must be untouched (not truncated/overwritten).
+        assert existing.read_text() == "do not destroy me"
+
+    def test_generate_overwrites_when_requested(self, tmp_path):
+        """With overwrite=True, generate replaces the existing file."""
+        existing = tmp_path / "movie.en.srt"
+        existing.write_text("old content")
+        segments = [{"start": 0.0, "end": 1.0, "text": "new subtitle"}]
+
+        generator = SubtitleGenerator()
+        result = generator.generate(
+            segments, str(existing), "srt", "en", overwrite=True
+        )
+
+        assert result == str(existing)
+        assert "new subtitle" in existing.read_text()
+
+    def test_generate_ok_when_output_absent(self, tmp_path):
+        """No collision check fires when the output path does not exist."""
+        out = tmp_path / "movie.en.srt"
+        segments = [{"start": 0.0, "end": 1.0, "text": "fresh"}]
+
+        generator = SubtitleGenerator()
+        generator.generate(segments, str(out), "srt", "en")
+
+        assert out.exists()

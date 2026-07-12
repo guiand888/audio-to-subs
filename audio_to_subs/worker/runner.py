@@ -21,7 +21,11 @@ from audio_to_subs.core.models import (
     MODEL_SPECS,
 )
 from audio_to_subs.core.path_utils import generate_output_path
-from audio_to_subs.core.pipeline import Pipeline, PipelineResult
+from audio_to_subs.core.pipeline import (
+    Pipeline,
+    PipelineResult,
+    SubtitleFileExistsError,
+)
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import Job, JobStatus, LogLevel, Setting
 from audio_to_subs.db.session import get_async_session
@@ -260,6 +264,9 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         # API layer (JobCreateRequest.language_mode: Literal) guarantees it's
         # always one of these two values.
         language_mode=cast(Literal["auto", "explicit"], claimed.language_mode),
+        # M6.g: allow replacing an existing output subtitle only when the job
+        # was created with overwrite=true.
+        overwrite=claimed.overwrite,
     )
 
     try:
@@ -331,6 +338,28 @@ async def run_job(claimed: ClaimedJob, deps: WorkerDeps) -> JobResult:
         return JobResult(
             status=JobStatus.CANCELLED,
             error_message="Job was cancelled",
+        )
+
+    except SubtitleFileExistsError as e:
+        # M6.g write-time overwrite guard: the resolved output file already
+        # exists and the job was not created with overwrite=true. Mark the job
+        # FAILED with a UI-recognizable `output_exists` error (the sentinel is
+        # detected by the Queue/History "Overwrite and retry" action) instead
+        # of silently truncating the existing subtitle.
+        logger.warning(f"Job {job_id} refused to overwrite existing file: {e.path}")
+
+        await persist_log(
+            deps.database_url,
+            job_id,
+            LogLevel.WARNING,
+            f"Output file already exists, not overwritten: {e.path}",
+        )
+
+        await publish_done(deps.redis, str(job_id), "failed", error="output_exists")
+
+        return JobResult(
+            status=JobStatus.FAILED,
+            error_message=f"Output file already exists (output_exists): {e.path}",
         )
 
     except Exception as e:

@@ -10,9 +10,10 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
 import { Progress } from "@/components/ui/progress"
 import { JobStatusIcon } from "@/components/JobStatusIcon"
-import { useJobs, useCancelJob } from "@/hooks/useJobs"
+import { useJobs, useCancelJob, useCreateJob } from "@/hooks/useJobs"
 import { useJobsStore } from "@/lib/jobsStore"
 import type { LiveJob } from "@/lib/jobsStore"
+import type { JobCreate } from "@/lib/types"
 import { ApiError } from "@/lib/api"
 import { formatCost, formatDuration } from "@/lib/utils"
 
@@ -22,6 +23,8 @@ interface JobCardProps {
   job: LiveJob
   onCancel: (id: string) => void
   isCancelling: boolean
+  onCreate: (payload: JobCreate) => void
+  isCreating: boolean
 }
 
 function jobTitle(job: LiveJob): string {
@@ -54,7 +57,7 @@ function stageLabel(job: LiveJob): string {
   return label
 }
 
-function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
+function JobCard({ job, onCancel, isCancelling, onCreate, isCreating }: JobCardProps) {
   const isTerminal =
     job.status === "done" ||
     job.status === "failed" ||
@@ -62,6 +65,13 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
 
   const indeterminate =
     job.status === "running" && !STAGES_WITH_SUBPROGRESS.has(job.stage)
+
+  // M6.g: the worker refused to overwrite an existing subtitle — offer a
+  // retry that resubmits the same job with overwrite=true.
+  const isOutputExists =
+    job.status === "failed" &&
+    job.error_message != null &&
+    job.error_message.includes("output_exists")
 
   return (
     <Card
@@ -91,6 +101,29 @@ function JobCard({ job, onCancel, isCancelling }: JobCardProps) {
                 onClick={() => onCancel(job.id)}
               >
                 <X className="h-4 w-4" />
+              </Button>
+            )}
+            {isOutputExists && (
+              <Button
+                size="sm"
+                variant="outline"
+                className="h-7"
+                title="Overwrite the existing subtitle and retry"
+                disabled={isCreating}
+                onClick={() =>
+                  onCreate({
+                    source: job.source as JobCreate["source"],
+                    source_ref: job.source_ref,
+                    media_path: job.media_path,
+                    language_code:
+                      job.language_mode === "auto" ? null : job.language_code,
+                    language_mode: job.language_mode,
+                    output_format: job.output_format as JobCreate["output_format"],
+                    overwrite: true,
+                  })
+                }
+              >
+                {isCreating ? "Queuing…" : "Overwrite & retry"}
               </Button>
             )}
           </div>
@@ -145,6 +178,7 @@ export function QueuePage() {
   // Initial seed on mount, then Zustand store is the source of truth
   const { data } = useJobs({ limit: 200 })
   const cancelJob = useCancelJob()
+  const createJob = useCreateJob()
   const seed = useJobsStore((s) => s.seed)
   const remove = useJobsStore((s) => s.remove)
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
@@ -200,6 +234,19 @@ export function QueuePage() {
     })
   }
 
+  const handleCreate = (payload: JobCreate) => {
+    createJob.mutate(payload, {
+      onSuccess: () => toast.success("Job queued"),
+      onError: (err) => {
+        if (err instanceof ApiError) {
+          toast.error(err.detail)
+        } else {
+          toast.error("Failed to queue job")
+        }
+      },
+    })
+  }
+
   const allJobs = Object.values(jobs)
   const running = allJobs.filter((j) => j.status === "running")
   const queued = allJobs.filter((j) => j.status === "queued")
@@ -234,6 +281,8 @@ export function QueuePage() {
                     job={job}
                     onCancel={handleCancel}
                     isCancelling={cancelJob.isPending}
+                    onCreate={handleCreate}
+                    isCreating={createJob.isPending}
                   />
                 ))}
               </div>
@@ -253,6 +302,8 @@ export function QueuePage() {
                     job={job}
                     onCancel={handleCancel}
                     isCancelling={cancelJob.isPending}
+                    onCreate={handleCreate}
+                    isCreating={createJob.isPending}
                   />
                 ))}
               </div>

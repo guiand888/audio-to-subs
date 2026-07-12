@@ -25,6 +25,7 @@ from audio_to_subs.core.audio_splitter import (
 from audio_to_subs.core.cancel import Cancelled, CancelToken
 from audio_to_subs.core.models import DEFAULT_MAX_AUDIO_LENGTH
 from audio_to_subs.core.subtitle_generator import (
+    SubtitleFileExistsError,
     SubtitleFormatError,
     SubtitleGenerator,
 )
@@ -117,6 +118,7 @@ class Pipeline:
         cancel_token: Optional[CancelToken] = None,
         max_audio_length: int = DEFAULT_MAX_AUDIO_LENGTH,
         language_mode: Literal["auto", "explicit"] = "explicit",
+        overwrite: bool = False,
     ) -> None:
         """Initialize pipeline.
 
@@ -134,6 +136,8 @@ class Pipeline:
                 language code as-is. "auto" ignores `language` for naming and
                 instead uses whatever language Mistral's response reports it
                 detected (falling back to "und" if it reports none).
+            overwrite: When True, allow the generator to replace an existing
+                output subtitle file (M6.g write-time guard). Default False.
 
         Raises:
             ValueError: If API key is not provided
@@ -162,6 +166,8 @@ class Pipeline:
         self.subtitle_generator = SubtitleGenerator()
         self._language = language
         self._language_mode = language_mode
+        # M6.g: whether an existing output file may be replaced at write time.
+        self._overwrite = overwrite
         # Step accounting. ``_step_total`` is resolved once we know the audio
         # duration (after extraction): 4 if splitting occurs, else 3. ``None``
         # until then (init stage, before extraction completes).
@@ -392,6 +398,7 @@ class Pipeline:
                 audio_duration_seconds,
                 mistral_usage,
                 effective_language,
+                overwrite=self._overwrite,
             )
 
             return PipelineResult(
@@ -598,6 +605,7 @@ class Pipeline:
         audio_duration_seconds: float,
         mistral_usage: dict[str, Any] | None,
         effective_language: str | None,
+        overwrite: bool = False,
     ) -> str:
         """Generate subtitles and emit final progress event.
 
@@ -631,6 +639,7 @@ class Pipeline:
             output_path,
             output_format,
             effective_language,
+            overwrite=overwrite,
         )
         logger.debug(f"Subtitles generated: {result_path}")
 
@@ -797,6 +806,7 @@ class Pipeline:
         output_path: str,
         output_format: str = "srt",
         language_code: Optional[str] = None,
+        overwrite: bool = False,
     ) -> str:
         """Generate subtitle file in specified format.
 
@@ -805,17 +815,28 @@ class Pipeline:
             output_path: Path to write subtitle file
             output_format: Output subtitle format (srt, vtt, webvtt, sbv)
             language_code: Optional language code for filename
+            overwrite: When True, allow replacing an existing output file
+                (M6.g write-time guard). Default False.
 
         Returns:
             Path to generated subtitle file
 
         Raises:
-            PipelineError: If generation fails
+            PipelineError: If generation fails (but NOT SubtitleFileExistsError,
+                which is propagated so the worker can mark the job accordingly)
         """
         try:
             return self.subtitle_generator.generate(
-                segments, output_path, output_format, language_code
+                segments,
+                output_path,
+                output_format,
+                language_code,
+                overwrite=overwrite,
             )
+        except SubtitleFileExistsError:
+            # Propagate as-is: the worker turns this into a FAILED job with an
+            # `output_exists` error rather than a generic failure.
+            raise
         except SubtitleFormatError as e:
             raise PipelineError(f"Subtitle generation failed: {str(e)}") from e
         except Exception as e:

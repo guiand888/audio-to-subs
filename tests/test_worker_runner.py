@@ -468,6 +468,54 @@ class TestRunJob:
         deps.redis.publish.assert_called()
 
     @pytest.mark.asyncio
+    async def test_run_job_refuses_to_overwrite_existing_file(self, mock_db_session):
+        """M6.g write-time guard: when the resolved output file already exists
+        and the job was not created with overwrite=true, run_job fails the job
+        with an `output_exists` error rather than clobbering the subtitle."""
+        from audio_to_subs.core.pipeline import SubtitleFileExistsError
+
+        claimed = make_claimed_job(overwrite=False)
+        deps = make_worker_deps(mock_db_session)
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.side_effect = SubtitleFileExistsError(
+                "/test/existing.srt"
+            )
+            mock_pipeline_class.return_value = mock_pipeline
+
+            result = await run_job(claimed, deps)
+
+        assert result.status == JobStatus.FAILED
+        assert result.error_message is not None
+        assert "output_exists" in result.error_message
+        deps.redis.publish.assert_called()
+
+    @pytest.mark.asyncio
+    async def test_run_job_threads_overwrite_flag_to_pipeline(self, mock_db_session):
+        """The job's overwrite flag must reach the Pipeline constructor so the
+        generator can decide whether to replace an existing file."""
+        claimed = make_claimed_job(overwrite=True)
+        deps = make_worker_deps(mock_db_session)
+
+        pipeline_result = PipelineResult(
+            output_path="/test/output.srt",
+            audio_duration_seconds=30.0,
+            mistral_usage=None,
+            segments_count=1,
+        )
+
+        with patch("audio_to_subs.worker.runner.Pipeline") as mock_pipeline_class:
+            mock_pipeline = MagicMock()
+            mock_pipeline.process_video.return_value = pipeline_result
+            mock_pipeline_class.return_value = mock_pipeline
+
+            await run_job(claimed, deps)
+
+        _, pipeline_kwargs = mock_pipeline_class.call_args
+        assert pipeline_kwargs["overwrite"] is True
+
+    @pytest.mark.asyncio
     async def test_run_job_failure_persists_error_and_returns_failed_status(
         self, mock_db_session
     ):

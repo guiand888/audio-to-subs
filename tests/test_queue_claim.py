@@ -53,6 +53,7 @@ class TestClaimOne:
             "srt",
             "manual",
             None,
+            False,  # overwrite (M6.g)
         )
         mock_session.execute = AsyncMock(return_value=mock_result)
         mock_session.commit = AsyncMock()

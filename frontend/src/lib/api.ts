@@ -1,13 +1,25 @@
 // Thin fetch wrapper: same-origin /api calls, credentials: "include" (session cookie),
 // JSON body/response, throws ApiError on non-2xx.
 
+import type { JobConflictDetail } from "@/lib/types"
+
 export class ApiError extends Error {
   constructor(
     public readonly status: number,
-    public readonly detail: string,
+    // M6.g: detail may be a plain human string (legacy) or a structured
+    // JobConflictDetail (409 subtitle_exists / job_already_active).
+    public readonly detail: string | JobConflictDetail,
   ) {
-    super(detail)
+    super(typeof detail === "string" ? detail : JSON.stringify(detail))
     this.name = "ApiError"
+  }
+
+  /** Narrow a 409 conflict detail to a JobConflictDetail, if present. */
+  get conflict(): JobConflictDetail | null {
+    if (this.status === 409 && typeof this.detail === "object") {
+      return this.detail as JobConflictDetail
+    }
+    return null
   }
 }
 
@@ -22,10 +34,12 @@ async function request<T>(path: string, init?: RequestInit): Promise<T> {
   })
 
   if (!res.ok) {
-    let detail = `HTTP ${res.status}`
+    let detail: string | JobConflictDetail = `HTTP ${res.status}`
     try {
-      const body = (await res.json()) as { detail?: string }
-      detail = body.detail ?? detail
+      const body = (await res.json()) as {
+        detail?: string | JobConflictDetail
+      }
+      if (body.detail !== undefined) detail = body.detail
     } catch {
       // ignore JSON parse errors on error responses
     }

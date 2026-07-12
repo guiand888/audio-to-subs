@@ -38,7 +38,13 @@ import { useCreateJob } from "@/hooks/useJobs"
 import { useRefreshWanted } from "@/hooks/useRefreshWanted"
 import { useJobsStore } from "@/lib/jobsStore"
 import { ApiError } from "@/lib/api"
-import type { MissingSubtitle, OutputFormat, WantedItem } from "@/lib/types"
+import type {
+  JobConflictDetail,
+  JobCreate,
+  MissingSubtitle,
+  OutputFormat,
+  WantedItem,
+} from "@/lib/types"
 
 type ItemType = "all" | "movie" | "episode"
 
@@ -69,6 +75,11 @@ function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
   const [language, setLanguage] = useState<string>(AUTO_LANGUAGE)
   const [manualCode, setManualCode] = useState<string>("")
   const [format, setFormat] = useState<OutputFormat>("srt")
+  // M6.g: when a subtitle already exists at the resolved output path, hold the
+  // intended submission and the conflict detail so the user can confirm an
+  // explicit overwrite instead of being silently blocked.
+  const [pendingSubmit, setPendingSubmit] = useState<JobCreate | null>(null)
+  const [conflict, setConflict] = useState<JobConflictDetail | null>(null)
 
   // Default to the item's first reported audio language if Bazarr knows it;
   // otherwise only Auto-detect makes sense (missing_subtitles is not used
@@ -78,46 +89,64 @@ function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
     setLanguage(firstAudioLang ? firstAudioLang.code2 : AUTO_LANGUAGE)
     setManualCode("")
     setFormat("srt")
+    setPendingSubmit(null)
+    setConflict(null)
   }, [item])
 
   if (!item) return null
 
-  const handleSubmit = () => {
-    const isAuto = language === AUTO_LANGUAGE
-    const resolvedCode = isAuto
+  const buildSubmit = (): JobCreate => ({
+    source: item.kind === "movie" ? "bazarr_movie" : "bazarr_episode",
+    source_ref: String(item.ext_id),
+    media_path: item.media_path,
+    language_mode: language === AUTO_LANGUAGE ? "auto" : "explicit",
+    language_code: language === AUTO_LANGUAGE
       ? null
       : language === OTHER_LANGUAGE
         ? manualCode.trim()
-        : language
+        : language,
+    output_format: format,
+  })
 
-    createJob.mutate(
-      {
-        source: item.kind === "movie" ? "bazarr_movie" : "bazarr_episode",
-        source_ref: String(item.ext_id),
-        media_path: item.media_path,
-        language_mode: isAuto ? "auto" : "explicit",
-        language_code: resolvedCode,
-        output_format: format,
+  const submit = (payload: JobCreate) => {
+    createJob.mutate(payload, {
+      onSuccess: () => {
+        toast.success("Job queued")
+        setPendingSubmit(null)
+        setConflict(null)
+        onClose()
       },
-      {
-        onSuccess: () => {
-          toast.success("Job queued")
-          onClose()
-        },
-        onError: (err) => {
-          if (err instanceof ApiError && err.status === 409) {
-            toast.error("A job for this item is already active")
-          } else {
-            toast.error(err instanceof ApiError ? err.detail : "Failed to queue job")
-          }
-          onClose()
-        },
+      onError: (err) => {
+        const c = err instanceof ApiError ? err.conflict : null
+        if (c?.code === "subtitle_exists") {
+          // Defer to the confirm dialog instead of erroring out.
+          setPendingSubmit(payload)
+          setConflict(c)
+          return
+        }
+        if (err instanceof ApiError && err.status === 409) {
+          toast.error("A job for this item is already active")
+        } else {
+          toast.error(err instanceof ApiError ? err.detail : "Failed to queue job")
+        }
+        setPendingSubmit(null)
+        setConflict(null)
+        onClose()
       },
-    )
+    })
+  }
+
+  const handleSubmit = () => {
+    submit(buildSubmit())
+  }
+
+  const confirmOverwrite = () => {
+    if (pendingSubmit) submit({ ...pendingSubmit, overwrite: true })
   }
 
   return (
-    <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
+    <>
+      <Dialog open={!!item} onOpenChange={(open) => !open && onClose()}>
       <DialogContent className="max-w-sm">
         <DialogHeader>
           <DialogTitle>Transcribe</DialogTitle>
@@ -192,6 +221,45 @@ function TranscribeDialog({ item, onClose }: TranscribeDialogProps) {
         </DialogFooter>
       </DialogContent>
     </Dialog>
+
+    {/* M6.g: overwrite confirmation when a subtitle already exists. */}
+    <Dialog
+      open={conflict !== null}
+      onOpenChange={(open) => {
+        if (!open) {
+          setConflict(null)
+          setPendingSubmit(null)
+        }
+      }}
+    >
+      <DialogContent className="max-w-sm">
+        <DialogHeader>
+          <DialogTitle>Subtitle already exists</DialogTitle>
+        </DialogHeader>
+        <div className="space-y-1 text-sm text-muted-foreground">
+          <p>
+            A {conflict?.language_code ?? ""} subtitle already exists at this
+            location{conflict?.existing_mtime ? ` (last modified ${conflict.existing_mtime})` : ""}.
+            Overwrite it and re-transcribe?
+          </p>
+        </div>
+        <DialogFooter>
+          <Button
+            variant="outline"
+            onClick={() => {
+              setConflict(null)
+              setPendingSubmit(null)
+            }}
+          >
+            Cancel
+          </Button>
+          <Button onClick={confirmOverwrite} disabled={createJob.isPending}>
+            {createJob.isPending ? "Queuing…" : "Overwrite and retry"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+    </>
   )
 }
 

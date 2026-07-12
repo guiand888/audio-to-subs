@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
 import { render, screen, waitFor, act } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { QueuePage } from "./QueuePage"
 import { useJobsStore } from "@/lib/jobsStore"
@@ -22,14 +23,22 @@ vi.mock("@/lib/api", () => ({
   },
 }))
 
+// Stable mock fns so tests can assert on hook return values.
+const mockCreateMutate = vi.fn()
+const mockCancelMutate = vi.fn()
+
 // Mock the hooks
 vi.mock("@/hooks/useJobs", () => ({
   useJobs: () => ({
     data: undefined,
     refetch: vi.fn(),
   }),
+  useCreateJob: () => ({
+    mutate: mockCreateMutate,
+    isPending: false,
+  }),
   useCancelJob: () => ({
-    mutate: vi.fn(),
+    mutate: mockCancelMutate,
     isPending: false,
   }),
 }))
@@ -134,6 +143,15 @@ const MOCK_JOB_DONE: JobResponse = {
   mistral_usage_json: null,
   error_message: null,
   updated_at: "2024-01-01T02:15:00Z",
+}
+
+const MOCK_JOB_FAILED: JobResponse = {
+  ...MOCK_JOB_DONE,
+  id: "job-4",
+  status: "failed",
+  finished_at: "2024-01-01T02:20:00Z",
+  output_path: null,
+  error_message: "Output file already exists (output_exists): /path/to/output.srt",
 }
 
 function wrapper({ children }: { children: React.ReactNode }) {
@@ -381,6 +399,43 @@ describe("QueuePage", () => {
       await waitFor(() => {
         expect(invalidate).toHaveBeenCalledWith({ queryKey: ["jobs"] })
       })
+    })
+  })
+
+  describe("Overwrite & retry (M6.g)", () => {
+    it("offers overwrite-retry when a job failed due to an existing subtitle", async () => {
+      useJobsStore.getState().seed([MOCK_JOB_FAILED])
+      useJobsStore.setState({ lastTerminalJobId: MOCK_JOB_FAILED.id })
+
+      render(<QueuePage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/Overwrite & retry/i)).toBeInTheDocument()
+      })
+
+      await userEvent.click(screen.getByText(/Overwrite & retry/i))
+
+      expect(mockCreateMutate).toHaveBeenCalledWith(
+        expect.objectContaining({
+          media_path: MOCK_JOB_FAILED.media_path,
+          overwrite: true,
+        }),
+        expect.any(Object),
+      )
+    })
+
+    it("does not offer overwrite-retry for an ordinary failure", async () => {
+      useJobsStore.getState().seed([
+        { ...MOCK_JOB_FAILED, id: "job-5", error_message: "Model crashed" },
+      ])
+      useJobsStore.setState({ lastTerminalJobId: "job-5" })
+
+      render(<QueuePage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByText(/manual #789/i)).toBeInTheDocument()
+      })
+      expect(screen.queryByText(/Overwrite & retry/i)).not.toBeInTheDocument()
     })
   })
 })
