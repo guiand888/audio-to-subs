@@ -45,7 +45,70 @@ interface JobsState {
 
   apply: (data: SseEventData) => void
   seed: (jobs: JobResponse[]) => void
+  // Re-sync from the REST endpoint without wiping in-flight SSE progress.
+  // Server-authoritative fields (cost, duration, media_path, …) are adopted;
+  // live fields already present in the store (percent/stage/message/step_*)
+  // are preserved so a re-seed triggered by a "new" event doesn't reset the
+  // progress bar of a job that is actively running.
+  merge: (jobs: JobResponse[]) => void
   remove: (jobId: string) => void
+}
+
+// Build a LiveJob from a REST JobResponse.
+function liveJobFromApi(j: JobResponse): LiveJob {
+  return {
+    id: j.id,
+    status: j.status,
+    percent: j.progress_percent,
+    stage: j.progress_stage ?? "",
+    message: j.progress_message ?? "",
+    step_index: j.progress_step_index ?? null,
+    step_total: j.progress_step_total ?? null,
+    source: j.source,
+    source_ref: j.source_ref,
+    media_path: j.media_path,
+    language_code: j.language_code,
+    language_mode: j.language_mode,
+    output_format: j.output_format,
+    created_at: j.created_at,
+    started_at: j.started_at,
+    finished_at: j.finished_at,
+    cancel_requested: j.cancel_requested,
+    audio_duration_seconds: j.audio_duration_seconds,
+    runtime_seconds: j.runtime_seconds,
+    estimated_cost_usd: j.estimated_cost_usd,
+    error_message: j.error_message,
+  }
+}
+
+// Minimal LiveJob created purely from an SSE event when the store has never
+// seen the job (e.g. a progress event fired before the seed caught up).
+function liveJobFromEvent(event: "progress" | "cancel" | "done", jobId: string): LiveJob {
+  const status =
+    event === "cancel" ? "cancelled" : event === "done" ? "running" : "running"
+  return {
+    id: jobId,
+    status,
+    percent: 0,
+    stage: "",
+    message: "",
+    step_index: null,
+    step_total: null,
+    source: "manual",
+    source_ref: null,
+    media_path: "",
+    language_code: null,
+    language_mode: "auto",
+    output_format: "srt",
+    created_at: "",
+    started_at: null,
+    finished_at: null,
+    cancel_requested: false,
+    audio_duration_seconds: null,
+    runtime_seconds: null,
+    estimated_cost_usd: null,
+    error_message: null,
+  }
 }
 
 export const useJobsStore = create<JobsState>()((set) => ({
@@ -61,39 +124,39 @@ export const useJobsStore = create<JobsState>()((set) => ({
         case "new":
           return { pendingNewCount: state.pendingNewCount + 1 }
 
-        case "progress":
-          if (jobs[data.job_id]) {
-            jobs[data.job_id] = {
-              ...jobs[data.job_id],
-              status: "running",
-              percent: data.percent,
-              stage: data.stage,
-              message: data.message,
-              step_index: data.step_index,
-              step_total: data.step_total,
-            }
+        case "progress": {
+          const prev = jobs[data.job_id] ?? liveJobFromEvent("progress", data.job_id)
+          jobs[data.job_id] = {
+            ...prev,
+            status: "running",
+            percent: data.percent,
+            stage: data.stage,
+            message: data.message,
+            step_index: data.step_index,
+            step_total: data.step_total,
           }
           return { jobs }
+        }
 
-        case "cancel":
-          if (jobs[data.job_id]) {
-            jobs[data.job_id] = {
-              ...jobs[data.job_id],
-              status: "cancelled",
-            }
+        case "cancel": {
+          const prev = jobs[data.job_id] ?? liveJobFromEvent("cancel", data.job_id)
+          jobs[data.job_id] = {
+            ...prev,
+            status: "cancelled",
           }
           return { jobs, lastTerminalJobId: data.job_id }
+        }
 
-        case "done":
-          if (jobs[data.job_id]) {
-            jobs[data.job_id] = {
-              ...jobs[data.job_id],
-              status: data.status,
-              percent: 100,
-              error_message: data.error ?? null,
-            }
+        case "done": {
+          const prev = jobs[data.job_id] ?? liveJobFromEvent("done", data.job_id)
+          jobs[data.job_id] = {
+            ...prev,
+            status: data.status,
+            percent: 100,
+            error_message: data.error ?? null,
           }
           return { jobs, lastTerminalJobId: data.job_id }
+        }
 
         default:
           return {}
@@ -106,28 +169,32 @@ export const useJobsStore = create<JobsState>()((set) => ({
       for (const j of apiJobs) {
         // Include all jobs, not just queued/running
         // This allows cost/duration to be available for recently completed jobs
-        jobs[j.id] = {
-          id: j.id,
-          status: j.status,
-          percent: j.progress_percent,
-          stage: j.progress_stage ?? "",
-          message: j.progress_message ?? "",
-          step_index: j.progress_step_index ?? null,
-          step_total: j.progress_step_total ?? null,
-          source: j.source,
-          source_ref: j.source_ref,
-          media_path: j.media_path,
-          language_code: j.language_code,
-          language_mode: j.language_mode,
-          output_format: j.output_format,
-          created_at: j.created_at,
-          started_at: j.started_at,
-          finished_at: j.finished_at,
-          cancel_requested: j.cancel_requested,
-          audio_duration_seconds: j.audio_duration_seconds,
-          runtime_seconds: j.runtime_seconds,
-          estimated_cost_usd: j.estimated_cost_usd,
-          error_message: j.error_message,
+        jobs[j.id] = liveJobFromApi(j)
+      }
+      return { jobs }
+    }),
+
+  // Re-sync from REST without discarding live SSE progress. Adopt
+  // server-authoritative fields, but keep any live percent/stage/message/
+  // step_* already present in the store so an in-flight progress bar isn't
+  // reset by a re-seed triggered on a "new" event.
+  merge: (apiJobs) =>
+    set((state) => {
+      const jobs = { ...state.jobs }
+      for (const j of apiJobs) {
+        const existing = jobs[j.id]
+        if (existing) {
+          jobs[j.id] = {
+            ...liveJobFromApi(j),
+            // preserve live progress if the store already had it
+            percent: existing.percent,
+            stage: existing.stage,
+            message: existing.message,
+            step_index: existing.step_index,
+            step_total: existing.step_total,
+          }
+        } else {
+          jobs[j.id] = liveJobFromApi(j)
         }
       }
       return { jobs }

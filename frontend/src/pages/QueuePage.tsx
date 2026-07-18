@@ -2,9 +2,9 @@
 // Seeded from GET /api/jobs; kept live via the Zustand SSE store.
 // Cards animate out 1.5s after reaching a terminal state, then disappear.
 
-import { useEffect, useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import { useQueryClient } from "@tanstack/react-query"
-import { X } from "lucide-react"
+import { RefreshCw, X } from "lucide-react"
 import { toast } from "sonner"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent } from "@/components/ui/card"
@@ -175,11 +175,20 @@ function JobCard({ job, onCancel, isCancelling, onCreate, isCreating }: JobCardP
 
 export function QueuePage() {
   const queryClient = useQueryClient()
+  // Opt-in fallback polling (default off). SSE is the primary live mechanism;
+  // this only re-syncs from GET /api/jobs when the user enables it.
+  const [autoRefresh, setAutoRefresh] = useState(false)
+  const [refreshInterval] = useState(10000)
   // Initial seed on mount, then Zustand store is the source of truth
-  const { data } = useJobs({ limit: 200 })
+  const { data, refetch, isFetching } = useJobs({
+    limit: 200,
+    autoRefresh,
+    refreshInterval,
+  })
   const cancelJob = useCancelJob()
   const createJob = useCreateJob()
   const seed = useJobsStore((s) => s.seed)
+  const merge = useJobsStore((s) => s.merge)
   const remove = useJobsStore((s) => s.remove)
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
   const pendingNewCount = useJobsStore((s) => s.pendingNewCount)
@@ -188,12 +197,18 @@ export function QueuePage() {
   // Track job IDs we're currently animating out
   const [fadingOut, setFadingOut] = useState<Set<string>>(new Set())
 
-  // Seed the store once on mount from API response
+  // Seed the store once on mount; afterwards re-sync via merge so live SSE
+  // progress is preserved.
+  const seededOnce = useRef(false)
   useEffect(() => {
-    if (data?.jobs) {
+    if (!data?.jobs) return
+    if (!seededOnce.current) {
       seed(data.jobs)
+      seededOnce.current = true
+    } else {
+      merge(data.jobs)
     }
-  }, [data?.jobs, seed])
+  }, [data?.jobs, seed, merge])
 
   // When a job reaches terminal state: animate out, then remove after delay,
   // and invalidate the history + wanted caches
@@ -216,7 +231,8 @@ export function QueuePage() {
   // M5.8 (#2, verified): the "new" SSE event previously only bumped the
   // (otherwise dead) pendingNewCount counter, so jobs created by another actor
   // never appeared without a manual refresh. Invalidating ["jobs"] makes the
-  // store re-seed from GET /api/jobs and the new card shows up live.
+  // store re-seed from GET /api/jobs and the new card shows up live. The
+  // re-seed goes through merge(), preserving any in-flight progress.
   useEffect(() => {
     if (pendingNewCount === 0) return
     void queryClient.invalidateQueries({ queryKey: ["jobs"] })
@@ -247,6 +263,14 @@ export function QueuePage() {
     })
   }
 
+  const handleManualRefresh = () => {
+    void refetch()
+  }
+
+  const toggleAutoRefresh = () => {
+    setAutoRefresh((v) => !v)
+  }
+
   const allJobs = Object.values(jobs)
   const running = allJobs.filter((j) => j.status === "running")
   const queued = allJobs.filter((j) => j.status === "queued")
@@ -262,6 +286,35 @@ export function QueuePage() {
 
   return (
     <div className="p-4 space-y-6">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Queue</h1>
+          <p className="text-sm text-muted-foreground">
+            Live job progress — updates stream in real time
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleManualRefresh}
+            disabled={isFetching}
+            title="Refresh now"
+          >
+            <RefreshCw className={isFetching ? "h-4 w-4 animate-spin" : "h-4 w-4"} />
+          </Button>
+          <Button
+            size="sm"
+            variant={autoRefresh ? "default" : "outline"}
+            onClick={toggleAutoRefresh}
+            title="Fallback polling when the live stream is unavailable"
+          >
+            Auto-refresh: {autoRefresh ? "On" : "Off"}
+          </Button>
+        </div>
+      </div>
+
       {isEmpty ? (
         <div className="flex h-40 items-center justify-center text-sm text-muted-foreground">
           No active jobs.
