@@ -92,7 +92,7 @@ secret-rm:  ## Remove Mistral API key secret
 
 # Frontend targets — Node comes from the `frontend` nix devShell (flake.nix),
 # never a host-installed toolchain.
-FRONTEND_RUN := nix develop .#frontend --command bash -c
+FRONTEND_RUN := nix develop .\#frontend --command bash -c
 
 frontend-test:  ## Run frontend tests (vitest)
 	$(FRONTEND_RUN) "cd frontend && npm install && npm run test"
