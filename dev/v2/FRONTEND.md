@@ -15,7 +15,7 @@ No state management framework beyond Zustand. No Redux. No SWR.
 
 ## Design
 
-- **Palette**: black and white. Use shadcn's `neutral` preset. Accent colour: none (or a single subtle gray). Status indicators (running, queued, error) use icons + text, not coloured pills, to stay clean.
+- **Palette**: navy-brand ("Ayu Tint") — a cool, navy-tinted neutral scale built off `#4b6195`, no second accent hue. Never pure black/white. Full recipe and rationale in `dev/reference/THEME_SPEC.md`. Status indicators (running, queued, error) use icons + text, not coloured pills, to stay clean — log-level badges are the one exception (see `LogsPage.tsx`).
 - **Layout**: persistent left sidebar with five links — Wanted, Queue, History, Logs, Settings. Top bar with theme toggle (sun/moon/auto) and logout button.
 - **Typography**: shadcn defaults (Inter or system stack).
 

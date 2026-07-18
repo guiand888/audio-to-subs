@@ -37,19 +37,20 @@ const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
   { value: "error", label: "Error" },
 ]
 
-// Solid, theme-aware badge classes per log level.
-// White text is used on every level for consistent, high-contrast legibility
-// in both light and dark mode (tokens shift per theme in index.css).
+// Solid, theme-aware badge classes per log level. Each pairs its background
+// with a foreground chosen for contrast — warning uses a dark foreground
+// since white-on-amber fails WCAG contrast; the rest use the near-white
+// primary-foreground token (tokens shift per theme in index.css).
 function getLevelBadgeClass(level: LogLevel): string {
   switch (level) {
     case "debug":
-      return "bg-log-debug text-white border-transparent"
+      return "bg-log-debug text-primary-foreground border-transparent"
     case "info":
-      return "bg-log-info text-white border-transparent"
+      return "bg-log-info text-primary-foreground border-transparent"
     case "warning":
-      return "bg-log-warning text-white border-transparent"
+      return "bg-log-warning text-log-warning-foreground border-transparent"
     case "error":
-      return "bg-log-error text-white border-transparent"
+      return "bg-log-error text-primary-foreground border-transparent"
     default:
       return "bg-muted text-foreground border-transparent"
   }
