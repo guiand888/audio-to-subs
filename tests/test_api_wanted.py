@@ -183,6 +183,79 @@ class TestListWantedEndpoint:
         assert items["movie:3"]["active_job_status"] is None
         assert items["movie:3"]["active_job_progress"] is None
 
+    def _seed_titles(self, sync_session):
+        sync_session.add_all(
+            [
+                BazarrCache(
+                    id="movie:1",
+                    kind="movie",
+                    ext_id=1,
+                    title="The Matrix",
+                    media_path="/data/movies/matrix.mkv",
+                    has_any_subs=False,
+                    missing_subtitles=[{"code2": "en"}],
+                    last_polled=datetime.now(timezone.utc),
+                ),
+                BazarrCache(
+                    id="movie:2",
+                    kind="movie",
+                    ext_id=2,
+                    title="Matrix Reloaded",
+                    media_path="/data/movies/reloaded.mkv",
+                    has_any_subs=True,
+                    missing_subtitles=[{"code2": "fr"}],
+                    last_polled=datetime.now(timezone.utc),
+                ),
+                BazarrCache(
+                    id="episode:1",
+                    kind="episode",
+                    ext_id=1,
+                    title="Breaking Bad S01E01",
+                    media_path="/data/series/bb.mkv",
+                    has_any_subs=False,
+                    missing_subtitles=[{"code2": "en"}],
+                    last_polled=datetime.now(timezone.utc),
+                ),
+            ]
+        )
+        sync_session.commit()
+
+    def test_list_wanted_search_matches_across_all_pages(self, sync_session, authenticated_client):
+        """Search must run server-side, not just over the displayed page."""
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?search=matrix")
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == {"The Matrix", "Matrix Reloaded"}
+
+    def test_list_wanted_search_is_case_insensitive(self, sync_session, authenticated_client):
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?search=BREAKING")
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == {"Breaking Bad S01E01"}
+
+    def test_list_wanted_has_any_subs_filter(self, sync_session, authenticated_client):
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?has_any_subs=true")
+        assert response.status_code == 200
+        items = response.json()["items"]
+        assert items == [i for i in items if i["has_any_subs"]]
+        assert {i["title"] for i in items} == {"Matrix Reloaded"}
+
+    def test_list_wanted_search_composes_with_other_filters(
+        self, sync_session, authenticated_client
+    ):
+        """Search must respect item_type, language, and has_any_subs filters."""
+        self._seed_titles(sync_session)
+        # "matrix" + Movies + no subs + missing lang en -> only "The Matrix"
+        response = authenticated_client.get(
+            "/api/wanted?search=matrix&item_type=movie&has_any_subs=false&language=en"
+        )
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == {"The Matrix"}
+
 
 class TestGetWantedItemEndpoint:
     """Test GET /api/wanted/{item_id} endpoint."""
