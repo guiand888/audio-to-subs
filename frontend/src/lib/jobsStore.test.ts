@@ -140,7 +140,7 @@ describe("jobsStore", () => {
       expect(job.message).toBe("Processing audio")
     })
 
-    it("ignores progress events for non-existent jobs", () => {
+    it("upserts progress events for unknown jobs instead of dropping them", () => {
       const event: SseEventData = {
         event: "progress",
         job_id: "non-existent",
@@ -153,8 +153,13 @@ describe("jobsStore", () => {
 
       useJobsStore.getState().apply(event)
 
-      // Should not crash, and non-existent job shouldn't be added
-      expect(useJobsStore.getState().jobs["non-existent"]).toBeUndefined()
+      // An event that fired before the seed caught up must still surface, so
+      // the UI shows live progress rather than requiring a manual refresh.
+      const job = useJobsStore.getState().jobs["non-existent"]
+      expect(job).toBeDefined()
+      expect(job.status).toBe("running")
+      expect(job.percent).toBe(50)
+      expect(job.stage).toBe("transcribing")
     })
   })
 
@@ -225,6 +230,49 @@ describe("jobsStore", () => {
 
       useJobsStore.getState().apply(event)
       expect(useJobsStore.getState().pendingNewCount).toBe(2)
+    })
+  })
+
+  describe("merge()", () => {
+    it("adds new jobs from the API without wiping existing live progress", () => {
+      // A job already has live SSE progress in the store.
+      useJobsStore.getState().apply({
+        event: "progress",
+        job_id: "job-1",
+        percent: 42,
+        stage: "transcribe",
+        message: "Half done",
+        step_index: null,
+        step_total: null,
+      })
+
+      // A re-seed (triggered by a "new" event) must not reset the progress.
+      useJobsStore.getState().merge([MOCK_JOB])
+
+      const job = useJobsStore.getState().jobs["job-1"]
+      expect(job.percent).toBe(42)
+      expect(job.stage).toBe("transcribe")
+      expect(job.message).toBe("Half done")
+      // Server-authoritative fields are still adopted.
+      expect(job.source_ref).toBe("123")
+    })
+
+    it("adopts server-authoritative fields for known jobs", () => {
+      useJobsStore.getState().seed([MOCK_JOB])
+      useJobsStore.getState().merge([
+        { ...MOCK_JOB, status: "running", estimated_cost_usd: 0.05 },
+      ])
+
+      const job = useJobsStore.getState().jobs["job-1"]
+      expect(job.status).toBe("running")
+      expect(job.estimated_cost_usd).toBe(0.05)
+    })
+
+    it("adds jobs that the store has never seen", () => {
+      useJobsStore.getState().merge([MOCK_JOB_2])
+      const jobs = useJobsStore.getState().jobs
+      expect(jobs["job-2"]).toBeDefined()
+      expect(jobs["job-2"].source_ref).toBe("456")
     })
   })
 
