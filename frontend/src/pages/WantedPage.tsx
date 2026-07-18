@@ -362,7 +362,11 @@ export function WantedPage() {
         i.missing_subtitles.some((ms) => ms.code2 === langFilter),
       )
     }
-    return list
+    // Default sort: alphabetical by title (case-insensitive). No sorting
+    // options or extra categories are exposed yet, so this is the baseline.
+    return [...list].sort((a, b) =>
+      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
+    )
   }, [data?.items, search, onlyNoSubs, langFilter])
 
   // Derive language options from all visible items

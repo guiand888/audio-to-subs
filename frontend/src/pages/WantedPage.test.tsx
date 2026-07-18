@@ -534,6 +534,101 @@ describe("WantedPage - Transcribe error handling", () => {
     })
   })
 
+describe("WantedPage - Default title sort & case-insensitive search", () => {
+  const MOCK_TITLE_ITEMS = [
+    {
+      id: "movie:3",
+      kind: "movie",
+      ext_id: 3,
+      title: "zebra Movie",
+      media_path: "/movies/zebra.mkv",
+      has_any_subs: false,
+      missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+      audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+      last_polled: "2024-01-01T00:00:00Z",
+      active_job_id: null,
+      active_job_status: null,
+      active_job_progress: null,
+    },
+    {
+      id: "movie:1",
+      kind: "movie",
+      ext_id: 1,
+      title: "Alpha Movie",
+      media_path: "/movies/alpha.mkv",
+      has_any_subs: false,
+      missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+      audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+      last_polled: "2024-01-02T00:00:00Z",
+      active_job_id: null,
+      active_job_status: null,
+      active_job_progress: null,
+    },
+    {
+      id: "movie:2",
+      kind: "movie",
+      ext_id: 2,
+      title: "mango Movie",
+      media_path: "/movies/mango.mkv",
+      has_any_subs: false,
+      missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+      audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+      last_polled: "2024-01-03T00:00:00Z",
+      active_job_id: null,
+      active_job_status: null,
+      active_job_progress: null,
+    },
+  ]
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    vi.mocked(api.get).mockResolvedValue({
+      items: MOCK_TITLE_ITEMS,
+      total: MOCK_TITLE_ITEMS.length,
+      last_refreshed_at: null,
+    })
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_SUCCESS)
+  })
+
+  it("sorts items alphabetically by title by default, ignoring case", async () => {
+    render(<WantedPage />, { wrapper })
+
+    const rows = await waitFor(() => {
+      const all = within(screen.getByRole("table")).getAllByRole("row")
+      // First row is the header; the rest are item rows.
+      const dataRows = all.slice(1)
+      expect(dataRows.length).toBe(MOCK_TITLE_ITEMS.length)
+      return dataRows
+    })
+
+    const renderedTitles = rows.map((row) =>
+      within(row).getAllByRole("cell")[0].textContent,
+    )
+    expect(renderedTitles).toEqual(["Alpha Movie", "mango Movie", "zebra Movie"])
+  })
+
+  it("filters case-insensitively via the search box", async () => {
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("Alpha Movie")).toBeInTheDocument()
+    })
+
+    await user.type(screen.getByPlaceholderText("Search…"), "MAN")
+
+    await waitFor(() => {
+      const all = within(screen.getByRole("table")).getAllByRole("row")
+      const dataRows = all.slice(1)
+      expect(dataRows.length).toBe(1)
+      expect(within(dataRows[0]).getAllByRole("cell")[0]).toHaveTextContent(
+        "mango Movie",
+      )
+    })
+  })
+})
+
   it("shows overwrite confirm dialog on subtitle_exists and retries with overwrite", async () => {
     // First attempt collides with an existing subtitle; the second (after
     // confirming) succeeds with overwrite=true.
