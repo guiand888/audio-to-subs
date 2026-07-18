@@ -60,9 +60,12 @@ RUN addgroup -g ${USER_GID} appgroup && \
     adduser -D -u ${USER_UID} -G appgroup appuser && \
     chown -R appuser:appgroup /app
 
-# Create directories for input/output
-RUN mkdir -p /input /output /tmp/parolesub && \
-    chown -R appuser:appgroup /input /output /tmp/parolesub
+# Create directories for input/output, plus placeholders for named-volume
+# mount points (/data, /movies, /tv) so a fresh empty volume mounted over
+# them inherits appuser ownership instead of the root:root default Docker/
+# Podman assign to newly created mount points.
+RUN mkdir -p /input /output /tmp/parolesub /data /movies /tv && \
+    chown -R appuser:appgroup /input /output /tmp/parolesub /data /movies /tv
 
 USER appuser
 
