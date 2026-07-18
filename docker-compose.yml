@@ -1,7 +1,7 @@
 services:
   backend:
     build:
-      context: https://github.com/guiand888/parolesub.git#v2.0.0-beta.7
+      context: https://github.com/guiand888/parolesub.git#v2.0.0-beta.8
       dockerfile: Dockerfile
     image: parolesub:backend
     container_name: parolesub-backend
@@ -81,7 +81,7 @@ services:
 
   worker:
     build:
-      context: https://github.com/guiand888/parolesub.git#v2.0.0-beta.7
+      context: https://github.com/guiand888/parolesub.git#v2.0.0-beta.8
       dockerfile: Dockerfile
     image: parolesub:worker
     container_name: parolesub-worker
@@ -127,7 +127,7 @@ services:
 
   frontend:
     build:
-      context: https://github.com/guiand888/parolesub.git#v2.0.0-beta.7:frontend
+      context: https://github.com/guiand888/parolesub.git#v2.0.0-beta.8:frontend
       dockerfile: Dockerfile
     image: parolesub:frontend
     container_name: parolesub-frontend
