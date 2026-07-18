@@ -10,11 +10,11 @@ services:
       - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
       - SESSION_SECRET_FILE=/data/session_secret
       - REDIS_URL=redis://redis:6379/0
-      - ADMIN_USERNAME=admin
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
-      - BEHIND_TLS=false
-      - DEBUG=true
-      - LOG_LEVEL=INFO
+      - BEHIND_TLS=${BEHIND_TLS:-false}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
 
     # Secrets for sensitive data
     secrets:
@@ -28,8 +28,10 @@ services:
       - audio-to-subs-tv:/tv:z
       # Temporary processing
       - audio-to-subs-tmp:/tmp/audio-to-subs:z
-    ports:
-      - "8000:8000"
+    # No ports published: only the frontend is reachable from the host, and
+    # it already reverse-proxies /api/ to this service over the compose
+    # network (frontend/nginx.conf). Put a TLS-terminating proxy (e.g. Caddy,
+    # see ./Caddyfile) in front of the frontend's published port for HTTPS.
     # Health check (defined here, not in the Dockerfile: Podman builds OCI
     # images and silently drops Dockerfile HEALTHCHECK instructions)
     healthcheck:
@@ -61,8 +63,8 @@ services:
   redis:
     image: docker.io/library/redis:8-alpine
     container_name: audio-to-subs-redis
-    ports:
-      - "6379:6379"
+    # No ports published: only backend/worker talk to redis, over the
+    # compose network (redis://redis:6379/0).
     # Persistence (optional, Redis can be stateless for our use case)
     volumes:
       - audio-to-subs-redis-data:/data:z
@@ -89,10 +91,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
       - SESSION_SECRET_FILE=/data/session_secret
-      - ADMIN_USERNAME=admin
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
       - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
-      - DEBUG=true
-      - LOG_LEVEL=INFO
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
     secrets:
       - mistral_api_key
     volumes:
@@ -129,6 +131,8 @@ services:
       dockerfile: Dockerfile
     image: audio-to-subs:frontend
     container_name: audio-to-subs-frontend
+    # Single host-exposed entry point. Put a TLS-terminating reverse proxy
+    # (e.g. Caddy, see ./Caddyfile) in front of this port for HTTPS.
     ports:
       - "8080:8080"
     depends_on:

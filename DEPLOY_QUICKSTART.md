@@ -34,6 +34,26 @@ This path can be used in place of Podman secrets. (Under Podman you can
 validate the same mechanism with `podman compose -f docker-compose.docker.yml
 up -d --build`.)
 
+## Fronting with HTTPS (Caddy)
+
+Only `frontend` publishes a host port (`8080`) — `backend` and `redis` are
+network-internal only, reached over the compose network. Put a
+TLS-terminating reverse proxy in front of `frontend`'s `8080` for HTTPS.
+
+A ready-to-use `Caddyfile` is included at the repo root (automatic Let's
+Encrypt via a public domain). It's standalone — not wired into either
+compose file — so run Caddy separately (host package/binary, or your own
+container) on the same host:
+
+```bash
+# edit Caddyfile: replace your-domain.example with your real domain
+caddy run --config ./Caddyfile
+```
+
+Once HTTPS is in front, set `BEHIND_TLS=true` in `.env` (both deployment
+paths read it) so the session cookie gets the `Secure` flag, then
+recreate the containers.
+
 ## Notes
 
 - `SESSION_SECRET` is generated automatically into the shared `/data` volume on
