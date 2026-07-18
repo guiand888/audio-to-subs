@@ -118,7 +118,7 @@ severity as unit test failures.
 
 ## Exit-code contract
 
-**CLI (`audio_to_subs/cli.py`, `python -m audio_to_subs` / `audio-to-subs`):**
+**CLI (`audio_to_subs/cli.py`, `python -m audio_to_subs` / `parolesub`):**
 
 | Exit code | Meaning |
 |---|---|

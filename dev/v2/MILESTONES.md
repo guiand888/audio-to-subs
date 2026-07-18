@@ -44,8 +44,8 @@ Tasks:
 
 Acceptance:
 - `pytest` passes unchanged (no test logic changed; only import paths).
-- `audio-to-subs --version` works.
-- `audio-to-subs -i dev/test_video.mp4 -o /tmp/out.srt` produces the same SRT as before M0.
+- `parolesub --version` works.
+- `parolesub -i dev/test_video.mp4 -o /tmp/out.srt` produces the same SRT as before M0.
 - Container builds and runs the CLI end-to-end.
 
 Out of scope: any new code under `db/`, `api/`, `worker/`, etc. Add the empty `core/__init__.py`; everything else lands in later milestones.
@@ -574,7 +574,7 @@ M6.a, M6.b, M6.c, M6.d, M6.e, and M6.f have no dependencies on each other and no
 - Backend: `tv_root_path` setting field (defaults dict, `SettingsOut`/`SettingsPatch` schemas) → `series_root_path`; `MediaType` Literal `"tv"` → `"series"` in `path_utils.py`. This is a settings-key/API-contract rename, not a DB column (settings aren't stored one-column-per-field), so no Alembic migration is needed — update the defaults dict and any place that reads the old key.
 - Update dependent tests: `test_api_settings.py`, `test_core_path_utils.py`, frontend `SettingsPage.test.tsx`, and any other fixture using the old field/value names.
 - Broader sweep beyond Series/TV: check for other duplicate terms describing the same concept across the UI (e.g. "subtitle" vs "subs", "queue" vs "job queue", inconsistent capitalization of page names, toast/error message tone). Fix what's in scope; note anything deferred for M7 to pick up during the doc rewrite.
-- Explicitly out of scope: the `docker-compose.yml` named volume (`audio-to-subs-tv`) and container mount path (`/tv`). Renaming those doesn't migrate existing users' volumes/bind-mounts and is a separate, higher-risk infra decision — leave them as-is; the container-internal path being named `/tv` is invisible to users since it's driven by the (now-renamed) `series_root_path` setting, not the other way around.
+- Explicitly out of scope: the `docker-compose.yml` named volume (`parolesub-tv`) and container mount path (`/tv`). Renaming those doesn't migrate existing users' volumes/bind-mounts and is a separate, higher-risk infra decision — leave them as-is; the container-internal path being named `/tv` is invisible to users since it's driven by the (now-renamed) `series_root_path` setting, not the other way around.
 
 **Acceptance**:
 - No remaining case-insensitive "TV" as a media-type descriptor in UI copy or API field/type names; "Series" used consistently end-to-end.
@@ -592,7 +592,7 @@ M6.a, M6.b, M6.c, M6.d, M6.e, and M6.f have no dependencies on each other and no
 **`AppLayout.tsx` `Tv` icon — kept deliberately**: the lucide `Tv` icon is still imported and used as the `/wanted` nav-item icon (`AppLayout.tsx:15,26`). It's an icon identifier, not user-visible copy, and the Wanted page is the wanted-subtitles queue rather than a series listing — so swapping it for e.g. `MonitorPlay` would be a pure cosmetic call outside this audit's "TV as a media-type descriptor" charter. Noted here so M7 (doc rewrite) can revisit if desired; the commit message's "all frontend copy" should be read as "all user-visible TV copy", not icon identifiers.
 
 **Broader terminology sweep findings**:
-- *"subs" vs "subtitle"*: the project/product name itself is `audio-to-subs` (repo dir, docker image, container, named volume `audio-to-subs-tv`, python package `audio_to_subs`), while internal code uses the full form (`subtitle_generator.py`, `SubtitleGenerator`, `generate_srt`/`vtt`/`sbv`, `missing_subtitles`). **Deferred to M7** — unifying these would mean renaming the product itself, which is a brand decision far beyond a semantic-audit sub-track and outside this audit's "media-type descriptor" scope. UI copy already uses "subtitle" consistently (SettingsPage help text, toasts, dialog copy), so there's no user-visible inconsistency today, only a code/product-naming one.
+- *"subs" vs "subtitle"*: the project/product name itself is `parolesub` (repo dir, docker image, container, named volume `parolesub-tv`, python package `audio_to_subs`), while internal code uses the full form (`subtitle_generator.py`, `SubtitleGenerator`, `generate_srt`/`vtt`/`sbv`, `missing_subtitles`). **Deferred to M7** — unifying these would mean renaming the product itself, which is a brand decision far beyond a semantic-audit sub-track and outside this audit's "media-type descriptor" scope. UI copy already uses "subtitle" consistently (SettingsPage help text, toasts, dialog copy), so there's no user-visible inconsistency today, only a code/product-naming one.
 - *"queue" vs "job queue"*: no inconsistency found — the `/queue` nav item and `QueuePage` are the only user-facing uses of the word; the backend uses "job" for the entity and "queue" for the data structure, which is conventional and not a duplicate-term problem.
 - *Page-name capitalization*: consistent — Wanted, Queue, History, Logs, Settings are all Title Case in both nav (`AppLayout.tsx`) and page headings.
 - *Toast/error tone*: spot-checked SettingsPage, WantedPage, and the auth toasts — tone is consistent (factual, no mixed "Error!" / "Oops" / "Sorry" registers).

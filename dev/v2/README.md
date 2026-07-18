@@ -1,6 +1,6 @@
-# audio-to-subs v2 — Architecture & Implementation Docs
+# parolesub v2 — Architecture & Implementation Docs
 
-This folder contains the design and implementation plan for **v2** of `audio-to-subs`: a self-hosted web application built on top of the existing transcription pipeline.
+This folder contains the design and implementation plan for **v2** of `parolesub`: a self-hosted web application built on top of the existing transcription pipeline.
 
 It is meant to be read by a developer (or AI agent) about to implement the v2 architecture from scratch. Documents are intentionally concrete: filenames, dependencies pinned to versions, SQL statements, and acceptance criteria are spelled out.
 
@@ -8,7 +8,7 @@ It is meant to be read by a developer (or AI agent) about to implement the v2 ar
 
 | | v1 (today) | v2 |
 |---|---|---|
-| Surface | CLI only (`audio-to-subs -i video.mp4 -o out.srt`) | Web app + CLI (CLI unchanged) |
+| Surface | CLI only (`parolesub -i video.mp4 -o out.srt`) | Web app + CLI (CLI unchanged) |
 | Source of jobs | User-supplied paths | Bazarr "wanted" list, or manual paths |
 | Concurrency | None (synchronous) | Job queue, separate worker container(s) |
 | State | Filesystem only | SQLite (jobs, history, logs, settings, Bazarr cache) |

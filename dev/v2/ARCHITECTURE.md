@@ -2,7 +2,7 @@
 
 ## Purpose
 
-Promote `audio-to-subs` from a one-shot CLI to a self-hosted web application that polls Bazarr, queues transcription jobs, runs them in dedicated workers, and surfaces history, logs, and settings through a shadcn/ui frontend — without breaking the existing CLI.
+Promote `parolesub` from a one-shot CLI to a self-hosted web application that polls Bazarr, queues transcription jobs, runs them in dedicated workers, and surfaces history, logs, and settings through a shadcn/ui frontend — without breaking the existing CLI.
 
 ## Service topology
 
@@ -39,7 +39,7 @@ Four containers in `docker-compose.yml`: **backend**, **worker** (≥1 replica),
 ## Repo layout (post-M0)
 
 ```
-audio-to-subs/
+parolesub/
   pyproject.toml
   requirements.txt              # runtime, includes web stack
   requirements-dev.txt
@@ -134,7 +134,7 @@ audio-to-subs/
 ### Why a real `audio_to_subs/` package instead of keeping `src/`
 
 - Imports like `from src.foo import …` leak build-tree naming into runtime; renaming makes the worker/api code cleaner and supports `python -m audio_to_subs.worker`.
-- The console script entry point becomes natural: `audio-to-subs = "audio_to_subs.cli:main"`.
+- The console script entry point becomes natural: `parolesub = "audio_to_subs.cli:main"`.
 - The rename is mechanical (one `git mv` + one `sed`) and is covered by M0's acceptance gate: the existing test suite must pass unchanged. See [`MIGRATION.md`](MIGRATION.md).
 
 ## Data flow — happy path for a Bazarr-sourced job

@@ -40,7 +40,7 @@ def get_async_engine(dsn: str) -> AsyncEngine:
     connecting to different DB than the main app).
 
     Args:
-        dsn: Database URL, e.g., 'sqlite+aiosqlite:////data/audio-to-subs.db'
+        dsn: Database URL, e.g., 'sqlite+aiosqlite:////data/parolesub.db'
 
     Returns:
         SQLAlchemy async engine with WAL pragmas configured
@@ -88,7 +88,7 @@ def get_sync_engine(dsn: str) -> Engine:
     """Create and return sync SQLAlchemy engine with WAL pragmas.
 
     Args:
-        dsn: Database URL, e.g., 'sqlite:////data/audio-to-subs.db'
+        dsn: Database URL, e.g., 'sqlite:////data/parolesub.db'
 
     Returns:
         SQLAlchemy sync engine with WAL pragmas configured

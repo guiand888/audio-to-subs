@@ -1,8 +1,8 @@
-# audio-to-subs Architecture
+# parolesub Architecture
 
 ## Overview
 
-**audio-to-subs** is a Python-based CLI tool that automates the conversion of video audio to subtitle files using AI-powered transcription.
+**parolesub** is a Python-based CLI tool that automates the conversion of video audio to subtitle files using AI-powered transcription.
 
 ### Pipeline Flow
 
@@ -166,22 +166,22 @@ Second subtitle text
 **Example Usage**:
 ```bash
 # Single file
-audio-to-subs -i video.mp4
+parolesub -i video.mp4
 
 # With custom output directory
-audio-to-subs -i video.mp4 -o ./subtitles/
+parolesub -i video.mp4 -o ./subtitles/
 
 # Batch processing
-audio-to-subs -i video1.mp4 video2.mp4 video3.mp4
+parolesub -i video1.mp4 video2.mp4 video3.mp4
 
 # With language code for filename
-audio-to-subs -i video.mp4 -l en
+parolesub -i video.mp4 -l en
 ```
 
 ## Project Structure
 
 ```
-audio-to-subs/
+parolesub/
 ├── src/
 │   ├── __init__.py
 │   ├── __main__.py                  # Entry point
@@ -360,7 +360,7 @@ Feature: Video to Subtitle Conversion
 ### Docker Compose / Podman Compose
 
 **Services**:
-- `audio-to-subs`: Main application container
+- `parolesub`: Main application container
 
 **Volumes**:
 - Input videos (bind mount or volume)
@@ -374,7 +374,7 @@ Feature: Video to Subtitle Conversion
 
 ```bash
 # Build image with Podman
-podman build -t audio-to-subs:latest .
+podman build -t parolesub:latest .
 
 # Run with Podman (preserves your UID/GID for output files)
 podman run --rm \
@@ -382,7 +382,7 @@ podman run --rm \
   --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
   -v ./videos:/input:ro,Z \
   -v ./subtitles:/output:Z \
-  audio-to-subs:latest -i /input/video.mp4 -o /output
+  parolesub:latest -i /input/video.mp4 -o /output
 
 # Or with Podman Compose
 podman-compose up

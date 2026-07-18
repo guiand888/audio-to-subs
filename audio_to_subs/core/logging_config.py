@@ -1,4 +1,4 @@
-"""Logging configuration for audio-to-subs.
+"""Logging configuration for parolesub.
 
 Provides structured logging setup with configurable verbosity levels and a
 redaction filter that scrubs secret values (API keys, session secret, admin
@@ -100,7 +100,7 @@ class SecretsRedactingFilter(logging.Filter):
 
 
 def configure_logging(verbose: bool = False) -> None:
-    """Configure Python logging for audio-to-subs.
+    """Configure Python logging for parolesub.
 
     Args:
         verbose: Enable DEBUG level logging for detailed output.

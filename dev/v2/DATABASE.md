@@ -2,7 +2,7 @@
 
 ## Engine & file location
 
-- **SQLite**, single file at `/data/audio-to-subs.db` inside the container, on a named volume shared between backend and worker.
+- **SQLite**, single file at `/data/parolesub.db` inside the container, on a named volume shared between backend and worker.
 - **WAL mode** mandatory. The engine factory in `audio_to_subs/db/base.py` runs these pragmas on every new connection:
   ```sql
   PRAGMA journal_mode = WAL;
@@ -10,7 +10,7 @@
   PRAGMA busy_timeout = 5000;       -- 5s
   PRAGMA foreign_keys = ON;
   ```
-- DSN: `sqlite+aiosqlite:////data/audio-to-subs.db` for the API; `sqlite:////data/audio-to-subs.db` for the worker.
+- DSN: `sqlite+aiosqlite:////data/parolesub.db` for the API; `sqlite:////data/parolesub.db` for the worker.
 - SQLAlchemy 2.x ORM. Pydantic v2 schemas live next to API routes, not on the ORM models.
 - Postgres upgrade path: only `DATABASE_URL` changes (and `alembic upgrade head` against the new DB). No SQLite-only SQL in the codebase (we use `RETURNING`, which Postgres also supports).
 

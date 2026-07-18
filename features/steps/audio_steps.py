@@ -158,11 +158,11 @@ def output_directory_not_exists(context, tmp_path, dirname):
     # Don't create it - test should create it
 
 
-@when(parsers.parse('I run audio-to-subs with "{filename}"'))
+@when(parsers.parse('I run parolesub with "{filename}"'))
 def run_video_to_subtitles_pipeline_single(
     context, tmp_path, filename, mock_mistral_api
 ):
-    """Run audio-to-subs with a single video file.
+    """Run parolesub with a single video file.
 
     Exercises the real pipeline end-to-end by:
     1. Mocking only the Mistral API HTTP endpoint (via respx)
@@ -240,11 +240,11 @@ def run_video_to_subtitles_pipeline_single(
         logger.error(f"Exception: {type(e).__name__}: {e}", exc_info=True)
 
 
-@when(parsers.parse('I run audio-to-subs with "{filename}" without FFmpeg'))
+@when(parsers.parse('I run parolesub with "{filename}" without FFmpeg'))
 def run_video_to_subtitles_pipeline_no_ffmpeg(
     context, tmp_path, filename, mock_mistral_api
 ):
-    """Run audio-to-subs when FFmpeg is unavailable.
+    """Run parolesub when FFmpeg is unavailable.
 
     Patches extract_audio to raise FFmpegNotFoundError so the pipeline
     surfaces an FFmpegNotFoundError. Exit code 2 marks a missing-tool
@@ -267,11 +267,11 @@ def run_video_to_subtitles_pipeline_no_ffmpeg(
         context.exit_code = 2
 
 
-@when(parsers.parse('I run audio-to-subs with multiple files "{file_list}"'))
+@when(parsers.parse('I run parolesub with multiple files "{file_list}"'))
 def run_video_to_subtitles_pipeline_batch(
     context, tmp_path, file_list, mock_mistral_api
 ):
-    """Run audio-to-subs with multiple videos.
+    """Run parolesub with multiple videos.
 
     Exercises real pipeline batch processing with Mistral API mocked at HTTP level.
     """
@@ -323,13 +323,13 @@ def run_video_to_subtitles_pipeline_batch(
 
 @when(
     parsers.parse(
-        'I run audio-to-subs with "{filename}" and output directory "{dirname}"'
+        'I run parolesub with "{filename}" and output directory "{dirname}"'
     )
 )
 def run_video_to_subtitles_pipeline_custom_output(
     context, tmp_path, filename, dirname, mock_mistral_api
 ):
-    """Run audio-to-subs with custom output directory.
+    """Run parolesub with custom output directory.
 
     Exercises real pipeline with custom output directory, mocking only Mistral API.
     """
@@ -379,11 +379,11 @@ def run_video_to_subtitles_pipeline_custom_output(
         context.exit_code = 1
 
 
-@when(parsers.parse('I run audio-to-subs with "{filename}" and language "{language}"'))
+@when(parsers.parse('I run parolesub with "{filename}" and language "{language}"'))
 def run_video_to_subtitles_pipeline_language(
     context, tmp_path, filename, language, mock_mistral_api
 ):
-    """Run audio-to-subs with language hint.
+    """Run parolesub with language hint.
 
     Exercises real pipeline with language parameter, mocking only Mistral API.
     """

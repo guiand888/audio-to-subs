@@ -1,4 +1,4 @@
-"""Command-line interface for audio-to-subs.
+"""Command-line interface for parolesub.
 
 Provides CLI tools for converting video audio to subtitles using Mistral AI transcription.
 Supports single video processing and batch processing via configuration files.
@@ -209,7 +209,7 @@ def _process_single_video(
     "--config",
     "config_path",
     type=click.Path(exists=True),
-    help="Configuration file for batch processing (.audio-to-subs.yaml)",
+    help="Configuration file for batch processing (.parolesub.yaml)",
 )
 @click.option(
     "--api-key",
@@ -260,21 +260,21 @@ def main(
 
     \b
     Single video usage:
-      audio-to-subs -i video.mp4 -o output.srt --api-key YOUR_KEY
-      audio-to-subs -i video.mp4 -o output.vtt --format vtt
+      parolesub -i video.mp4 -o output.srt --api-key YOUR_KEY
+      parolesub -i video.mp4 -o output.vtt --format vtt
 
     Batch processing:
-      audio-to-subs --config .audio-to-subs.yaml
+      parolesub --config .parolesub.yaml
 
     Or set MISTRAL_API_KEY environment variable:
       export MISTRAL_API_KEY=your_key
-      audio-to-subs -i video.mp4 -o output.srt
+      parolesub -i video.mp4 -o output.srt
     """
     # Configure logging early
     configure_logging(verbose=verbose)
 
     if version:
-        click.echo(f"audio-to-subs v{__version__}")
+        click.echo(f"parolesub v{__version__}")
         return
 
     logger.debug(f"CLI invoked with verbose={verbose}, progress={progress}")
@@ -310,7 +310,7 @@ def _process_batch(
     """Process multiple videos from configuration file.
 
     Args:
-        config_path: Path to .audio-to-subs.yaml configuration file
+        config_path: Path to .parolesub.yaml configuration file
         api_key: Mistral AI API key
         model: Transcription model to use
         progress: Show detailed progress messages

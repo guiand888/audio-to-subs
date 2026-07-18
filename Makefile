@@ -1,7 +1,7 @@
 .PHONY: help build test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell
 
 # Variables
-IMAGE_NAME := audio-to-subs
+IMAGE_NAME := parolesub
 IMAGE_TAG := latest
 PROD_IMAGE := $(IMAGE_NAME):$(IMAGE_TAG)
 

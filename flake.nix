@@ -1,5 +1,5 @@
 {
-  description = "audio-to-subs dev environment: `nix develop` drives local dev (backend + frontend) and CI alike";
+  description = "parolesub dev environment: `nix develop` drives local dev (backend + frontend) and CI alike";
 
   inputs = {
     nixpkgs.url = "github:NixOS/nixpkgs/nixos-unstable";
@@ -72,7 +72,7 @@
           # Full environment: backend + frontend + service deps. Used for
           # local dev and by CI's backend test job.
           default = pkgs.mkShell {
-            name = "audio-to-subs-dev";
+            name = "parolesub-dev";
 
             packages = commonPkgs ++ pythonNativePkgs ++ nodePkgs ++ (with pkgs; [
               # Media processing (used at runtime by ffmpeg-python)
@@ -94,7 +94,7 @@
 
             shellHook = pythonVenvShellHook + ''
               echo ""
-              echo "audio-to-subs dev shell ready:"
+              echo "parolesub dev shell ready:"
               echo "  python  $(python --version 2>&1)   ($(command -v python))"
               echo "  node    $(node --version)   ($(command -v node))"
               echo "  ffmpeg  $(ffmpeg -version | head -n1 | cut -d' ' -f1-3)"
@@ -111,7 +111,7 @@
           # job) so it isn't paying for a Python venv bootstrap it never
           # touches.
           frontend = pkgs.mkShell {
-            name = "audio-to-subs-frontend";
+            name = "parolesub-frontend";
             packages = commonPkgs ++ nodePkgs;
           };
         };

@@ -1,6 +1,6 @@
 # Quality Checks
 
-This document describes code quality standards and tools for the audio-to-subs project.
+This document describes code quality standards and tools for the parolesub project.
 
 ## Quick Start
 
@@ -65,7 +65,7 @@ Code formatter ensuring consistent style.
 
 ```bash
 # In container
-podman run --rm -v ./:/app:Z audio-to-subs:dev black src/ tests/
+podman run --rm -v ./:/app:Z parolesub:dev black src/ tests/
 
 # Or
 make format
@@ -81,10 +81,10 @@ Fast Python linter and code analyzer.
 
 ```bash
 # Check
-podman run --rm -v ./:/app:Z audio-to-subs:dev ruff check src/ tests/
+podman run --rm -v ./:/app:Z parolesub:dev ruff check src/ tests/
 
 # Fix
-podman run --rm -v ./:/app:Z audio-to-subs:dev ruff check --fix src/ tests/
+podman run --rm -v ./:/app:Z parolesub:dev ruff check --fix src/ tests/
 ```
 
 **Configuration**: `pyproject.toml`
@@ -96,7 +96,7 @@ podman run --rm -v ./:/app:Z audio-to-subs:dev ruff check --fix src/ tests/
 Static type checker for Python.
 
 ```bash
-podman run --rm -v ./:/app:Z audio-to-subs:dev mypy src/
+podman run --rm -v ./:/app:Z parolesub:dev mypy src/
 ```
 
 **Configuration**: `pyproject.toml`
@@ -110,13 +110,13 @@ Unit and integration testing framework.
 
 ```bash
 # Run all tests
-podman run --rm -v ./:/app:Z audio-to-subs:dev pytest
+podman run --rm -v ./:/app:Z parolesub:dev pytest
 
 # Run with coverage
-podman run --rm -v ./:/app:Z audio-to-subs:dev pytest --cov
+podman run --rm -v ./:/app:Z parolesub:dev pytest --cov
 
 # Watch mode
-podman run --rm -it -v ./:/app:Z audio-to-subs:dev pytest -f
+podman run --rm -it -v ./:/app:Z parolesub:dev pytest -f
 ```
 
 **Configuration**: `pyproject.toml`
@@ -132,7 +132,7 @@ Automated quality checks run before each commit.
 
 ```bash
 # In container
-podman run --rm -it -v ./:/app:Z audio-to-subs:dev pre-commit install
+podman run --rm -it -v ./:/app:Z parolesub:dev pre-commit install
 
 # Or outside container (requires local git)
 pre-commit install
@@ -216,7 +216,7 @@ def function(arg: str) -> str:
 Let ruff fix imports automatically:
 
 ```bash
-podman run --rm -v ./:/app:Z audio-to-subs:dev ruff check --fix src/
+podman run --rm -v ./:/app:Z parolesub:dev ruff check --fix src/
 ```
 
 ### Formatting conflicts

@@ -169,7 +169,7 @@ class TestCLI:
 
         # Assert
         assert result.exit_code == 0
-        assert "audio-to-subs" in result.output.lower() or "0." in result.output
+        assert "parolesub" in result.output.lower() or "0." in result.output
 
     @patch("audio_to_subs.cli.Pipeline")
     def test_process_video_progress_flag(self, mock_pipeline_class, tmp_path):

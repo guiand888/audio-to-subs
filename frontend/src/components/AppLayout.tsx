@@ -109,7 +109,7 @@ export function AppLayout() {
       <aside className="w-[200px] flex-none flex flex-col border-r bg-background">
         {/* Brand */}
         <div className="flex h-16 items-center px-4 font-semibold text-sm tracking-tight">
-          audio-to-subs
+          Parolesub
         </div>
         <Separator />
 

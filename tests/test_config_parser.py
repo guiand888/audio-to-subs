@@ -1,6 +1,6 @@
 """Tests for configuration file parser.
 
-Tests ConfigParser for reading and validating .audio-to-subs.yaml files.
+Tests ConfigParser for reading and validating .parolesub.yaml files.
 """
 
 import tempfile
