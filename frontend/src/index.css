@@ -23,6 +23,7 @@
   --color-log-debug: hsl(var(--log-debug));
   --color-log-info: hsl(var(--log-info));
   --color-log-warning: hsl(var(--log-warning));
+  --color-log-warning-foreground: hsl(var(--log-warning-foreground));
   --color-log-error: hsl(var(--log-error));
   --color-border: hsl(var(--border));
   --color-input: hsl(var(--input));
@@ -47,57 +48,63 @@
 
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 0 0% 3.9%;
-    --card: 0 0% 100%;
-    --card-foreground: 0 0% 3.9%;
-    --popover: 0 0% 100%;
-    --popover-foreground: 0 0% 3.9%;
-    --primary: 0 0% 9%;
-    --primary-foreground: 0 0% 98%;
-    --secondary: 0 0% 96.1%;
-    --secondary-foreground: 0 0% 9%;
-    --muted: 0 0% 96.1%;
-    --muted-foreground: 0 0% 45.1%;
-    --accent: 0 0% 96.1%;
-    --accent-foreground: 0 0% 9%;
-    --destructive: 0 84.2% 60.2%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 89.8%;
-    --input: 0 0% 89.8%;
-    --ring: 0 0% 3.9%;
+    /* Ayu Tint — navy brand (#4b6195) over a cool-tinted neutral scale.
+       Never 0% saturation: everything carries a slight navy cast, in
+       both light and dark, to avoid stark black/white extremes. */
+    --background: 218 28% 94%;
+    --foreground: 222 22% 20%;
+    --card: 210 35% 99%;
+    --card-foreground: 222 22% 20%;
+    --popover: 210 35% 99%;
+    --popover-foreground: 222 22% 20%;
+    --primary: 222 35% 44%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 220 22% 89%;
+    --secondary-foreground: 222 20% 24%;
+    --muted: 220 20% 90%;
+    --muted-foreground: 220 12% 42%;
+    --accent: 222 45% 93%;
+    --accent-foreground: 222 40% 26%;
+    --destructive: 4 62% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 18% 82%;
+    --input: 220 18% 82%;
+    --ring: 222 35% 44%;
     --radius: 0.5rem;
 
-    --log-debug: 0 0% 45.1%;
-    --log-info: 217 91% 60%;
-    --log-warning: 38 92% 50%;
-    --log-error: 0 84.2% 60.2%;
+    --log-debug: 220 10% 48%;
+    --log-info: 222 40% 55%;
+    --log-warning: 36 82% 46%;
+    --log-warning-foreground: 36 45% 14%;
+    --log-error: 4 62% 51%;
   }
 
   .dark {
-    --background: 0 0% 3.9%;
-    --foreground: 0 0% 98%;
-    --card: 0 0% 3.9%;
-    --card-foreground: 0 0% 98%;
-    --popover: 0 0% 3.9%;
-    --popover-foreground: 0 0% 98%;
-    --primary: 0 0% 98%;
-    --primary-foreground: 0 0% 9%;
-    --secondary: 0 0% 14.9%;
-    --secondary-foreground: 0 0% 98%;
-    --muted: 0 0% 14.9%;
-    --muted-foreground: 0 0% 63.9%;
-    --accent: 0 0% 14.9%;
-    --accent-foreground: 0 0% 98%;
-    --destructive: 0 62.8% 30.6%;
-    --destructive-foreground: 0 0% 98%;
-    --border: 0 0% 14.9%;
-    --input: 0 0% 14.9%;
-    --ring: 0 0% 83.1%;
-    --log-debug: 0 0% 63.9%;
-    --log-info: 217 91% 60%;
-    --log-warning: 38 92% 50%;
-    --log-error: 0 72% 51%;
+    --background: 222 26% 11%;
+    --foreground: 220 22% 89%;
+    --card: 222 24% 15%;
+    --card-foreground: 220 22% 89%;
+    --popover: 222 24% 15%;
+    --popover-foreground: 220 22% 89%;
+    --primary: 222 48% 65%;
+    --primary-foreground: 222 35% 11%;
+    --secondary: 222 20% 19%;
+    --secondary-foreground: 220 20% 88%;
+    --muted: 222 18% 18%;
+    --muted-foreground: 220 12% 62%;
+    --accent: 222 40% 24%;
+    --accent-foreground: 220 30% 92%;
+    --destructive: 4 58% 54%;
+    --destructive-foreground: 220 20% 95%;
+    --border: 222 18% 21%;
+    --input: 222 18% 21%;
+    --ring: 222 48% 65%;
+
+    --log-debug: 220 10% 58%;
+    --log-info: 222 48% 65%;
+    --log-warning: 36 78% 56%;
+    --log-warning-foreground: 36 40% 12%;
+    --log-error: 4 62% 58%;
   }
 }
 
