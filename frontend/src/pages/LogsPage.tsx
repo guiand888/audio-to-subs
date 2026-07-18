@@ -99,7 +99,7 @@ function LogsFiltersForm({ filters, onChange }: LogsFiltersProps) {
               <SelectItem value="_all">All levels</SelectItem>
               {LEVEL_OPTIONS.map((opt) => (
                 <SelectItem key={opt.value} value={opt.value}>
-                  <span className={opt.color}>{opt.label}</span>
+                  {opt.label}
                 </SelectItem>
               ))}
             </SelectContent>
