@@ -19,7 +19,7 @@ DEFAULT_SESSION_TTL = 30 * 24 * 3600
 # Sliding renewal threshold: 1 hour in seconds
 SLIDING_RENEWAL_THRESHOLD = 3600
 # Default session cookie name
-SESSION_COOKIE_NAME = "ats_session"
+SESSION_COOKIE_NAME = "parolesub_session"
 # Default session secret file path
 DEFAULT_SESSION_SECRET_FILE = "/data/session_secret"
 # Placeholder secret to refuse

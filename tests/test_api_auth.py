@@ -69,7 +69,7 @@ class TestLogin:
         data = response.json()
         assert "user" in data
         assert data["user"]["username"] == "admin"
-        assert "ats_session" in response.cookies
+        assert "parolesub_session" in response.cookies
 
     def test_login_invalid_credentials(self, api_client):
         """Login with wrong password returns 401."""
@@ -136,11 +136,11 @@ class TestMe:
             json={"username": "admin", "password": "test-secure-password-12345"},
         )
 
-        session_cookie = login_response.cookies.get("ats_session")
+        session_cookie = login_response.cookies.get("parolesub_session")
 
         response = api_client.get(
             "/api/auth/me",
-            cookies={"ats_session": session_cookie},
+            cookies={"parolesub_session": session_cookie},
         )
 
         assert response.status_code == 200
@@ -157,12 +157,12 @@ class TestLogout:
             json={"username": "admin", "password": "test-secure-password-12345"},
         )
 
-        session_cookie = login_response.cookies.get("ats_session")
+        session_cookie = login_response.cookies.get("parolesub_session")
 
         response = api_client.post(
             "/api/auth/logout",
-            cookies={"ats_session": session_cookie},
+            cookies={"parolesub_session": session_cookie},
         )
 
         assert response.status_code == 204
-        assert response.cookies.get("ats_session") in (None, "")
+        assert response.cookies.get("parolesub_session") in (None, "")

@@ -26,7 +26,7 @@ def verify_password(plain: str, hashed: str) -> bool:
 ## Sessions
 
 - **`itsdangerous.URLSafeTimedSerializer(SESSION_SECRET)`** signing `{"user_id": int, "iat": int}` into a single cookie.
-- Cookie name: `ats_session`.
+- Cookie name: `parolesub_session`.
 - Cookie flags: `HttpOnly`, `SameSite=Lax`, `Path=/`, `Secure` when `BEHIND_TLS=true` (env-controlled — the homelab default is `false`).
 - TTL: 30 days with sliding renewal: on every authenticated request, if the cookie is older than 1 hour, re-sign with the same `user_id` and a fresh `iat`.
 - `SESSION_SECRET` from env (or `SESSION_SECRET_FILE` → secret file). On first boot, if no secret is set, generate one and write it to `/data/session_secret` (chmod 600). Refuse to start with a default placeholder.
@@ -50,7 +50,7 @@ async def get_current_user(
     db: AsyncSession = Depends(get_db),
     serializer: URLSafeTimedSerializer = Depends(get_serializer),
 ) -> User:
-    token = request.cookies.get("ats_session")
+    token = request.cookies.get("parolesub_session")
     if not token:
         raise HTTPException(status.HTTP_401_UNAUTHORIZED)
     try:
@@ -116,7 +116,7 @@ async def login(req: LoginRequest, response: Response, db: AsyncSession = Depend
 
 ## Logout
 
-`POST /api/auth/logout`: clears the cookie with `Set-Cookie: ats_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`. Returns 204.
+`POST /api/auth/logout`: clears the cookie with `Set-Cookie: parolesub_session=; Max-Age=0; Path=/; HttpOnly; SameSite=Lax`. Returns 204.
 
 ## Rate limiting
 

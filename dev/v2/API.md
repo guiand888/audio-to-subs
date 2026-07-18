@@ -2,7 +2,7 @@
 
 All routes are prefixed with `/api`. The frontend is served by Nginx at `/`, and Nginx proxies `/api` to the backend container on port 8000.
 
-Auth is via session cookie (`ats_session`, `HttpOnly`, `SameSite=Lax`, `Secure` behind TLS). See [`AUTH.md`](AUTH.md). Unless the table below says "no", a valid session is required.
+Auth is via session cookie (`parolesub_session`, `HttpOnly`, `SameSite=Lax`, `Secure` behind TLS). See [`AUTH.md`](AUTH.md). Unless the table below says "no", a valid session is required.
 
 Pydantic v2 schemas back every request/response. Field validation errors surface as FastAPI's default 422.
 
@@ -226,7 +226,7 @@ Standard FastAPI: 400 (validation), 401 (no/expired session), 403 (no permission
 {"detail": "<message>"}
 ```
 
-Auth failures clear the cookie via `Set-Cookie: ats_session=; Max-Age=0`.
+Auth failures clear the cookie via `Set-Cookie: parolesub_session=; Max-Age=0`.
 
 ## Healthz
 

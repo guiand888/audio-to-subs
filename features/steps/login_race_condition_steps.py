@@ -189,7 +189,7 @@ def login(context, api_client, username, password):
         "/api/auth/login",
         json={"username": username, "password": password},
     )
-    context.session_cookie = context.response.cookies.get("ats_session")
+    context.session_cookie = context.response.cookies.get("parolesub_session")
 
 
 # ---------------------------------------------------------------------------
@@ -211,7 +211,7 @@ def logged_in(context, api_client):
         json={"username": "admin", "password": "test-secure-password-12345"},
     )
     assert response.status_code == 200, f"Login failed: {response.text}"
-    context.session_cookie = response.cookies.get("ats_session")
+    context.session_cookie = response.cookies.get("parolesub_session")
     assert context.session_cookie is not None
 
 
@@ -220,7 +220,7 @@ def request_jobs_authenticated(context, api_client):
     """GET /api/jobs with the session cookie."""
     context.response = api_client.get(
         "/api/jobs",
-        cookies={"ats_session": context.session_cookie},
+        cookies={"parolesub_session": context.session_cookie},
     )
 
 
@@ -245,14 +245,14 @@ def request_jobs_with_stale_cookie(context, api_client):
     """GET /api/jobs with a cookie signed by the old secret."""
     context.response = api_client.get(
         "/api/jobs",
-        cookies={"ats_session": context.session_cookie},
+        cookies={"parolesub_session": context.session_cookie},
     )
 
 
 @then("the session cookie should be cleared")
 def session_cookie_cleared(context):
     """The response should delete/invalidate the session cookie."""
-    cookie = context.response.cookies.get("ats_session")
+    cookie = context.response.cookies.get("parolesub_session")
     assert cookie in (None, "")
 
 
