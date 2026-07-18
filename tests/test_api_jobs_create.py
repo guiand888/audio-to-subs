@@ -4,9 +4,11 @@ Covers the auto-mode language_code override and the output-path ordering
 fix (the default-language setting must be applied before the output path
 is generated, not after).
 
-media_path is a plain string under /movies (the app's default
-MOVIES_ROOT_PATH) rather than a real file - path validation and output-path
-generation are pure string operations that don't require the file to exist.
+media_path is a plain string under /movies rather than a real file - path
+validation and output-path generation are pure string operations that don't
+require the file to exist. validate_media_path only enforces structural
+safety (absolute, no traversal, no control chars); there is no longer a
+fixed root directory, so arbitrary absolute paths are accepted.
 """
 
 import json
@@ -94,16 +96,21 @@ def test_create_job_rejects_manual_path_traversal(authenticated_client):
     assert "traversal" in response.text.lower()
 
 
-def test_create_job_rejects_manual_path_outside_roots(authenticated_client):
-    """Manual media_path outside configured roots must be rejected (M6.a)."""
+def test_create_job_accepts_manual_path_outside_old_roots(authenticated_client):
+    """A manual media_path anywhere on disk is accepted - there is no longer a
+    fixed movies/series root. Only structural safety (absolute, no traversal,
+    no control chars) is enforced."""
     response = authenticated_client.post(
         "/api/jobs",
         json={
             "source": "manual",
-            "media_path": "/etc/passwd",
+            "media_path": "/data/media/arbitrary/location/movie.mkv",
         },
     )
-    assert response.status_code == 400, response.text
+    assert response.status_code == 201, response.text
+    assert response.json()["output_path"] == (
+        "/data/media/arbitrary/location/movie.srt"
+    )
 
 
 def test_create_job_rejects_traversal_output_path(authenticated_client):
@@ -222,13 +229,13 @@ def test_create_job_bazarr_source_empty_media_path_clear_error(
 
 
 def test_create_job_manual_traversal_rejected(authenticated_client):
-    """M6.c: a manual source whose media_path escapes configured roots must be
-    rejected (path traversal protection)."""
+    """M6.c: a manual source whose media_path contains '..' must be rejected
+    (path traversal protection)."""
     response = authenticated_client.post(
         "/api/jobs",
         json={
             "source": "manual",
-            "media_path": "/etc/passwd",
+            "media_path": "/data/../etc/passwd",
         },
     )
     assert response.status_code == 400, response.text
@@ -265,42 +272,17 @@ def test_create_job_manual_relative_path_rejected(authenticated_client):
 
 
 def test_create_job_manual_output_traversal_rejected(authenticated_client):
-    """M6.c: a provided output_path that escapes the roots must be rejected."""
+    """M6.c: a provided output_path that contains traversal must be rejected."""
     response = authenticated_client.post(
         "/api/jobs",
         json={
             "source": "manual",
             "media_path": MEDIA_PATH,
-            "output_path": "/etc/out.srt",
+            "output_path": "/movies/../etc/out.srt",
         },
     )
     assert response.status_code == 400, response.text
     assert "Invalid output path" in response.json()["detail"]
-
-
-@pytest.fixture
-def no_media_roots(monkeypatch):
-    """Unset media roots before the app is built by ``authenticated_client``.
-
-    With no roots configured, ``validate_media_path`` would otherwise allow
-    any path; the always-on traversal check must still reject ``..``.
-    """
-    monkeypatch.setenv("MOVIES_ROOT_PATH", "")
-    monkeypatch.setenv("SERIES_ROOT_PATH", "")
-    yield
-
-
-def test_manual_job_rejects_traversal_without_configured_roots(
-    no_media_roots, authenticated_client
-):
-    """M6 security: a manual job whose media_path contains '..' must be
-    rejected even when no media roots are configured."""
-    response = authenticated_client.post(
-        "/api/jobs",
-        json={"source": "manual", "media_path": "/movies/../../etc/passwd"},
-    )
-    assert response.status_code == 400, response.text
-    assert "traversal" in response.text.lower()
 
 
 def test_manual_job_rejects_traversal_with_configured_roots(authenticated_client):

@@ -56,8 +56,6 @@ const MOCK_SETTINGS = {
   path_mappings: [],
   default_language: "en",
   default_output_format: "srt",
-  movies_root_path: "/movies",
-  series_root_path: "/tv",
   subtitles_same_directory: true,
   max_audio_length: 900,
   timezone: "UTC",
@@ -277,9 +275,11 @@ describe("SettingsPage - Save Settings change tracking", () => {
     const user = userEvent.setup()
     render(<SettingsPage />, { wrapper })
 
-    const input = await screen.findByLabelText(/Movies Root Path/i)
-    await user.clear(input)
-    await user.type(input, "/media/movies")
+    // The "Media Paths" root-path inputs were replaced by the path-mappings
+    // form. Exercise the same unsaved-changes flow via a path mapping.
+    await user.click(await screen.findByRole("button", { name: /Add Mapping/i }))
+    const fromInput = await screen.findByPlaceholderText(/Bazarr path/i)
+    await user.type(fromInput, "/bazarr/movies")
 
     await waitFor(() => {
       expect(screen.getByText("1 change")).toBeInTheDocument()

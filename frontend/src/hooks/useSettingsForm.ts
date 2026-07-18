@@ -15,8 +15,6 @@ function settingsToFormData(settings: SettingsOut): Partial<SettingsPatch> {
     path_mappings: settings.path_mappings as any,
     default_language: settings.default_language,
     default_output_format: settings.default_output_format,
-    movies_root_path: settings.movies_root_path || "",
-    series_root_path: settings.series_root_path || "",
     subtitles_same_directory: settings.subtitles_same_directory ?? true,
     max_audio_length: settings.max_audio_length || 900,
     timezone: settings.timezone || "UTC",
@@ -66,8 +64,6 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
       "bazarr_timeout",
       "default_language",
       "default_output_format",
-      "movies_root_path",
-      "series_root_path",
       "subtitles_same_directory",
       "max_audio_length",
       "timezone",
@@ -85,7 +81,7 @@ export function useSettingsForm(settings: SettingsOut | undefined) {
         if (v === "" && (field === "bazarr_url" || field === "bazarr_api_key")) {
           return v
         }
-        return v ?? (field.includes("bazarr") || field.includes("root_path") ? "" : undefined)
+        return v ?? (field.includes("bazarr") ? "" : undefined)
       }
 
       if (normalizeValue(formValue) !== normalizeValue(settingsValue)) {

@@ -103,15 +103,6 @@ class Settings(BaseSettings):
         description="Enable debug mode",
     )
 
-    # Media paths
-    MOVIES_ROOT_PATH: str | None = Field(
-        default="/movies",
-        description="Root path for movie files (Sonarr/Radarr aligned)",
-    )
-    SERIES_ROOT_PATH: str | None = Field(
-        default="/tv",
-        description="Root path for series files (Sonarr/Radarr aligned)",
-    )
     SUBTITLES_SAME_DIRECTORY: bool = Field(
         default=True,
         description="Save subtitles in same directory as source video files",

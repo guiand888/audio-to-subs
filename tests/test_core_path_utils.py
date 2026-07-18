@@ -1,11 +1,9 @@
 """Tests for path utilities."""
 
 import os
-import tempfile
 
 from audio_to_subs.core.path_utils import (
     generate_output_path,
-    get_media_type,
     normalize_path,
     path_is_absolute,
     paths_overlap,
@@ -14,136 +12,57 @@ from audio_to_subs.core.path_utils import (
 
 
 class TestValidateMediaPath:
-    """Tests for validate_media_path function."""
+    """Tests for validate_media_path function.
 
-    def test_no_roots_configured_allows_any_path(self) -> None:
-        """When no roots configured, any path should be allowed."""
-        is_valid, error = validate_media_path("/some/random/path", None, None)
+    validate_media_path only enforces structural safety (absolute path, no
+    traversal, no control characters). Location is no longer constrained to a
+    fixed set of root directories.
+    """
+
+    def test_valid_absolute_path_allowed(self) -> None:
+        """An absolute path should be accepted."""
+        is_valid, error = validate_media_path("/movies/action/movie.mp4")
         assert is_valid is True
         assert error is None
 
-    def test_path_within_movies_root(self) -> None:
-        """Path within movies root should be valid."""
-        is_valid, error = validate_media_path(
-            "/movies/action/movie.mp4", "/movies", None
-        )
-        assert is_valid is True
-        assert error is None
-
-    def test_path_within_series_root(self) -> None:
-        """Path within series root should be valid."""
-        is_valid, error = validate_media_path(
-            "/tv/comedy/series/episode.mp4", None, "/tv"
-        )
-        assert is_valid is True
-        assert error is None
-
-    def test_path_outside_roots(self) -> None:
-        """Path outside configured roots should be invalid."""
-        is_valid, error = validate_media_path("/other/path/file.mp4", "/movies", "/tv")
-        assert is_valid is False
-        assert error is not None
-        assert "not within configured root directories" in error
-
-    def test_path_in_movies_when_both_roots_configured(self) -> None:
-        """Path in movies root should be valid even when series root is also configured."""
-        is_valid, error = validate_media_path(
-            "/movies/sci-fi/film.mp4", "/movies", "/tv"
-        )
+    def test_path_any_location_allowed(self) -> None:
+        """A path anywhere on disk is allowed (no fixed roots)."""
+        is_valid, error = validate_media_path("/some/random/path/file.mp4")
         assert is_valid is True
         assert error is None
 
     def test_relative_path_rejected(self) -> None:
         """A relative path must be rejected (server paths must be absolute)."""
-        is_valid, error = validate_media_path("../etc/passwd", "/movies", "/tv")
+        is_valid, error = validate_media_path("../etc/passwd")
         assert is_valid is False
         assert error is not None
         assert "absolute" in error
 
     def test_dotdot_escape_rejected(self) -> None:
-        """A '..' segment that escapes the root must be rejected."""
-        is_valid, error = validate_media_path(
-            "/movies/../../etc/passwd", "/movies", "/tv"
-        )
+        """A '..' segment must be rejected."""
+        is_valid, error = validate_media_path("/movies/../../etc/passwd")
         assert is_valid is False
         assert error is not None
 
     def test_null_byte_rejected(self) -> None:
         """A NUL byte in the path must be rejected."""
-        is_valid, error = validate_media_path("/movies/film\x00.mp4", "/movies", "/tv")
+        is_valid, error = validate_media_path("/movies/film\x00.mp4")
         assert is_valid is False
         assert error is not None
         assert "control" in error
 
     def test_control_char_rejected(self) -> None:
         """A control character in the path must be rejected."""
-        is_valid, error = validate_media_path("/movies/film\x1f.mp4", "/movies", "/tv")
+        is_valid, error = validate_media_path("/movies/film\x1f.mp4")
         assert is_valid is False
         assert error is not None
         assert "control" in error
 
     def test_empty_path_rejected(self) -> None:
         """An empty path must be rejected."""
-        is_valid, error = validate_media_path("", "/movies", "/tv")
+        is_valid, error = validate_media_path("")
         assert is_valid is False
         assert error is not None
-
-    def test_symlink_escape_rejected(self) -> None:
-        """A symlink inside the root pointing outside must be rejected.
-
-        ``os.path.realpath`` resolves the symlink, so the canonical path lands
-        outside the root and fails the containment prefix check.
-        """
-        with tempfile.TemporaryDirectory() as tmp:
-            root = os.path.join(tmp, "movies")
-            outside = os.path.join(tmp, "secret")
-            os.makedirs(root)
-            os.makedirs(outside)
-            link = os.path.join(root, "escape")
-            os.symlink(outside, link)
-            is_valid, error = validate_media_path(
-                os.path.join(link, "film.mp4"), root, None
-            )
-            assert is_valid is False
-            assert error is not None
-
-    def test_within_root_symlink_allowed(self) -> None:
-        """A symlink that stays inside the root is accepted."""
-        with tempfile.TemporaryDirectory() as tmp:
-            root = os.path.join(tmp, "movies")
-            sub = os.path.join(root, "sub")
-            os.makedirs(sub)
-            link = os.path.join(root, "link")
-            os.symlink(sub, link)
-            is_valid, error = validate_media_path(
-                os.path.join(link, "film.mp4"), root, None
-            )
-            assert is_valid is True
-            assert error is None
-
-
-class TestGetMediaType:
-    """Tests for get_media_type function."""
-
-    def test_no_roots_returns_unknown(self) -> None:
-        """When no roots configured, should return unknown."""
-        media_type = get_media_type("/some/path.mp4", None, None)
-        assert media_type == "unknown"
-
-    def test_path_in_movies_root(self) -> None:
-        """Path in movies root should return movie."""
-        media_type = get_media_type("/movies/action/film.mp4", "/movies", None)
-        assert media_type == "movie"
-
-    def test_path_in_series_root(self) -> None:
-        """Path in series root should return series."""
-        media_type = get_media_type("/tv/comedy/series/ep1.mp4", None, "/tv")
-        assert media_type == "series"
-
-    def test_path_not_in_any_root(self) -> None:
-        """Path not in any configured root should return unknown."""
-        media_type = get_media_type("/other/path.mp4", "/movies", "/tv")
-        assert media_type == "unknown"
 
 
 class TestGenerateOutputPath:

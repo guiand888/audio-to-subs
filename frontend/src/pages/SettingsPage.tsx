@@ -12,10 +12,8 @@ import type { SettingsOut, SettingsPatch } from "@/lib/types"
 
 // Import from shadcn/ui
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Switch } from "@/components/ui/switch"
 import {
   Select,
   SelectContent,
@@ -241,61 +239,6 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent>
             <BazarrSettingsForm formData={formData} onChange={updateFormData} />
-          </CardContent>
-        </Card>
-
-        {/* Media Paths Configuration */}
-        <Card>
-          <CardHeader>
-            <CardTitle>Media Paths</CardTitle>
-            <CardDescription>
-              Configure root directories for movies and series (aligned with Radarr/Sonarr/Bazarr)
-            </CardDescription>
-          </CardHeader>
-          <CardContent className="space-y-4">
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-              <div className="space-y-2">
-                <Label htmlFor="movies-root-path">Movies Root Path</Label>
-                <Input
-                  id="movies-root-path"
-                  type="text"
-                  placeholder="/movies"
-                  value={formData.movies_root_path ?? ""}
-                  onChange={(e) => updateFormData({ movies_root_path: e.target.value })}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Root directory for movie files (e.g., /movies)
-                </p>
-              </div>
-              <div className="space-y-2">
-                <Label htmlFor="series-root-path">Series Root Path</Label>
-                <Input
-                  id="series-root-path"
-                  type="text"
-                  placeholder="/tv"
-                  value={formData.series_root_path ?? ""}
-                  onChange={(e) => updateFormData({ series_root_path: e.target.value })}
-                />
-                <p className="text-sm text-muted-foreground">
-                  Root directory for series files (e.g., /tv)
-                </p>
-              </div>
-            </div>
-            <div className="space-y-2">
-              <div className="flex items-center justify-between">
-                <div>
-                  <Label htmlFor="subtitles-same-directory">Save Subtitles Alongside Video Files</Label>
-                  <p className="text-sm text-muted-foreground">
-                    When enabled, subtitles will be saved in the same directory as the source video file
-                  </p>
-                </div>
-                <Switch
-                  id="subtitles-same-directory"
-                  checked={formData.subtitles_same_directory ?? true}
-                  onCheckedChange={(checked) => updateFormData({ subtitles_same_directory: checked })}
-                />
-              </div>
-            </div>
           </CardContent>
         </Card>
 

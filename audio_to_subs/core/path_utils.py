@@ -1,15 +1,13 @@
 """Path utilities for media file handling.
 
 Provides utilities for:
-- Path validation against configured root directories
+- Path validation (structural safety: absolute, no traversal, no control chars)
 - Output path generation based on source media paths
-- Media type detection (movie vs series)
 """
 
 import os
 import re
 from pathlib import Path, PurePosixPath
-from typing import Literal
 
 # Control characters (including NUL) are never valid in a filesystem path and
 # are rejected outright to avoid injection into downstream ffmpeg/FFmpeg calls.
@@ -78,70 +76,28 @@ def _is_within(path: str, root: str) -> bool:
 
 def validate_media_path(
     media_path: str,
-    movies_root: str | None = None,
-    series_root: str | None = None,
 ) -> tuple[bool, str | None]:
-    """Validate that a media path is within allowed root directories.
+    """Validate that a media path is structurally safe.
+
+    Location is no longer constrained to a fixed set of root directories: both
+    Radarr and Sonarr support multiple root folders per item, and Bazarr locates
+    files via path mappings rather than a single movies/series root. Instead we
+    only enforce that the path is structurally safe to hand to downstream tools
+    (ffmpeg/etc.): absolute, no parent-directory (``..``) references, and no
+    control characters.
 
     Args:
         media_path: The path to validate
-        movies_root: Root path for movies (e.g., "/movies")
-        series_root: Root path for series (e.g., "/tv")
 
     Returns:
         Tuple of (is_valid, error_message)
-        is_valid is True if path is valid or if no roots are configured
+        is_valid is True if the path is structurally safe
         error_message contains details if validation fails
     """
-    malformed = _reject_malformed_path(media_path)
-    if malformed:
-        return False, malformed
-
-    if not movies_root and not series_root:
-        # No roots configured, allow any path
-        return True, None
-
-    # Check against configured roots using safe path comparison
-    if movies_root and _is_within(media_path, movies_root):
-        return True, None
-
-    if series_root and _is_within(media_path, series_root):
-        return True, None
-
-    return (
-        False,
-        f"Path '{media_path}' is not within configured root directories "
-        f"(movies: {movies_root}, series: {series_root})",
-    )
-
-
-def get_media_type(
-    media_path: str,
-    movies_root: str | None = None,
-    series_root: str | None = None,
-) -> Literal["movie", "series", "unknown"]:
-    """Determine media type based on path.
-
-    Args:
-        media_path: Path to analyze
-        movies_root: Root path for movies
-        series_root: Root path for series
-
-    Returns:
-        "movie" if path is under movies_root
-        "series" if path is under series_root
-        "unknown" if path doesn't match either or roots aren't configured
-    """
-    if not movies_root and not series_root:
-        return "unknown"
-
-    if movies_root and _is_within(media_path, movies_root):
-        return "movie"
-
-    if series_root and _is_within(media_path, series_root):
-        return "series"
-
-    return "unknown"
+    error = _reject_malformed_path(media_path)
+    if error:
+        return False, error
+    return True, None
 
 
 def generate_output_path(

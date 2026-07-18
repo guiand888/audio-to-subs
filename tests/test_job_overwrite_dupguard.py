@@ -21,10 +21,8 @@ from audio_to_subs.db.models import Job, JobSource, JobStatus, OutputFormat
 MEDIA_PATH = "/movies/Test Movie (2024)/movie.mkv"
 
 
-def _settings(movies_root="/movies", series_root="", same_dir=True):
+def _settings(same_dir=True):
     return SimpleNamespace(
-        MOVIES_ROOT_PATH=movies_root,
-        SERIES_ROOT_PATH=series_root,
         SUBTITLES_SAME_DIRECTORY=same_dir,
     )
 
@@ -153,7 +151,7 @@ async def test_preflight_subtitle_exists_409(mock_db_session, tmp_path):
     media.write_text("data")
     existing = tmp_path / "movie.en.srt"
     existing.write_text("old subtitle")
-    settings = _settings(movies_root=str(tmp_path), same_dir=True)
+    settings = _settings(same_dir=True)
 
     with pytest.raises(Exception) as exc:
         await create_job_service(
@@ -181,7 +179,7 @@ async def test_preflight_subtitle_exists_bypassed_with_overwrite(
     media = tmp_path / "movie.mkv"
     media.write_text("data")
     (tmp_path / "movie.en.srt").write_text("old subtitle")
-    settings = _settings(movies_root=str(tmp_path), same_dir=True)
+    settings = _settings(same_dir=True)
 
     job = await create_job_service(
         db=mock_db_session,
@@ -206,7 +204,7 @@ async def test_preflight_only_for_explicit_language(mock_db_session, tmp_path):
     media = tmp_path / "movie.mkv"
     media.write_text("data")
     (tmp_path / "movie.und.srt").write_text("old subtitle")
-    settings = _settings(movies_root=str(tmp_path), same_dir=True)
+    settings = _settings(same_dir=True)
 
     job = await create_job_service(
         db=mock_db_session,

@@ -143,8 +143,6 @@ export interface SettingsOut {
   path_mappings: Record<string, string>[]
   default_language: string
   default_output_format: string
-  movies_root_path: string | null
-  series_root_path: string | null
   subtitles_same_directory: boolean
   max_audio_length: number
   timezone: string
@@ -163,8 +161,6 @@ export interface SettingsPatch {
   path_mappings?: Record<string, string>[]
   default_language?: string
   default_output_format?: string
-  movies_root_path?: string | null
-  series_root_path?: string | null
   subtitles_same_directory?: boolean
   max_audio_length?: number
   timezone?: string
@@ -217,8 +213,6 @@ export interface SettingsFormData {
   path_mappings: Array<{ from: string; to: string }>
   default_language: string
   default_output_format: OutputFormat
-  movies_root_path: string | null
-  series_root_path: string | null
   subtitles_same_directory: boolean
   max_audio_length: number
   timezone: string
