@@ -22,7 +22,8 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.6.1 — Post-M5.6 stabilization batch (unplanned bug-fix run) | ✅ Done | 2026-07-10 | Depends on M5.6; see note below |
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
-| M6 — Polish, coverage, security | 🔶 In Progress | - | M6.a-f done (2026-07-11); M6.g done (2026-07-12); M6.h not started. Depends on M5.6, M5.7, M5.8 |
+| M6 — Polish, coverage, security | ✅ Done | 2026-07-12 | M6.a-f done (2026-07-11); M6.g, M6.h done (2026-07-12). Depends on M5.6, M5.7, M5.8 |
+| M6.i — Post-M6 hardening batch (unplanned): Parolesub rebrand + deploy hardening | ✅ Done | 2026-07-18 | Depends on M6; see note below |
 | M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6 |
 
 Every milestone ends with the same quality bar:
@@ -657,7 +658,52 @@ Applies to the milestone as a whole, once every sub-track above has landed:
 - `pre-commit run --all-files` clean with no version drift against `pyproject.toml` (M6.e).
 - UI/API terminology consistently uses "Series", not "TV" (M6.f).
 
-**Status (2026-07-12)**: M6.a-f done (2026-07-11); M6.g done (2026-07-12). Full backend suite: 704 passed, 4 skipped, 1 xfailed (the 2 prior environmental failures — `test_db_migrations`, `test_queue_events` — now pass under `nix develop` with `alembic`/`redis` present). `black --check`/`ruff check` clean repo-wide. Frontend: `vitest` 102 passed (9 files); `tsc --noEmit` clean. `mypy --strict` could not be verified: the nix flake's native `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`), independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before any of this M6 work; `pre-commit run --all-files` confirms every other hook (`black`, `ruff`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, etc.) passes. M6.h not started.
+**Status (2026-07-12)**: M6.a-h all done — M6.a-f (2026-07-11), M6.g and M6.h (2026-07-12). Full backend suite: 704 passed, 4 skipped, 1 xfailed (the 2 prior environmental failures — `test_db_migrations`, `test_queue_events` — now pass under `nix develop` with `alembic`/`redis` present). `black --check`/`ruff check` clean repo-wide. Frontend: `vitest` 102 passed (9 files); `tsc --noEmit` clean. `mypy --strict` could not be verified: the nix flake's native `mypy` (1.20.1, via the Nix store) fails to import (`ModuleNotFoundError: No module named 'librt.base64'`), independent of any change made here — confirmed pre-existing by reproducing the same failure on `dev` before any of this M6 work; `pre-commit run --all-files` confirms every other hook (`black`, `ruff`, `trailing-whitespace`, `end-of-file-fixer`, `check-yaml`, etc.) passes.
+
+## M6.i — Post-M6 hardening batch (unplanned)
+
+**Goal**: not a planned milestone — a retroactive record of an ad-hoc batch
+(2026-07-18) that landed directly on `dev` between M6 and the start of M7:
+a production-deployment hardening fix and a product rebrand, discovered
+and done via direct use rather than milestone planning. Recorded here so
+this document keeps matching `dev`'s actual state, same precedent as
+[M5.6.1](#m561--post-m56-stabilization-batch-unplanned).
+
+**Depends on**: M6
+
+Notable changes:
+
+- **Deploy hardening** (`docker-compose.yml`, `docker-compose.docker.yml`,
+  `Caddyfile`, `DEPLOY_QUICKSTART.md`): stopped publishing the `backend`
+  (`8000`) and `redis` (`6379`) ports to the host — the frontend's own
+  `nginx.conf` already reverse-proxies `/api/` to the backend internally, so
+  neither port ever needed to be reachable from outside the compose network,
+  and leaving them open was unnecessary attack surface for a
+  production deployment. Fixed a real config bug in the process: `DEBUG`,
+  `BEHIND_TLS`, `LOG_LEVEL`, and `ADMIN_USERNAME` were hardcoded literals in
+  each service's `environment:` block, which compose gives precedence over
+  `env_file:` for the same key — so `.env` could never actually override
+  them. Switched to `${VAR:-default}` interpolation so both compose files
+  now read every operator-tunable value from `.env`. Added a standalone
+  `Caddyfile` (public-domain + automatic Let's Encrypt) for TLS-terminating
+  in front of the frontend's now-sole exposed port, documented in
+  `DEPLOY_QUICKSTART.md`.
+- **Parolesub rebrand** (`c8850e5`, `4a242b7`): renamed product-facing names
+  to the **Parolesub** brand — CLI binary, Docker images/volumes, SQLite db
+  filename, config file, frontend package name, session cookie
+  (`ats_session` → the new name), sidebar/login-page casing, and docs. The
+  `audio_to_subs` Python package name is intentionally unchanged — it stays
+  the reusable backend library name, separate from the product brand.
+  `dev/NAMING.md` documents the umbrella naming convention: a shared
+  **Parole** (French for "speech") family prefix with a `-<domain>` suffix
+  per variant (`parolesub` is this repo's video→subtitles variant;
+  `parolecast`/`parolenote`/`parolelive` are sibling variants sharing the
+  same umbrella branding/infra).
+
+No acceptance checklist — this predates any plan, same as M5.6.1. No test
+behaviour change: deploy-hardening is compose/proxy config only, and the
+rebrand is a mechanical rename (verified no residual old-name references in
+product-facing surfaces post-rename).
 
 ## M7 — Documentation rewrite & dev-docs reorganization
 
