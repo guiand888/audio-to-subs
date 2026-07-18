@@ -22,7 +22,12 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from audio_to_subs.api.settings import Settings
-    from audio_to_subs.bazarr.schemas import Episode, Movie
+    from audio_to_subs.bazarr.schemas import (
+        Episode,
+        Movie,
+        WantedEpisodesPage,
+        WantedMoviesPage,
+    )
 
 logger = logging.getLogger(__name__)
 
@@ -43,8 +48,9 @@ class ProgressReporter:
 
     def __init__(
         self,
-        callback: Callable[[int, int | None, int, str], Coroutine[Any, Any, None]]
-        | None = None,
+        callback: (
+            Callable[[int, int | None, int, str], Coroutine[Any, Any, None]] | None
+        ) = None,
         *,
         throttle_seconds: float = 1.0,
     ) -> None:
@@ -82,7 +88,7 @@ class ProgressReporter:
         # Only report a denominator while the known (wanted) portion is being
         # processed. Once we move into the unknown no-subs tail, report None so
         # the UI shows a live counter instead of a fake estimate.
-        if self._known_total and self._processed < self._known_total:
+        if self._known_total and self._processed <= self._known_total:
             return self._known_total
         return None
 
@@ -100,9 +106,7 @@ class ProgressReporter:
         if not force and (now - self._last_emit) < self._throttle:
             return
         self._last_emit = now
-        await self._callback(
-            self._processed, self.total, self.percent, self._stage
-        )
+        await self._callback(self._processed, self.total, self.percent, self._stage)
 
 
 class PollerState:
@@ -278,18 +282,26 @@ async def _seed_wanted_total(
     reporter: ProgressReporter,
     poll_movies: bool,
     poll_episodes: bool,
-) -> None:
-    """Query Bazarr for the exact wanted counts up front to seed progress."""
+) -> tuple["WantedMoviesPage | None", "WantedEpisodesPage | None"]:
+    """Fetch wanted movies/episodes once and seed the reporter's exact total.
+
+    Returns the fetched pages so _process_wanted_movies/_process_wanted_episodes
+    can reuse them instead of re-fetching (a `length=1` probe call followed by
+    a separate `length=200` fetch would hit Bazarr twice per type per poll).
+    """
     wanted_total = 0
+    movies_page = None
+    episodes_page = None
     if poll_movies:
-        wanted_movies_page = await client.list_wanted_movies(length=1)
-        wanted_total += wanted_movies_page.total
+        movies_page = await client.list_wanted_movies(length=200)
+        wanted_total += movies_page.total
     if poll_episodes:
-        wanted_episodes_page = await client.list_wanted_episodes(length=1)
-        wanted_total += wanted_episodes_page.total
+        episodes_page = await client.list_wanted_episodes(length=200)
+        wanted_total += episodes_page.total
     reporter.set_known_total(wanted_total)
     reporter.set_stage("refreshing wanted")
     await reporter.report(force=True)
+    return movies_page, episodes_page
 
 
 async def _process_wanted_movies(
@@ -298,9 +310,9 @@ async def _process_wanted_movies(
     path_map: PathMap,
     started_at: datetime,
     reporter: ProgressReporter,
+    movies_page: "WantedMoviesPage",
 ) -> int:
-    """Fetch and cache all wanted movies, reporting progress per item."""
-    movies_page = await client.list_wanted_movies(length=200)
+    """Cache all wanted movies from an already-fetched page, reporting progress per item."""
     movie_details = await _fetch_movie_details(
         client, [m.radarrId for m in movies_page.data]
     )
@@ -327,9 +339,9 @@ async def _process_wanted_episodes(
     path_map: PathMap,
     started_at: datetime,
     reporter: ProgressReporter,
+    episodes_page: "WantedEpisodesPage",
 ) -> int:
-    """Fetch and cache all wanted episodes, reporting progress per item."""
-    episodes_page = await client.list_wanted_episodes(length=200)
+    """Cache all wanted episodes from an already-fetched page, reporting progress per item."""
     episode_details = await _fetch_episode_details(
         client, {e.sonarrSeriesId for e in episodes_page.data}
     )
@@ -405,19 +417,25 @@ async def poll_bazarr_manually(
         )
 
         # The "wanted" portion has an exact total from Bazarr up front; seed the
-        # reporter so the progress bar can show "N of M" for this part.
-        await _seed_wanted_total(client, reporter, poll_movies, poll_episodes)
+        # reporter so the progress bar can show "N of M" for this part. This
+        # also fetches the pages processed below, so movies/episodes are each
+        # fetched from Bazarr exactly once per poll.
+        movies_page, episodes_page = await _seed_wanted_total(
+            client, reporter, poll_movies, poll_episodes
+        )
 
         # Process wanted movies
         if poll_movies:
+            assert movies_page is not None
             movies_processed = await _process_wanted_movies(
-                db, client, path_map, started_at, reporter
+                db, client, path_map, started_at, reporter, movies_page
             )
 
         # Process wanted episodes
         if poll_episodes:
+            assert episodes_page is not None
             episodes_processed = await _process_wanted_episodes(
-                db, client, path_map, started_at, reporter
+                db, client, path_map, started_at, reporter, episodes_page
             )
 
         # If tracking no-subs items, also check all items. This portion has no

@@ -1006,6 +1006,8 @@ class TestPollerIntegration:
         processed = await poll_once(mock_db_session, mock_client, path_map)
 
         assert processed == 0
+        # Each is fetched exactly once (length=200); that single response
+        # seeds both the progress-bar total and the processed items.
         mock_client.list_wanted_movies.assert_awaited_once()
         mock_client.list_wanted_episodes.assert_awaited_once()
 
@@ -1343,7 +1345,9 @@ class TestManualPolling:
             mock_db_session, mock_client, path_map, None
         )
 
-        # Verify both API calls were made
+        # Verify both API calls were made - exactly once each (length=200);
+        # that single response seeds both the progress-bar total and the
+        # processed items.
         mock_client.list_wanted_movies.assert_awaited_once()
         mock_client.list_wanted_episodes.assert_awaited_once()
 
@@ -1387,7 +1391,7 @@ class TestManualPolling:
             mock_db_session, mock_client, path_map, WantedItemType.MOVIE
         )
 
-        # Verify only movie API call was made
+        # Verify only movie API call was made - exactly once (length=200).
         mock_client.list_wanted_movies.assert_awaited_once()
         # Episode API should not be called
         mock_client.list_wanted_episodes.assert_not_awaited()
@@ -1432,7 +1436,7 @@ class TestManualPolling:
             mock_db_session, mock_client, path_map, WantedItemType.EPISODE
         )
 
-        # Verify only episode API call was made
+        # Verify only episode API call was made - exactly once (length=200).
         mock_client.list_wanted_episodes.assert_awaited_once()
         # Movie API should not be called
         mock_client.list_wanted_movies.assert_not_awaited()
@@ -1539,6 +1543,9 @@ class TestManualPolling:
         # batch-fetch audio_language for the wanted items, and once more by
         # the (independent) track_no_subs full-library scan - two distinct
         # purposes, not a regression of the "bounded, not per-item" guarantee.
+        # list_wanted_movies/list_wanted_episodes are each fetched exactly
+        # once (length=200); that response seeds both the progress-bar total
+        # and the processed items.
         mock_client.list_wanted_movies.assert_awaited_once()
         mock_client.list_wanted_episodes.assert_awaited_once()
         assert mock_client.list_all_movies.await_count == 2
