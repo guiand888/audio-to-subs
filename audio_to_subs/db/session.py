@@ -12,8 +12,8 @@ from sqlalchemy.orm import Session
 from audio_to_subs.db.base import Base, get_async_engine, get_sync_engine
 
 # Default DSN
-DEFAULT_ASYNC_DSN = "sqlite+aiosqlite:////data/audio-to-subs.db"
-DEFAULT_SYNC_DSN = "sqlite:////data/audio-to-subs.db"
+DEFAULT_ASYNC_DSN = "sqlite+aiosqlite:////data/parolesub.db"
+DEFAULT_SYNC_DSN = "sqlite:////data/parolesub.db"
 
 
 @asynccontextmanager

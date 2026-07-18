@@ -49,7 +49,7 @@ services:
     build: .
     command: ["uvicorn", "audio_to_subs.api.app:app", "--host", "0.0.0.0", "--port", "8000"]
     environment:
-      DATABASE_URL: "sqlite+aiosqlite:////data/audio-to-subs.db"
+      DATABASE_URL: "sqlite+aiosqlite:////data/parolesub.db"
       REDIS_URL: "redis://redis:6379/0"
       MISTRAL_API_KEY_FILE: "/run/secrets/mistral_api_key"
       BAZARR_URL: "${BAZARR_URL}"
@@ -85,7 +85,7 @@ services:
     command: ["python", "-m", "audio_to_subs.worker"]
     environment:
       # Same env as backend; YAML anchors keep this DRY in real file.
-      DATABASE_URL: "sqlite:////data/audio-to-subs.db"
+      DATABASE_URL: "sqlite:////data/parolesub.db"
       REDIS_URL: "redis://redis:6379/0"
       MISTRAL_API_KEY_FILE: "/run/secrets/mistral_api_key"
       PATH_MAPPINGS_JSON: '${PATH_MAPPINGS_JSON:-[]}'
@@ -139,7 +139,7 @@ secrets:
 Notes:
 
 - The `worker` uses the sync SQLite driver (`sqlite:////…`), the backend uses async (`sqlite+aiosqlite:////…`). Both point at the same file.
-- The `media` volume is declared `external: true` — the operator creates it once with `docker volume create media` (or names the existing Bazarr volume here). This is the **only** point where `audio-to-subs` and Bazarr share state on disk.
+- The `media` volume is declared `external: true` — the operator creates it once with `docker volume create media` (or names the existing Bazarr volume here). This is the **only** point where `parolesub` and Bazarr share state on disk.
 - Redis runs without persistence (`--save "" --appendonly no`). SQLite is the source of truth.
 - Secrets are mounted at `/run/secrets/<name>`. The Python code reads either `<KEY>` or `<KEY>_FILE` envs, preferring the file when present.
 
@@ -204,5 +204,5 @@ Migration cost: one DSN change + `alembic upgrade head` against the new DB. The 
 
 ## Backups
 
-- The whole `db_data` volume is one SQLite file. Back it up with `docker run --rm -v audio-to-subs_db_data:/data -v $PWD:/out alpine sh -c 'cp /data/audio-to-subs.db /out/db-$(date +%F).db'` (use `.backup` SQLite command in production to get a consistent snapshot).
+- The whole `db_data` volume is one SQLite file. Back it up with `docker run --rm -v parolesub_db_data:/data -v $PWD:/out alpine sh -c 'cp /data/parolesub.db /out/db-$(date +%F).db'` (use `.backup` SQLite command in production to get a consistent snapshot).
 - Secrets are external by definition. The `.secrets/` directory should be in a password manager or vault, not in git.

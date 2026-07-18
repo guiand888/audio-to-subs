@@ -113,7 +113,7 @@ These players automatically load subtitles with:
 
 ### Current System Analysis
 
-The current `audio-to-subs` system generates subtitle files with basic naming:
+The current `parolesub` system generates subtitle files with basic naming:
 ```
 output.srt
 ```

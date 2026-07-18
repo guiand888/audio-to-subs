@@ -1,6 +1,6 @@
 """Configuration file parser for batch processing.
 
-Supports .audio-to-subs.yaml configuration files for defining batch jobs.
+Supports .parolesub.yaml configuration files for defining batch jobs.
 """
 
 from pathlib import Path
@@ -16,7 +16,7 @@ class ConfigError(Exception):
 
 
 class ConfigParser:
-    """Parse and validate .audio-to-subs.yaml configuration files."""
+    """Parse and validate .parolesub.yaml configuration files."""
 
     SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
 
@@ -24,7 +24,7 @@ class ConfigParser:
         """Initialize config parser.
 
         Args:
-            config_path: Path to .audio-to-subs.yaml file
+            config_path: Path to .parolesub.yaml file
 
         Raises:
             ConfigError: If config file not found or invalid YAML

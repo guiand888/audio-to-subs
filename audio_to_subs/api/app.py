@@ -180,8 +180,8 @@ def create_app() -> FastAPI:
     settings = get_settings()
 
     app = FastAPI(
-        title="audio-to-subs v2 API",
-        description="API for audio-to-subs v2 transcription service",
+        title="parolesub v2 API",
+        description="API for parolesub v2 transcription service",
         version="2.0.0",
         lifespan=lifespan,
         debug=settings.DEBUG,

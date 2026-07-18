@@ -1,9 +1,9 @@
-# audio-to-subs
+# parolesub
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
-![Coverage](https://raw.githubusercontent.com/guiand888/audio-to-subs/badges/coverage.svg)
-[![Tests](https://github.com/guiand888/audio-to-subs/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/audio-to-subs/actions/workflows/tests.yml)
+![Coverage](https://raw.githubusercontent.com/guiand888/parolesub/badges/coverage.svg)
+[![Tests](https://github.com/guiand888/parolesub/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/parolesub/actions/workflows/tests.yml)
 
 <img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" /> Convert video audio to subtitles using Mistral Voxtral Mini transcription.
 
@@ -33,16 +33,16 @@
    podman run --rm --userns=keep-id \
      --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
      -v ./videos:/input:ro,Z -v ./subs:/output:Z \
-     audio-to-subs:latest -i /input/video.mp4 -o /output/video.srt
+     parolesub:latest -i /input/video.mp4 -o /output/video.srt
    ```
 
 ### Local development (`nix develop`)
 ```bash
-git clone https://github.com/guiand888/audio-to-subs.git
-cd audio-to-subs
+git clone https://github.com/guiand888/parolesub.git
+cd parolesub
 nix develop   # bootstraps a .venv and installs deps automatically
 export MISTRAL_API_KEY=your_api_key
-audio-to-subs -i video.mp4 -o subtitles.srt
+parolesub -i video.mp4 -o subtitles.srt
 ```
 
 ## Usage
@@ -53,7 +53,7 @@ audio-to-subs -i video.mp4 -o subtitles.srt
 podman run --rm --userns=keep-id \
   --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
   -v ./videos:/input:ro,Z -v ./subs:/output:Z \
-  audio-to-subs:latest -i /input/video.mp4 -o /output/video.srt
+  parolesub:latest -i /input/video.mp4 -o /output/video.srt
 
 # VTT format
 ... --format vtt
@@ -63,7 +63,7 @@ podman run --rm --userns=keep-id \
 ```
 
 ### Batch Processing
-Create `audio-to-subs.yaml`:
+Create `parolesub.yaml`:
 ```yaml
 jobs:
   - input: /input/video1.mp4
@@ -77,7 +77,7 @@ Run:
 podman run --rm --userns=keep-id \
   --secret mistral_api_key,type=env,target=MISTRAL_API_KEY \
   -v $(pwd):/work:Z,rslave \
-  audio-to-subs:latest --config /work/audio-to-subs.yaml
+  parolesub:latest --config /work/parolesub.yaml
 ```
 
 ## Output Formats

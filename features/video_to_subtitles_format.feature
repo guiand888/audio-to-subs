@@ -6,7 +6,7 @@ Feature: Video to Subtitle Format Validation
   Scenario: Successfully convert video to subtitles
     Given I have a video file "test_video.mp4"
     And I have a valid Mistral API key
-    When I process the video with audio-to-subs
+    When I process the video with parolesub
     Then I should get an SRT subtitle file
     And the SRT file should contain valid timestamps
     And the SRT file should contain transcribed text

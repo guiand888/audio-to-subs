@@ -25,7 +25,7 @@ class Settings(BaseSettings):
 
     # Database
     DATABASE_URL: str = Field(
-        default="sqlite+aiosqlite:////data/audio-to-subs.db",
+        default="sqlite+aiosqlite:////data/parolesub.db",
         description="Database connection URL",
     )
 

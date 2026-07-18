@@ -112,7 +112,7 @@ make secret-rm
 - **Includes**: Only runtime dependencies
 - **User**: `appuser` (UID 1000, non-root)
 - **Working Dir**: `/app`
-- **Volumes**: `/input` (videos), `/output` (subtitles), `/tmp/audio-to-subs` (temp)
+- **Volumes**: `/input` (videos), `/output` (subtitles), `/tmp/parolesub` (temp)
 - **Entry Point**: `python -m video_to_subtitles_pipeline`
 
 **Usage**: Production deployment, actual video processing
@@ -138,7 +138,7 @@ make secret-rm
 
 ```yaml
 services:
-  audio-to-subs:
+  parolesub:
     build: .
     secrets:
       - mistral_api_key
@@ -155,7 +155,7 @@ services:
 podman-compose up
 
 # Run single video
-podman-compose run audio-to-subs -i /input/video.mp4 -o /output
+podman-compose run parolesub -i /input/video.mp4 -o /output
 
 # View logs
 podman-compose logs -f
@@ -210,7 +210,7 @@ podman info
 make clean
 
 # Rebuild from scratch
-podman build --no-cache -t audio-to-subs:latest .
+podman build --no-cache -t parolesub:latest .
 ```
 
 ### Tests Fail
@@ -251,7 +251,7 @@ make secret-create
 ```yaml
 volumes:
   - type: tmpfs
-    target: /tmp/audio-to-subs
+    target: /tmp/parolesub
     tmpfs:
       size: 1G
 ```
@@ -289,14 +289,14 @@ nix develop --command pytest -n auto
 apiVersion: apps/v1
 kind: Deployment
 metadata:
-  name: audio-to-subs
+  name: parolesub
 spec:
   replicas: 3
   template:
     spec:
       containers:
-      - name: audio-to-subs
-        image: audio-to-subs:latest
+      - name: parolesub
+        image: parolesub:latest
         env:
         - name: MISTRAL_API_KEY
           valueFrom:

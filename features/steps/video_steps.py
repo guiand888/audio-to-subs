@@ -89,7 +89,7 @@ def api_unavailable():
     return True
 
 
-@when("I process the video with audio-to-subs", target_fixture="process_video")
+@when("I process the video with parolesub", target_fixture="process_video")
 def process_video(video_file, valid_api_key, tmp_path, mock_mistral_api):
     """Process video through pipeline.
 

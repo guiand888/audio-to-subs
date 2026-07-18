@@ -8,7 +8,7 @@ Usage:
     python -m audio_to_subs.worker
 
 Environment variables:
-    DATABASE_URL: Database connection URL (default: sqlite+aiosqlite:////data/audio-to-subs.db)
+    DATABASE_URL: Database connection URL (default: sqlite+aiosqlite:////data/parolesub.db)
     REDIS_URL: Redis connection URL (default: redis://localhost:6379/0)
     MISTRAL_API_KEY: Mistral API key (or MISTRAL_API_KEY_FILE)
     WORKER_ID: Optional worker identifier (auto-generated if not provided)

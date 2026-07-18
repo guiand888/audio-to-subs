@@ -61,14 +61,14 @@ RUN addgroup -g ${USER_GID} appgroup && \
     chown -R appuser:appgroup /app
 
 # Create directories for input/output
-RUN mkdir -p /input /output /tmp/audio-to-subs && \
-    chown -R appuser:appgroup /input /output /tmp/audio-to-subs
+RUN mkdir -p /input /output /tmp/parolesub && \
+    chown -R appuser:appgroup /input /output /tmp/parolesub
 
 USER appuser
 
 # Set environment variables
 ENV PYTHONUNBUFFERED=1
-ENV TMPDIR=/tmp/audio-to-subs
+ENV TMPDIR=/tmp/parolesub
 
 # Health check
 HEALTHCHECK --interval=30s --timeout=10s --start-period=5s --retries=3 \

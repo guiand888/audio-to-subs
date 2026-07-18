@@ -3,11 +3,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: audio-to-subs:backend
-    container_name: audio-to-subs-backend
+    image: parolesub:backend
+    container_name: parolesub-backend
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
+      - DATABASE_URL=sqlite+aiosqlite:////data/parolesub.db
       - SESSION_SECRET_FILE=/data/session_secret
       - REDIS_URL=redis://redis:6379/0
       - ADMIN_USERNAME=admin
@@ -21,13 +21,13 @@ services:
       - admin_password
     volumes:
       # Database and session data (shared with worker)
-      - audio-to-subs-data:/data:z
+      - parolesub-data:/data:z
       # Movie files (aligned with Radarr/Bazarr)
-      - audio-to-subs-movies:/movies:z
+      - parolesub-movies:/movies:z
       # TV series files (aligned with Sonarr/Bazarr)
-      - audio-to-subs-tv:/tv:z
+      - parolesub-tv:/tv:z
       # Temporary processing
-      - audio-to-subs-tmp:/tmp/audio-to-subs:z
+      - parolesub-tmp:/tmp/parolesub:z
     ports:
       - "8000:8000"
     # Health check (defined here, not in the Dockerfile: Podman builds OCI
@@ -60,12 +60,12 @@ services:
 
   redis:
     image: docker.io/library/redis:8-alpine
-    container_name: audio-to-subs-redis
+    container_name: parolesub-redis
     ports:
       - "6379:6379"
     # Persistence (optional, Redis can be stateless for our use case)
     volumes:
-      - audio-to-subs-redis-data:/data:z
+      - parolesub-redis-data:/data:z
     healthcheck:
       test: ["CMD", "redis-cli", "ping"]
       interval: 10s
@@ -81,11 +81,11 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-    image: audio-to-subs:worker
-    container_name: audio-to-subs-worker
+    image: parolesub:worker
+    container_name: parolesub-worker
     environment:
       - PYTHONUNBUFFERED=1
-      - DATABASE_URL=sqlite+aiosqlite:////data/audio-to-subs.db
+      - DATABASE_URL=sqlite+aiosqlite:////data/parolesub.db
       - REDIS_URL=redis://redis:6379/0
       - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
       - SESSION_SECRET_FILE=/data/session_secret
@@ -96,10 +96,10 @@ services:
     secrets:
       - mistral_api_key
     volumes:
-      - audio-to-subs-data:/data:z
-      - audio-to-subs-movies:/movies:z
-      - audio-to-subs-tv:/tv:z
-      - audio-to-subs-tmp:/tmp/audio-to-subs:z
+      - parolesub-data:/data:z
+      - parolesub-movies:/movies:z
+      - parolesub-tv:/tv:z
+      - parolesub-tmp:/tmp/parolesub:z
     depends_on:
       backend:
         condition: service_healthy
@@ -127,8 +127,8 @@ services:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-    image: audio-to-subs:frontend
-    container_name: audio-to-subs-frontend
+    image: parolesub:frontend
+    container_name: parolesub-frontend
     ports:
       - "8080:8080"
     depends_on:
@@ -140,15 +140,15 @@ services:
     user: "101:101" # nginx user in nginx-unprivileged image
 
 volumes:
-  audio-to-subs-data:
+  parolesub-data:
     driver: local
-  audio-to-subs-redis-data:
+  parolesub-redis-data:
     driver: local
-  audio-to-subs-movies:
+  parolesub-movies:
     driver: local
-  audio-to-subs-tv:
+  parolesub-tv:
     driver: local
-  audio-to-subs-tmp:
+  parolesub-tmp:
     driver: local
 
 # Native Podman secrets (prioritized provisioning path). The secret NAMES are

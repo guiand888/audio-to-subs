@@ -9,7 +9,7 @@ This is the **M0** milestone. Its only goal is to relocate the existing modules 
   - `pipeline.py`, `audio_extractor.py`, `audio_splitter.py`, `transcription_client.py`, `subtitle_generator.py`, `config_parser.py`, `logging_config.py`
 - `cli.py`, `__main__.py`, `__init__.py` stay at the package root (`audio_to_subs/`).
 - All imports are rewritten from `from src.X` to `from audio_to_subs.core.X` (or `from audio_to_subs.X` for `cli`).
-- `pyproject.toml` entry point becomes `audio-to-subs = "audio_to_subs.cli:main"`.
+- `pyproject.toml` entry point becomes `parolesub = "audio_to_subs.cli:main"`.
 - `pyproject.toml` packages config is updated for the new layout.
 - Pytest tests use the new import paths; mock targets follow (e.g., `@patch("src.transcription_client.Mistral")` → `@patch("audio_to_subs.core.transcription_client.Mistral")`).
 
@@ -69,7 +69,7 @@ find audio_to_subs tests -type f -name "*.py" -exec sed -i \
 
 ### `pyproject.toml`
 
-- `[project.scripts]`: `audio-to-subs = "audio_to_subs.cli:main"`
+- `[project.scripts]`: `parolesub = "audio_to_subs.cli:main"`
 - `[tool.setuptools.packages.find]`: include `audio_to_subs*` instead of `src*`
 - `[tool.coverage.run] source = ["audio_to_subs"]` (was `["src"]`)
 - `[tool.mypy]` per-module overrides — rewrite any `src.*` patterns to `audio_to_subs.*`
@@ -113,8 +113,8 @@ ruff check audio_to_subs tests
 mypy --strict audio_to_subs
 
 # 3. CLI still works end-to-end.
-audio-to-subs --version
-audio-to-subs -i dev/test_video.mp4 -o /tmp/out.srt
+parolesub --version
+parolesub -i dev/test_video.mp4 -o /tmp/out.srt
 diff /tmp/out.srt <(git show HEAD~1:tests/fixtures/expected.srt)   # if such a fixture exists
 
 # 4. Container entrypoint unchanged.

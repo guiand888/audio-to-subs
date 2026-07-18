@@ -61,7 +61,7 @@ class SessionManager:
 
         # Generate salt if not provided
         if salt is None:
-            salt = "audio-to-subs-session"
+            salt = "parolesub-session"
 
         self._serializer = URLSafeTimedSerializer(
             self._secret, salt=salt, signer_kwargs={"key_derivation": "hmac"}

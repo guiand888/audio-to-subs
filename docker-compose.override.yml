@@ -8,7 +8,7 @@ services:
       - TZ=Asia/Singapore
     volumes:
       - sonarr-config:/config:Z
-      - audio-to-subs-tv:/tv:z
+      - parolesub-tv:/tv:z
     restart: unless-stopped
     ports:
       - 8989:8989
@@ -22,7 +22,7 @@ services:
       - TZ=Asia/Singapore
     volumes:
       - radarr-config:/config:Z
-      - audio-to-subs-movies:/movies:z
+      - parolesub-movies:/movies:z
     restart: unless-stopped
     ports:
       - 7878:7878
@@ -36,8 +36,8 @@ services:
       - TZ=Asia/Singapore
     volumes:
       - bazarr-config:/config:Z
-      - audio-to-subs-movies:/movies:z
-      - audio-to-subs-tv:/tv:z
+      - parolesub-movies:/movies:z
+      - parolesub-tv:/tv:z
     restart: unless-stopped
     ports:
       - 6767:6767

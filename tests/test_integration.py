@@ -14,9 +14,7 @@ def mistral_api_key():
     api_key = os.getenv("MISTRAL_API_KEY")
 
     if not api_key:
-        api_key_file = Path(
-            "/home/guillaume/Development/audio-to-subs/.mistral_api_key"
-        )
+        api_key_file = Path("/home/guillaume/Development/parolesub/.mistral_api_key")
         if api_key_file.exists():
             api_key = api_key_file.read_text().strip()
 
