@@ -342,32 +342,25 @@ export function WantedPage() {
 
   const { data, isLoading } = useWanted({
     item_type: itemType,
+    language: langFilter || undefined,
+    search: search || undefined,
+    has_any_subs: onlyNoSubs ? false : undefined,
     page,
     page_size: pageSize,
   })
 
-  // Client-side search + filter (simple approach for now)
+  // Server now applies search + type + language + no-subs filtering, so the
+  // client only needs to surface the returned items.
   const items = useMemo(() => {
     if (!data?.items) return []
-    let list = data.items
-    if (search) {
-      const q = search.toLowerCase()
-      list = list.filter((i) => i.title.toLowerCase().includes(q))
-    }
-    if (onlyNoSubs) {
-      list = list.filter((i) => !i.has_any_subs)
-    }
-    if (langFilter) {
-      list = list.filter((i) =>
-        i.missing_subtitles.some((ms) => ms.code2 === langFilter),
-      )
-    }
+    // Search, no-subs, and language filtering are applied server-side (see
+    // the useWanted call above), so the client only sorts what comes back.
     // Default sort: alphabetical by title (case-insensitive). No sorting
     // options or extra categories are exposed yet, so this is the baseline.
-    return [...list].sort((a, b) =>
+    return [...data.items].sort((a, b) =>
       a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
     )
-  }, [data?.items, search, onlyNoSubs, langFilter])
+  }, [data?.items])
 
   // Derive language options from all visible items
   const langOptions = useMemo(() => {

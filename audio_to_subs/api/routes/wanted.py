@@ -151,6 +151,12 @@ async def list_wanted(  # noqa: C901
     language: str | None = Query(
         default=None, description="Filter by missing language code"
     ),
+    search: str | None = Query(
+        default=None, description="Case-insensitive title search"
+    ),
+    has_any_subs: bool | None = Query(
+        default=None, description="Filter by whether item has any subtitles"
+    ),
     has_job: bool | None = Query(
         default=None, description="Filter by whether item has an active job"
     ),
@@ -167,6 +173,8 @@ async def list_wanted(  # noqa: C901
     Query parameters:
     - item_type: Filter by type (all, movie, episode)
     - language: Filter by specific missing language code
+    - search: Case-insensitive title search
+    - has_any_subs: Filter by whether the item has any subtitles
     - has_job: Filter by whether item has an active job (true/false)
     - page: Page number (1-based)
     - page_size: Items per page
@@ -177,6 +185,14 @@ async def list_wanted(  # noqa: C901
     # Apply type filter
     if item_type != WantedItemType.ALL:
         query = query.where(BazarrCache.kind == item_type.value)
+
+    # Apply search filter (case-insensitive title match)
+    if search:
+        query = query.where(BazarrCache.title.ilike(f"%{search}%"))
+
+    # Apply has_any_subs filter
+    if has_any_subs is not None:
+        query = query.where(BazarrCache.has_any_subs == has_any_subs)
 
     # Note: Language filter applied in Python below (SQLite has no json_contains)
 
