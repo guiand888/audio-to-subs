@@ -8,7 +8,7 @@ from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import desc, func, select
+from sqlalchemy import func, select
 
 from audio_to_subs.api.deps import SettingsDep, get_db
 from audio_to_subs.api.routes._helpers import UTCAwareModel
@@ -22,6 +22,11 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/wanted", tags=["wanted"])
+
+# Keep strong references to in-flight background refresh tasks: asyncio only
+# holds a weak reference to a task created via create_task, so an unreferenced
+# task is eligible for GC mid-run (see asyncio docs on create_task).
+_background_refresh_tasks: set[asyncio.Task] = set()
 
 
 class WantedItemType(str, Enum):
@@ -179,16 +184,25 @@ async def list_wanted(  # noqa: C901
     - page: Page number (1-based)
     - page_size: Items per page
     """
-    # Build base query
-    query = select(BazarrCache).order_by(desc(BazarrCache.last_polled))
+    # Build base query. Ordered alphabetically by title (case-insensitive) so
+    # the default sort is a true global order across pages, not just within
+    # the page returned - the frontend's client-side sort only re-orders the
+    # single page it receives, so pagination must already hand back pages in
+    # title order for cross-page results to look sorted.
+    query = select(BazarrCache).order_by(func.lower(BazarrCache.title))
 
     # Apply type filter
     if item_type != WantedItemType.ALL:
         query = query.where(BazarrCache.kind == item_type.value)
 
-    # Apply search filter (case-insensitive title match)
+    # Apply search filter (case-insensitive title match). Escape LIKE
+    # wildcards in the user's input so a literal "%" or "_" in a title search
+    # matches literally instead of acting as a pattern wildcard.
     if search:
-        query = query.where(BazarrCache.title.ilike(f"%{search}%"))
+        escaped_search = (
+            search.replace("\\", "\\\\").replace("%", "\\%").replace("_", "\\_")
+        )
+        query = query.where(BazarrCache.title.ilike(f"%{escaped_search}%", escape="\\"))
 
     # Apply has_any_subs filter
     if has_any_subs is not None:
@@ -203,31 +217,40 @@ async def list_wanted(  # noqa: C901
         else:
             query = query.where(BazarrCache.active_job_id.is_(None))
 
-    # Get total count
-    count_query = select(func.count()).select_from(query.subquery())
-    result = await db.execute(count_query)
-    total = result.scalar_one()
-
-    # Get paginated items
     offset = (page - 1) * page_size
-    query = query.limit(page_size).offset(offset)
-    # Use ``db.scalars`` (not ``db.execute(query)`` + ``result.scalars().all()``):
-    # the latter made mypy unify the reused ``result`` variable's generic across
-    # the earlier int-typed count query, forcing a ``# type: ignore[arg-type]`` on
-    # the ``list[...]`` annotation (M5.7). ``db.scalars`` types the row type
-    # directly from the ``select(BazarrCache)`` so no ignore is needed.
-    items = list(await db.scalars(query))
 
-    # Filter by language if specified (Python-side since SQLite lacks json_contains)
     if language:
-        filtered_items: list[BazarrCache] = []
-        for item in items:
+        # The language filter can't be expressed in SQL (SQLite has no
+        # json_contains over missing_subtitles), so it must run in Python.
+        # That means `total` and the page slice have to be computed from the
+        # *filtered* set here too - computing `total` from a SQL count and
+        # then filtering only the already-paginated page (the previous
+        # approach) desyncs "Page X of Y" from what's actually returned and
+        # can drop matching items on later pages.
+        all_items = list(await db.scalars(query))
+        matched_items: list[BazarrCache] = []
+        for item in all_items:
             if item.missing_subtitles:
                 for sub in item.missing_subtitles:
                     if isinstance(sub, dict) and sub.get("code2") == language:
-                        filtered_items.append(item)
+                        matched_items.append(item)
                         break
-        items = filtered_items
+        total = len(matched_items)
+        items = matched_items[offset : offset + page_size]
+    else:
+        # Get total count
+        count_query = select(func.count()).select_from(query.subquery())
+        result = await db.execute(count_query)
+        total = result.scalar_one()
+
+        # Get paginated items
+        query = query.limit(page_size).offset(offset)
+        # Use ``db.scalars`` (not ``db.execute(query)`` + ``result.scalars().all()``):
+        # the latter made mypy unify the reused ``result`` variable's generic across
+        # the earlier int-typed count query, forcing a ``# type: ignore[arg-type]`` on
+        # the ``list[...]`` annotation (M5.7). ``db.scalars`` types the row type
+        # directly from the ``select(BazarrCache)`` so no ignore is needed.
+        items = list(await db.scalars(query))
 
     # Translate paths
     items = await _translate_paths(db, items)
@@ -387,6 +410,7 @@ async def refresh_wanted_list(
 
     # Validate Bazarr is configured before spawning the background task, so we
     # can fail fast with a clear error rather than an orphaned task.
+    client_probe = None
     try:
         client_probe, _, _, _ = await get_bazarr_client_with_settings(db, settings)
     except Exception as e:  # noqa: BLE001
@@ -425,16 +449,17 @@ async def refresh_wanted_list(
         redis = get_redis_client()
         try:
             async with get_async_session(settings.DATABASE_URL) as bg_db:
-                client, _, _, _ = await get_bazarr_client_with_settings(
-                    bg_db, settings
-                )
-                if client is None:
-                    await publish_refresh_done(
-                        redis, refresh_id, "failed", error="Bazarr not configured"
-                    )
-                    return
-
+                client = None
                 try:
+                    client, _, _, _ = await get_bazarr_client_with_settings(
+                        bg_db, settings
+                    )
+                    if client is None:
+                        await publish_refresh_done(
+                            redis, refresh_id, "failed", error="Bazarr not configured"
+                        )
+                        return
+
                     path_map = await get_path_map(bg_db)
 
                     reporter = ProgressReporter(
@@ -455,16 +480,24 @@ async def refresh_wanted_list(
                         episodes_processed=episodes_processed,
                     )
                 except Exception as e:  # noqa: BLE001
+                    # Covers failures anywhere in setup (client/path-map init)
+                    # or polling, not just the poll call - otherwise a setup
+                    # failure here skips publish_refresh_done entirely and the
+                    # frontend's progress bar waits for an event that will
+                    # never arrive.
                     logger.error("Background refresh failed: %s", e, exc_info=True)
                     await publish_refresh_done(
                         redis, refresh_id, "failed", error="Refresh failed"
                     )
                 finally:
-                    await client.close()
+                    if client is not None:
+                        await client.close()
         finally:
             await redis.aclose()
 
-    asyncio.create_task(_run_refresh())
+    task = asyncio.create_task(_run_refresh())
+    _background_refresh_tasks.add(task)
+    task.add_done_callback(_background_refresh_tasks.discard)
 
     return WantedRefreshResponse(
         status="started",

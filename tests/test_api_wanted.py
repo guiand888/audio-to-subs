@@ -220,7 +220,9 @@ class TestListWantedEndpoint:
         )
         sync_session.commit()
 
-    def test_list_wanted_search_matches_across_all_pages(self, sync_session, authenticated_client):
+    def test_list_wanted_search_matches_across_all_pages(
+        self, sync_session, authenticated_client
+    ):
         """Search must run server-side, not just over the displayed page."""
         self._seed_titles(sync_session)
         response = authenticated_client.get("/api/wanted?search=matrix")
@@ -228,7 +230,9 @@ class TestListWantedEndpoint:
         titles = {i["title"] for i in response.json()["items"]}
         assert titles == {"The Matrix", "Matrix Reloaded"}
 
-    def test_list_wanted_search_is_case_insensitive(self, sync_session, authenticated_client):
+    def test_list_wanted_search_is_case_insensitive(
+        self, sync_session, authenticated_client
+    ):
         self._seed_titles(sync_session)
         response = authenticated_client.get("/api/wanted?search=BREAKING")
         assert response.status_code == 200
