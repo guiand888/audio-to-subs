@@ -1,5 +1,6 @@
 """Wanted API routes for Bazarr integration."""
 
+import asyncio
 import logging
 from datetime import datetime
 from enum import Enum
@@ -313,6 +314,7 @@ class WantedRefreshResponse(BaseModel):
     """Response model for wanted list refresh."""
 
     status: str = Field(description="Refresh status: started, completed, failed")
+    refresh_id: str = Field(description="Unique id for this refresh run")
     movies_processed: int = Field(default=0, description="Number of movies processed")
     episodes_processed: int = Field(
         default=0, description="Number of episodes processed"
@@ -334,35 +336,44 @@ async def refresh_wanted_list(
 ) -> WantedRefreshResponse:
     """Trigger a manual refresh of the wanted list from Bazarr.
 
-    This endpoint triggers an immediate poll of Bazarr for wanted items,
-    respecting the filtering scope specified in the request.
+    The poll runs in the background; this endpoint returns immediately with
+    ``status="started"`` and a ``refresh_id``. Progress is streamed to clients
+    over the global SSE channel (``/api/jobs/stream``) as ``refresh_progress``
+    events, and a final ``refresh_done`` event marks completion.
 
     The refresh:
     - Uses database settings first, falling back to environment variables
     - Respects the item_type filter (all, movies, episodes)
     - Respects the bazarr_track_no_subs setting
     - Updates the local cache with fresh data from Bazarr
-    - Returns counts of items processed
+    - Streams progress (processed / total) as it runs
 
     Args:
         item_type: Filter scope - "all" polls both movies and episodes,
                    "movie" polls only movies, "episode" polls only episodes
 
     Returns:
-        Refresh result with status and counts
+        Refresh handle with status "started" and a refresh_id
     """
+    import uuid
+
     from audio_to_subs.bazarr.poller import (
+        ProgressReporter,
         get_bazarr_client_with_settings,
         get_path_map,
         poll_bazarr_manually,
     )
+    from audio_to_subs.db.session import get_async_session
+    from audio_to_subs.queue_.events import (
+        publish_refresh_done,
+        publish_refresh_progress,
+    )
 
+    # Validate Bazarr is configured before spawning the background task, so we
+    # can fail fast with a clear error rather than an orphaned task.
     try:
-        # Get Bazarr client using database settings first, then environment fallback
-        client, bazarr_url, bazarr_api_key, bazarr_timeout = (
-            await get_bazarr_client_with_settings(db, settings)
-        )
-    except Exception as e:
+        client_probe, _, _, _ = await get_bazarr_client_with_settings(db, settings)
+    except Exception as e:  # noqa: BLE001
         logger.error("Failed to initialize Bazarr client: %s", type(e).__name__)
         await write_job_log(
             db,
@@ -371,42 +382,78 @@ async def refresh_wanted_list(
         )
         return WantedRefreshResponse(
             status="failed",
+            refresh_id="",
             movies_processed=0,
             episodes_processed=0,
             error="Bazarr client initialization failed",
         )
+    finally:
+        if client_probe is not None:
+            await client_probe.close()
 
-    if client is None:
+    if client_probe is None:
         return WantedRefreshResponse(
             status="failed",
+            refresh_id="",
             movies_processed=0,
             episodes_processed=0,
             error="Bazarr not configured",
         )
 
-    # Everything from here on must close the client on every exit path,
-    # including failures in get_path_map (not just poll_bazarr_manually).
-    try:
-        path_map = await get_path_map(db)
+    refresh_id = str(uuid.uuid4())
+    item_type = refresh_request.item_type.value
 
-        movies_processed, episodes_processed = await poll_bazarr_manually(
-            db, client, path_map, refresh_request.item_type.value
-        )
+    async def _run_refresh() -> None:
+        from audio_to_subs.api.deps import get_redis_client
 
-        return WantedRefreshResponse(
-            status="completed",
-            movies_processed=movies_processed,
-            episodes_processed=episodes_processed,
-            error=None,
-        )
+        redis = get_redis_client()
+        try:
+            async with get_async_session(settings.DATABASE_URL) as bg_db:
+                client, _, _, _ = await get_bazarr_client_with_settings(
+                    bg_db, settings
+                )
+                if client is None:
+                    await publish_refresh_done(
+                        redis, refresh_id, "failed", error="Bazarr not configured"
+                    )
+                    return
 
-    except Exception as e:
-        logger.error("Failed to refresh wanted list: %s", type(e).__name__)
-        return WantedRefreshResponse(
-            status="failed",
-            movies_processed=0,
-            episodes_processed=0,
-            error="Refresh failed",
-        )
-    finally:
-        await client.close()
+                try:
+                    path_map = await get_path_map(bg_db)
+
+                    reporter = ProgressReporter(
+                        callback=lambda processed, total, percent, stage: publish_refresh_progress(
+                            redis, refresh_id, processed, total, percent, stage
+                        )
+                    )
+
+                    movies_processed, episodes_processed = await poll_bazarr_manually(
+                        bg_db, client, path_map, item_type, reporter=reporter
+                    )
+
+                    await publish_refresh_done(
+                        redis,
+                        refresh_id,
+                        "completed",
+                        movies_processed=movies_processed,
+                        episodes_processed=episodes_processed,
+                    )
+                except Exception as e:  # noqa: BLE001
+                    logger.error("Background refresh failed: %s", e, exc_info=True)
+                    await publish_refresh_done(
+                        redis, refresh_id, "failed", error="Refresh failed"
+                    )
+                finally:
+                    await client.close()
+        finally:
+            await redis.aclose()
+
+    asyncio.create_task(_run_refresh())
+
+    return WantedRefreshResponse(
+        status="started",
+        refresh_id=refresh_id,
+        movies_processed=0,
+        episodes_processed=0,
+        error=None,
+    )

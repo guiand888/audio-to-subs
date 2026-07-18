@@ -250,6 +250,22 @@ export type SseEventData =
     }
   | { event: "cancel"; job_id: string }
   | { event: "done"; job_id: string; status: string; error?: string }
+  | {
+      event: "refresh_progress"
+      refresh_id: string
+      processed: number
+      total: number | null
+      percent: number
+      stage: string
+    }
+  | {
+      event: "refresh_done"
+      refresh_id: string
+      status: "completed" | "failed"
+      movies_processed: number
+      episodes_processed: number
+      error?: string
+    }
 
 // --------------- Bazarr Connection Test ---------------
 
@@ -280,6 +296,7 @@ export interface WantedRefreshRequest {
 
 export interface WantedRefreshResponse {
   status: "started" | "completed" | "failed"
+  refresh_id: string
   movies_processed: number
   episodes_processed: number
   error: string | null

@@ -5,6 +5,8 @@ Periodically polls Bazarr API for wanted subtitles and updates the local cache.
 
 import asyncio
 import logging
+import time
+from collections.abc import Callable, Coroutine
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Any
 
@@ -23,6 +25,84 @@ if TYPE_CHECKING:
     from audio_to_subs.bazarr.schemas import Episode, Movie
 
 logger = logging.getLogger(__name__)
+
+
+class ProgressReporter:
+    """Tracks refresh progress and emits throttled updates to a callback.
+
+    The poller knows the exact total of "wanted" items up front (Bazarr's
+    wanted endpoints return a ``total``). The opt-in no-subs pass walks the
+    entire library and only knows its item count after per-item filtering, so
+    its total is not known ahead of time. To keep a single coherent progress
+    signal, we start with the known wanted total and, once that is exhausted,
+    fall back to a live "processed" counter with no denominator.
+
+    Updates are throttled (~1 Hz) so a fast poll loop doesn't flood the
+    downstream pub/sub channel.
+    """
+
+    def __init__(
+        self,
+        callback: Callable[[int, int | None, int, str], Coroutine[Any, Any, None]]
+        | None = None,
+        *,
+        throttle_seconds: float = 1.0,
+    ) -> None:
+        self._callback = callback
+        self._throttle = throttle_seconds
+        self._processed = 0
+        self._known_total: int | None = 0
+        self._stage = "starting"
+        self._last_emit = 0.0
+
+    def set_known_total(self, total: int) -> None:
+        """Set the denominator known up front (wanted items)."""
+        self._known_total = total
+
+    def set_stage(self, stage: str) -> None:
+        self._stage = stage
+
+    def increment(self, by: int = 1) -> None:
+        self._processed += by
+
+    async def step(self, by: int = 1) -> None:
+        """Increment processed count and emit a (throttled) progress update.
+
+        Safe to call unconditionally; no-ops when no callback is configured.
+        """
+        self.increment(by)
+        await self.report()
+
+    @property
+    def processed(self) -> int:
+        return self._processed
+
+    @property
+    def total(self) -> int | None:
+        # Only report a denominator while the known (wanted) portion is being
+        # processed. Once we move into the unknown no-subs tail, report None so
+        # the UI shows a live counter instead of a fake estimate.
+        if self._known_total and self._processed < self._known_total:
+            return self._known_total
+        return None
+
+    @property
+    def percent(self) -> int:
+        total = self.total
+        if not total:
+            return 0
+        return min(100, round(self._processed / total * 100))
+
+    async def report(self, *, force: bool = False) -> None:
+        if self._callback is None:
+            return
+        now = time.monotonic()
+        if not force and (now - self._last_emit) < self._throttle:
+            return
+        self._last_emit = now
+        await self._callback(
+            self._processed, self.total, self.percent, self._stage
+        )
 
 
 class PollerState:
@@ -193,11 +273,89 @@ async def poll_once(
     return movies_processed + episodes_processed
 
 
+async def _seed_wanted_total(
+    client: BazarrClient,
+    reporter: ProgressReporter,
+    poll_movies: bool,
+    poll_episodes: bool,
+) -> None:
+    """Query Bazarr for the exact wanted counts up front to seed progress."""
+    wanted_total = 0
+    if poll_movies:
+        wanted_movies_page = await client.list_wanted_movies(length=1)
+        wanted_total += wanted_movies_page.total
+    if poll_episodes:
+        wanted_episodes_page = await client.list_wanted_episodes(length=1)
+        wanted_total += wanted_episodes_page.total
+    reporter.set_known_total(wanted_total)
+    reporter.set_stage("refreshing wanted")
+    await reporter.report(force=True)
+
+
+async def _process_wanted_movies(
+    db: "AsyncSession",
+    client: BazarrClient,
+    path_map: PathMap,
+    started_at: datetime,
+    reporter: ProgressReporter,
+) -> int:
+    """Fetch and cache all wanted movies, reporting progress per item."""
+    movies_page = await client.list_wanted_movies(length=200)
+    movie_details = await _fetch_movie_details(
+        client, [m.radarrId for m in movies_page.data]
+    )
+    processed = 0
+    for movie in movies_page.data:
+        movie_detail = movie_details.get(movie.radarrId)
+        await _process_movie(
+            db,
+            movie,
+            path_map,
+            started_at,
+            movie_detail.audio_language if movie_detail else None,
+            movie_detail.path if movie_detail else None,
+            movie_detail.subtitles if movie_detail else None,
+        )
+        processed += 1
+        await reporter.step()
+    return processed
+
+
+async def _process_wanted_episodes(
+    db: "AsyncSession",
+    client: BazarrClient,
+    path_map: PathMap,
+    started_at: datetime,
+    reporter: ProgressReporter,
+) -> int:
+    """Fetch and cache all wanted episodes, reporting progress per item."""
+    episodes_page = await client.list_wanted_episodes(length=200)
+    episode_details = await _fetch_episode_details(
+        client, {e.sonarrSeriesId for e in episodes_page.data}
+    )
+    processed = 0
+    for episode in episodes_page.data:
+        episode_detail = episode_details.get(episode.sonarrEpisodeId)
+        await _process_episode(
+            db,
+            episode,
+            path_map,
+            started_at,
+            episode_detail.audio_language if episode_detail else None,
+            episode_detail.path if episode_detail else None,
+            episode_detail.subtitles if episode_detail else None,
+        )
+        processed += 1
+        await reporter.step()
+    return processed
+
+
 async def poll_bazarr_manually(
     db: "AsyncSession",
     client: BazarrClient,
     path_map: PathMap,
     item_type: str | None = None,
+    reporter: ProgressReporter | None = None,
 ) -> tuple[int, int]:
     """Perform a poll of Bazarr items with optional type filtering.
 
@@ -219,10 +377,15 @@ async def poll_bazarr_manually(
             If None or "all", polls both movies and episodes.
             If "movie", polls only movies.
             If "episode", polls only episodes.
+        reporter: Optional progress reporter. A no-op reporter is used when
+            None so callers don't need to guard every progress call.
 
     Returns:
         Tuple of (movies_processed, episodes_processed) counts
     """
+    if reporter is None:
+        reporter = ProgressReporter()
+
     started_at = datetime.now(timezone.utc)
     logger.info(
         "Starting Bazarr poll at %s (item_type=%s)", started_at.isoformat(), item_type
@@ -241,55 +404,39 @@ async def poll_bazarr_manually(
             item_type is None or item_type == "all" or item_type == "episode"
         )
 
+        # The "wanted" portion has an exact total from Bazarr up front; seed the
+        # reporter so the progress bar can show "N of M" for this part.
+        await _seed_wanted_total(client, reporter, poll_movies, poll_episodes)
+
         # Process wanted movies
         if poll_movies:
-            movies_page = await client.list_wanted_movies(length=200)
-            movie_details = await _fetch_movie_details(
-                client, [m.radarrId for m in movies_page.data]
+            movies_processed = await _process_wanted_movies(
+                db, client, path_map, started_at, reporter
             )
-            for movie in movies_page.data:
-                movie_detail = movie_details.get(movie.radarrId)
-                await _process_movie(
-                    db,
-                    movie,
-                    path_map,
-                    started_at,
-                    movie_detail.audio_language if movie_detail else None,
-                    movie_detail.path if movie_detail else None,
-                    movie_detail.subtitles if movie_detail else None,
-                )
-                movies_processed += 1
 
         # Process wanted episodes
         if poll_episodes:
-            episodes_page = await client.list_wanted_episodes(length=200)
-            episode_details = await _fetch_episode_details(
-                client, {e.sonarrSeriesId for e in episodes_page.data}
+            episodes_processed = await _process_wanted_episodes(
+                db, client, path_map, started_at, reporter
             )
-            for episode in episodes_page.data:
-                episode_detail = episode_details.get(episode.sonarrEpisodeId)
-                await _process_episode(
-                    db,
-                    episode,
-                    path_map,
-                    started_at,
-                    episode_detail.audio_language if episode_detail else None,
-                    episode_detail.path if episode_detail else None,
-                    episode_detail.subtitles if episode_detail else None,
-                )
-                episodes_processed += 1
 
-        # If tracking no-subs items, also check all items
+        # If tracking no-subs items, also check all items. This portion has no
+        # known total, so the reporter drops the denominator and the UI shows a
+        # live processed counter instead.
         if track_no_subs:
-            if poll_movies:
-                await _poll_all_movies(db, client, path_map, started_at)
-            if poll_episodes:
-                await _poll_all_episodes(db, client, path_map, started_at)
+            no_subs_movies, no_subs_episodes = await _run_no_subs_pass(
+                db, client, path_map, started_at, reporter, poll_movies, poll_episodes
+            )
+            movies_processed += no_subs_movies
+            episodes_processed += no_subs_episodes
 
         # Delete stale items (no longer wanted) - only for types that were polled
         deleted_count = await _delete_stale(db, started_at, poll_movies, poll_episodes)
         if deleted_count > 0:
             logger.info("Deleted %d stale items from cache", deleted_count)
+
+        reporter.set_stage("done")
+        await reporter.report(force=True)
 
         logger.info(
             "Bazarr poll complete: processed %d movies, %d episodes, deleted %d stale",
@@ -307,6 +454,8 @@ async def poll_bazarr_manually(
     except Exception as e:
         logger.error("Error during Bazarr poll: %s", e, exc_info=True)
         await write_job_log(db, LogLevel.ERROR, f"Bazarr sync failed: {e}")
+        reporter.set_stage("error")
+        await reporter.report(force=True)
         raise
 
     return movies_processed, episodes_processed
@@ -574,12 +723,44 @@ async def _process_episode(
     )
 
 
+async def _run_no_subs_pass(
+    db: "AsyncSession",
+    client: BazarrClient,
+    path_map: PathMap,
+    started_at: datetime,
+    reporter: ProgressReporter,
+    poll_movies: bool,
+    poll_episodes: bool,
+) -> tuple[int, int]:
+    """Scan the full library for items with no subtitles (opt-in).
+
+    This portion has no known total up front, so the reporter drops its
+    denominator and the UI shows a live processed counter instead.
+    """
+    reporter.set_stage("scanning library for missing subtitles")
+    reporter.set_known_total(0)
+    await reporter.report()
+
+    movies_added = 0
+    episodes_added = 0
+    if poll_movies:
+        movies_added = await _poll_all_movies(
+            db, client, path_map, started_at, reporter
+        )
+    if poll_episodes:
+        episodes_added = await _poll_all_episodes(
+            db, client, path_map, started_at, reporter
+        )
+    return movies_added, episodes_added
+
+
 async def _poll_all_movies(
     db: "AsyncSession",
     client: BazarrClient,
     path_map: PathMap,
     started_at: datetime,
-) -> None:
+    reporter: ProgressReporter | None = None,
+) -> int:
     """Poll all movies and add those with no subtitles to cache.
 
     This is expensive and opt-in via bazarr_track_no_subs setting.
@@ -589,7 +770,12 @@ async def _poll_all_movies(
         client: BazarrClient instance
         path_map: PathMap for path translation
         started_at: Poll start time
+        reporter: Optional progress reporter (no known total for this pass).
+
+    Returns:
+        Number of cache entries added during this pass.
     """
+    added = 0
     try:
         movies_page = await client.list_all_movies(length=200)
         for movie in movies_page.data:
@@ -621,10 +807,15 @@ async def _poll_all_movies(
                         active_job_id=None,
                     )
                     db.add(cache_entry)
+                    added += 1
+                    if reporter is not None:
+                        await reporter.step()
 
         await db.commit()
     except Exception as e:
         logger.warning("Failed to poll all movies: %s", e)
+
+    return added
 
 
 async def _poll_all_episodes(
@@ -632,7 +823,8 @@ async def _poll_all_episodes(
     client: BazarrClient,
     path_map: PathMap,
     started_at: datetime,
-) -> None:
+    reporter: ProgressReporter | None = None,
+) -> int:
     """Poll all episodes and add those with no subtitles to cache.
 
     This is expensive and opt-in via bazarr_track_no_subs setting.
@@ -645,7 +837,12 @@ async def _poll_all_episodes(
         client: BazarrClient instance
         path_map: PathMap for path translation
         started_at: Poll start time
+        reporter: Optional progress reporter (no known total for this pass).
+
+    Returns:
+        Number of cache entries added during this pass.
     """
+    added = 0
     try:
         # Phase 1: HTTP calls only - collect cache entries without DB access
         cache_entries_to_add = []
@@ -696,10 +893,15 @@ async def _poll_all_episodes(
                     active_job_id=None,
                 )
                 db.add(cache_entry)
+                added += 1
+                if reporter is not None:
+                    await reporter.step()
 
         await db.commit()
     except Exception as e:
         logger.warning("Failed to poll all episodes: %s", e)
+
+    return added
 
 
 async def _delete_stale(
