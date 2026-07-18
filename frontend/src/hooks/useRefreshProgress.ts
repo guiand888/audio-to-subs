@@ -85,6 +85,14 @@ export function useRefreshProgress(refreshId: string | null) {
             active: true,
             status: data.status,
             error: data.error ?? null,
+            // refresh_done carries the authoritative final count - the last
+            // (throttled) refresh_progress event may have been emitted
+            // before the very last few items were processed, so adopt these
+            // over whatever `processed` was last reported.
+            processed:
+              data.status === "completed"
+                ? data.movies_processed + data.episodes_processed
+                : p.processed,
             // On success, pin the bar full so it reads complete before reset.
             percent: data.status === "completed" ? 100 : p.percent,
           }))

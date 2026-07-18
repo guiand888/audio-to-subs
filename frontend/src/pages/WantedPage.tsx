@@ -294,7 +294,10 @@ export function WantedPage() {
   // refresh the table. Clear the bar after a short delay.
   const didFinalize = useRef(false)
   useEffect(() => {
-    if (!refresh.active || refresh.status == null || didFinalize.current) return
+    // "started" is set as soon as the SSE subscription opens, before any
+    // real progress arrives - only "completed"/"failed" are terminal.
+    const isTerminal = refresh.status === "completed" || refresh.status === "failed"
+    if (!refresh.active || !isTerminal || didFinalize.current) return
     didFinalize.current = true
 
     void queryClient.invalidateQueries({ queryKey: ["wanted"] })
@@ -362,13 +365,24 @@ export function WantedPage() {
     )
   }, [data?.items])
 
-  // Derive language options from all visible items (keep the full
-  // MissingSubtitle so we can render the real language name, like the
-  // "Missing" column does, rather than the bare two-letter code).
+  // Options for the language filter dropdown come from a dedicated query that
+  // omits `language`, so picking a language doesn't shrink `data.items` to
+  // only that language and make every other option disappear from the list.
+  const { data: langOptionsData } = useWanted({
+    item_type: itemType,
+    search: search || undefined,
+    has_any_subs: onlyNoSubs ? false : undefined,
+    page: 1,
+    page_size: 1000,
+  })
+
+  // Derive language options (keep the full MissingSubtitle so we can render
+  // the real language name, like the "Missing" column does, rather than the
+  // bare two-letter code).
   const langOptions = useMemo(() => {
-    if (!data?.items) return []
+    if (!langOptionsData?.items) return []
     const byCode = new Map<string, MissingSubtitle>()
-    for (const item of data.items) {
+    for (const item of langOptionsData.items) {
       for (const ms of item.missing_subtitles) {
         if (!byCode.has(ms.code2)) byCode.set(ms.code2, ms)
       }
@@ -376,7 +390,7 @@ export function WantedPage() {
     return [...byCode.values()].sort((a, b) =>
       (a.name ?? a.code2).localeCompare(b.name ?? b.code2),
     )
-  }, [data?.items])
+  }, [langOptionsData?.items])
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 1
 

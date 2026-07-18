@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, within } from "@testing-library/react"
+import { act, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -43,19 +43,62 @@ const MOCK_WANTED_EMPTY = {
   last_refreshed_at: null,
 }
 
-const MOCK_REFRESH_SUCCESS = {
-  status: "completed",
-  movies_processed: 5,
-  episodes_processed: 3,
+// POST /api/wanted/refresh only kicks the refresh off; the outcome streams
+// back over SSE (see MockEventSource below), matching the async contract
+// introduced by the progress-bar refresh (data.status "started"/"failed",
+// never "completed" synchronously).
+const MOCK_REFRESH_STARTED = {
+  status: "started",
+  refresh_id: "refresh-1",
+  movies_processed: 0,
+  episodes_processed: 0,
   error: null,
 }
 
 const MOCK_REFRESH_FAILURE = {
   status: "failed",
+  refresh_id: "",
   movies_processed: 0,
   episodes_processed: 0,
   error: "Connection failed",
 }
+
+// Minimal EventSource stand-in: jsdom has no native EventSource, and
+// useRefreshProgress opens one against /api/jobs/stream as soon as a refresh
+// starts. Tests that need to observe the post-refresh toast grab the latest
+// instance and call `.emit(...)` to simulate a server-sent frame.
+class MockEventSource {
+  static instances: MockEventSource[] = []
+  onmessage: ((ev: { data: string }) => void) | null = null
+  onerror: (() => void) | null = null
+
+  constructor(public url: string) {
+    MockEventSource.instances.push(this)
+  }
+
+  close() {}
+
+  static reset() {
+    MockEventSource.instances = []
+  }
+
+  static latest(): MockEventSource | undefined {
+    return MockEventSource.instances[MockEventSource.instances.length - 1]
+  }
+
+  emit(data: unknown) {
+    // The onmessage handler triggers a React state update (setProgress in
+    // useRefreshProgress); wrap it so React batches/flushes it the same way
+    // it would a real browser event, avoiding an "update not wrapped in
+    // act(...)" warning from these synthetic SSE frames.
+    act(() => {
+      this.onmessage?.({ data: JSON.stringify(data) })
+    })
+  }
+}
+
+// @ts-expect-error test-only polyfill for an API jsdom doesn't implement
+global.EventSource = MockEventSource
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({
@@ -70,8 +113,9 @@ function wrapper({ children }: { children: React.ReactNode }) {
 describe("WantedPage - Refresh Wanted List", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    MockEventSource.reset()
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
-    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_SUCCESS)
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
 
   it("renders Refresh button", async () => {
@@ -84,8 +128,8 @@ describe("WantedPage - Refresh Wanted List", () => {
 
   it("Refresh button is disabled during refresh", async () => {
     const user = userEvent.setup()
-    let resolveRefresh: (value: typeof MOCK_REFRESH_SUCCESS) => void
-    const refreshPromise = new Promise<typeof MOCK_REFRESH_SUCCESS>((resolve) => {
+    let resolveRefresh: (value: typeof MOCK_REFRESH_STARTED) => void
+    const refreshPromise = new Promise<typeof MOCK_REFRESH_STARTED>((resolve) => {
       resolveRefresh = resolve
     })
     vi.mocked(api.post).mockReturnValue(refreshPromise)
@@ -101,24 +145,18 @@ describe("WantedPage - Refresh Wanted List", () => {
     // Click the button
     await user.click(screen.getByText("Refresh"))
 
-    // Should show loading state and disable button
+    // Should show loading state and disable button once the POST resolves
+    // and useRefreshProgress picks up the returned refresh_id.
+    resolveRefresh!(MOCK_REFRESH_STARTED)
     await waitFor(() => {
       const button = screen.getByText("Refreshing...")
       expect(button).toBeInTheDocument()
       expect(button.closest("button")).toBeDisabled()
     })
-
-    // Resolve the promise so the test doesn't leave a dangling act() warning
-    resolveRefresh!(MOCK_REFRESH_SUCCESS)
   })
 
   it("shows loading state during refresh", async () => {
     const user = userEvent.setup()
-    let resolveRefresh: (value: typeof MOCK_REFRESH_SUCCESS) => void
-    const refreshPromise = new Promise<typeof MOCK_REFRESH_SUCCESS>((resolve) => {
-      resolveRefresh = resolve
-    })
-    vi.mocked(api.post).mockReturnValue(refreshPromise)
 
     render(<WantedPage />, { wrapper })
 
@@ -127,12 +165,10 @@ describe("WantedPage - Refresh Wanted List", () => {
     })
     await user.click(screen.getByText("Refresh"))
 
-    // Should show loading state
+    // Should show loading state as soon as the started response is picked up
     await waitFor(() => {
       expect(screen.getByText("Refreshing...")).toBeInTheDocument()
     })
-
-    resolveRefresh!(MOCK_REFRESH_SUCCESS)
   })
 
   it("shows success notification on completion", async () => {
@@ -145,13 +181,25 @@ describe("WantedPage - Refresh Wanted List", () => {
     })
     await user.click(screen.getByText("Refresh"))
 
-    // Default tab is "All" - toast should mention both movies and episodes
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies and 3 episodes")
+      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+    })
+
+    // The backend streams the outcome over SSE; simulate the final frame.
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: "refresh-1",
+      status: "completed",
+      movies_processed: 5,
+      episodes_processed: 3,
+    })
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 8 items")
     })
   })
 
-  it("shows error notification on failure", async () => {
+  it("shows error notification on a synchronous refresh failure", async () => {
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_FAILURE)
     const user = userEvent.setup()
 
@@ -412,8 +460,9 @@ describe("WantedPage - Transcribe Dialog language selection", () => {
 describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()
+    MockEventSource.reset()
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
-    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_SUCCESS)
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
 
   it("refreshes only movies when the Movies tab is selected", async () => {
@@ -431,7 +480,19 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
       expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "movie" })
     })
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies")
+      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+    })
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: "refresh-1",
+      status: "completed",
+      movies_processed: 5,
+      episodes_processed: 0,
+    })
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 items")
     })
   })
 
@@ -450,7 +511,19 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
       expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "episode" })
     })
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith("Refreshed 3 episodes")
+      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+    })
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: "refresh-1",
+      status: "completed",
+      movies_processed: 0,
+      episodes_processed: 3,
+    })
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 3 items")
     })
   })
 
@@ -468,7 +541,19 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
       expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "all" })
     })
     await waitFor(() => {
-      expect(toast.success).toHaveBeenCalledWith("Refreshed 5 movies and 3 episodes")
+      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+    })
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: "refresh-1",
+      status: "completed",
+      movies_processed: 5,
+      episodes_processed: 3,
+    })
+
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 8 items")
     })
   })
 })
@@ -534,7 +619,53 @@ describe("WantedPage - Transcribe error handling", () => {
     })
   })
 
-describe("WantedPage - Default title sort & case-insensitive search", () => {
+  it("shows overwrite confirm dialog on subtitle_exists and retries with overwrite", async () => {
+    // First attempt collides with an existing subtitle; the second (after
+    // confirming) succeeds with overwrite=true.
+    vi.mocked(api.post)
+      .mockRejectedValueOnce(
+        new ApiError(409, {
+          code: "subtitle_exists",
+          message: "An en subtitle already exists at /movies/foo.en.srt",
+          existing_path: "/movies/foo.en.srt",
+          language_code: "en",
+        }),
+      )
+      .mockResolvedValueOnce({ id: "new-job", status: "queued" } as never)
+
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(screen.getByText("French Movie")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Transcribe"))
+
+    await waitFor(() => {
+      expect(screen.getByText("Queue job")).toBeInTheDocument()
+    })
+    await user.click(screen.getByText("Queue job"))
+
+    // Confirm dialog appears instead of an error toast.
+    await waitFor(() => {
+      expect(screen.getByText("Subtitle already exists")).toBeInTheDocument()
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+
+    await user.click(screen.getByText("Overwrite and retry"))
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenLastCalledWith(
+        "/api/jobs",
+        expect.objectContaining({ overwrite: true }),
+      )
+    })
+    expect(toast.success).toHaveBeenCalledWith("Job queued")
+  })
+})
+
+describe("WantedPage - Default title sort & search", () => {
   const MOCK_TITLE_ITEMS = [
     {
       id: "movie:3",
@@ -587,7 +718,7 @@ describe("WantedPage - Default title sort & case-insensitive search", () => {
       total: MOCK_TITLE_ITEMS.length,
       last_refreshed_at: null,
     })
-    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_SUCCESS)
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
 
   it("sorts items alphabetically by title by default, ignoring case", async () => {
@@ -607,7 +738,10 @@ describe("WantedPage - Default title sort & case-insensitive search", () => {
     expect(renderedTitles).toEqual(["Alpha Movie", "mango Movie", "zebra Movie"])
   })
 
-  it("filters case-insensitively via the search box", async () => {
+  it("sends the typed search term to the server instead of filtering client-side", async () => {
+    // Search is applied server-side (see audio_to_subs/api/routes/wanted.py),
+    // so the client's only job is to forward the term as a query param - it
+    // must not re-filter the page it already received.
     const user = userEvent.setup()
 
     render(<WantedPage />, { wrapper })
@@ -619,58 +753,9 @@ describe("WantedPage - Default title sort & case-insensitive search", () => {
     await user.type(screen.getByPlaceholderText("Search…"), "MAN")
 
     await waitFor(() => {
-      const all = within(screen.getByRole("table")).getAllByRole("row")
-      const dataRows = all.slice(1)
-      expect(dataRows.length).toBe(1)
-      expect(within(dataRows[0]).getAllByRole("cell")[0]).toHaveTextContent(
-        "mango Movie",
+      expect(api.get).toHaveBeenLastCalledWith(
+        expect.stringContaining("search=MAN"),
       )
     })
-  })
-})
-
-  it("shows overwrite confirm dialog on subtitle_exists and retries with overwrite", async () => {
-    // First attempt collides with an existing subtitle; the second (after
-    // confirming) succeeds with overwrite=true.
-    vi.mocked(api.post)
-      .mockRejectedValueOnce(
-        new ApiError(409, {
-          code: "subtitle_exists",
-          message: "An en subtitle already exists at /movies/foo.en.srt",
-          existing_path: "/movies/foo.en.srt",
-          language_code: "en",
-        }),
-      )
-      .mockResolvedValueOnce({ id: "new-job", status: "queued" } as never)
-
-    const user = userEvent.setup()
-
-    render(<WantedPage />, { wrapper })
-
-    await waitFor(() => {
-      expect(screen.getByText("French Movie")).toBeInTheDocument()
-    })
-    await user.click(screen.getByText("Transcribe"))
-
-    await waitFor(() => {
-      expect(screen.getByText("Queue job")).toBeInTheDocument()
-    })
-    await user.click(screen.getByText("Queue job"))
-
-    // Confirm dialog appears instead of an error toast.
-    await waitFor(() => {
-      expect(screen.getByText("Subtitle already exists")).toBeInTheDocument()
-    })
-    expect(toast.error).not.toHaveBeenCalled()
-
-    await user.click(screen.getByText("Overwrite and retry"))
-
-    await waitFor(() => {
-      expect(api.post).toHaveBeenLastCalledWith(
-        "/api/jobs",
-        expect.objectContaining({ overwrite: true }),
-      )
-    })
-    expect(toast.success).toHaveBeenCalledWith("Job queued")
   })
 })
