@@ -362,14 +362,20 @@ export function WantedPage() {
     )
   }, [data?.items])
 
-  // Derive language options from all visible items
+  // Derive language options from all visible items (keep the full
+  // MissingSubtitle so we can render the real language name, like the
+  // "Missing" column does, rather than the bare two-letter code).
   const langOptions = useMemo(() => {
     if (!data?.items) return []
-    const codes = new Set<string>()
+    const byCode = new Map<string, MissingSubtitle>()
     for (const item of data.items) {
-      for (const ms of item.missing_subtitles) codes.add(ms.code2)
+      for (const ms of item.missing_subtitles) {
+        if (!byCode.has(ms.code2)) byCode.set(ms.code2, ms)
+      }
     }
-    return [...codes].sort()
+    return [...byCode.values()].sort((a, b) =>
+      (a.name ?? a.code2).localeCompare(b.name ?? b.code2),
+    )
   }, [data?.items])
 
   const totalPages = data ? Math.ceil(data.total / pageSize) : 1
@@ -431,14 +437,14 @@ export function WantedPage() {
               setPage(1)
             }}
           >
-            <SelectTrigger className="w-[120px]">
+            <SelectTrigger className="w-[160px]">
               <SelectValue placeholder="Language" />
             </SelectTrigger>
             <SelectContent>
-              <SelectItem value="_all">All langs</SelectItem>
-              {langOptions.map((code) => (
-                <SelectItem key={code} value={code}>
-                  {code}
+              <SelectItem value="_all">All</SelectItem>
+              {langOptions.map((ms) => (
+                <SelectItem key={ms.code2} value={ms.code2}>
+                  {langLabel(ms)}
                 </SelectItem>
               ))}
             </SelectContent>
