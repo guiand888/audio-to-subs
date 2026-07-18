@@ -32,6 +32,17 @@ async def get_redis() -> AsyncGenerator[Redis, None]:
         await redis.close()
 
 
+def get_redis_client() -> Redis:
+    """Create a standalone Redis client (for use outside a request scope).
+
+    Callers are responsible for closing it via ``redis.aclose()``.
+    """
+    import redis.asyncio as redis_lib
+
+    settings = get_settings()
+    return redis_lib.from_url(settings.REDIS_URL)
+
+
 # Re-export from auth.deps for convenience
 CurrentUser = Annotated[User, Depends(get_current_user)]
 OptionalUser = Annotated[User | None, Depends(get_optional_user)]

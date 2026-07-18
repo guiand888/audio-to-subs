@@ -93,6 +93,69 @@ async def publish_progress(
     await _publish(redis, CHANNEL_GLOBAL, global_payload)
 
 
+async def publish_refresh_progress(
+    redis: Redis,
+    refresh_id: str,
+    processed: int,
+    total: int | None,
+    percent: int,
+    stage: str,
+) -> None:
+    """Publish a progress update for a Wanted-list refresh.
+
+    Emitted on the global fan-out channel so the already-mounted global SSE
+    stream carries it to every connected client. The refresh has no Job row,
+    so it is identified by a refresh_id rather than a job_id.
+
+    Args:
+        redis: Redis async client
+        refresh_id: Unique id for this refresh run
+        processed: Number of items processed so far
+        total: Known total of wanted items, or None when unknown (no-subs pass)
+        percent: Progress percentage (0-100), 0 when total is unknown
+        stage: Human-readable current stage
+    """
+    payload = {
+        "event": "refresh_progress",
+        "refresh_id": refresh_id,
+        "processed": processed,
+        "total": total,
+        "percent": percent,
+        "stage": stage,
+    }
+    await _publish(redis, CHANNEL_GLOBAL, payload)
+
+
+async def publish_refresh_done(
+    redis: Redis,
+    refresh_id: str,
+    status: str,
+    movies_processed: int = 0,
+    episodes_processed: int = 0,
+    error: str | None = None,
+) -> None:
+    """Publish completion of a Wanted-list refresh.
+
+    Args:
+        redis: Redis async client
+        refresh_id: Unique id for this refresh run
+        status: Final status ('completed' or 'failed')
+        movies_processed: Movies processed this run
+        episodes_processed: Episodes processed this run
+        error: Optional error message on failure
+    """
+    payload: dict[str, Any] = {
+        "event": "refresh_done",
+        "refresh_id": refresh_id,
+        "status": status,
+        "movies_processed": movies_processed,
+        "episodes_processed": episodes_processed,
+    }
+    if error:
+        payload["error"] = error
+    await _publish(redis, CHANNEL_GLOBAL, payload)
+
+
 async def publish_cancel(redis: Redis, job_id: str) -> None:
     """Publish a cancellation notification for a job.
 
