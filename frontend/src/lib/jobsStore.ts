@@ -84,8 +84,7 @@ function liveJobFromApi(j: JobResponse): LiveJob {
 // Minimal LiveJob created purely from an SSE event when the store has never
 // seen the job (e.g. a progress event fired before the seed caught up).
 function liveJobFromEvent(event: "progress" | "cancel" | "done", jobId: string): LiveJob {
-  const status =
-    event === "cancel" ? "cancelled" : event === "done" ? "running" : "running"
+  const status = event === "cancel" ? "cancelled" : "running"
   return {
     id: jobId,
     status,
@@ -193,7 +192,13 @@ export const useJobsStore = create<JobsState>()((set) => ({
             step_index: existing.step_index,
             step_total: existing.step_total,
           }
-        } else {
+        } else if (j.status === "queued" || j.status === "running") {
+          // Don't resurrect a job the store doesn't know about unless it's
+          // still active. GET /api/jobs?limit=200 keeps returning recently
+          // finished jobs after they finish, so a terminal job absent from
+          // the store here means the user already watched it fade out and
+          // remove() dropped it - re-adding it on the next merge (e.g. a
+          // "new"-triggered re-seed) would make a dismissed card reappear.
           jobs[j.id] = liveJobFromApi(j)
         }
       }

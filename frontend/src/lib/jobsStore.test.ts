@@ -274,6 +274,18 @@ describe("jobsStore", () => {
       expect(jobs["job-2"]).toBeDefined()
       expect(jobs["job-2"].source_ref).toBe("456")
     })
+
+    it("does not resurrect a terminal job the user already dismissed via remove()", () => {
+      // job-1 finished, faded out, and was removed from the store - it's no
+      // longer present, but GET /api/jobs?limit=200 still returns it.
+      useJobsStore.getState().seed([MOCK_JOB])
+      useJobsStore.getState().remove("job-1")
+      expect(useJobsStore.getState().jobs["job-1"]).toBeUndefined()
+
+      useJobsStore.getState().merge([{ ...MOCK_JOB, status: "done" }])
+
+      expect(useJobsStore.getState().jobs["job-1"]).toBeUndefined()
+    })
   })
 
   describe("remove()", () => {
