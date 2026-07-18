@@ -30,30 +30,28 @@ import {
   TableRow,
 } from "@/components/ui/table"
 
-const LEVEL_OPTIONS: { value: LogLevel; label: string; color: string }[] = [
-  { value: "debug", label: "Debug", color: "text-muted-foreground" },
-  { value: "info", label: "Info", color: "text-blue-600" },
-  { value: "warning", label: "Warning", color: "text-yellow-600" },
-  { value: "error", label: "Error", color: "text-red-600" },
+const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
+  { value: "debug", label: "Debug" },
+  { value: "info", label: "Info" },
+  { value: "warning", label: "Warning" },
+  { value: "error", label: "Error" },
 ]
 
-// Get color class for log level
-function getLevelColor(level: LogLevel): string {
-  const option = LEVEL_OPTIONS.find((o) => o.value === level)
-  return option?.color || "text-muted-foreground"
-}
-
-// Get level badge variant
-function getLevelVariant(level: LogLevel): "default" | "secondary" | "destructive" | "outline" {
+// Solid, theme-aware badge classes per log level.
+// White text is used on every level for consistent, high-contrast legibility
+// in both light and dark mode (tokens shift per theme in index.css).
+function getLevelBadgeClass(level: LogLevel): string {
   switch (level) {
-    case "error":
-      return "destructive"
-    case "warning":
-      return "secondary"
     case "debug":
-      return "outline"
+      return "bg-log-debug text-white border-transparent"
+    case "info":
+      return "bg-log-info text-white border-transparent"
+    case "warning":
+      return "bg-log-warning text-white border-transparent"
+    case "error":
+      return "bg-log-error text-white border-transparent"
     default:
-      return "default"
+      return "bg-muted text-foreground border-transparent"
   }
 }
 
@@ -249,8 +247,8 @@ export function LogsPage() {
                         </TableCell>
                         <TableCell className="p-3">
                           <Badge
-                            variant={getLevelVariant(log.level)}
-                            className={getLevelColor(log.level)}
+                            variant="outline"
+                            className={getLevelBadgeClass(log.level)}
                           >
                             {log.level.toUpperCase()}
                           </Badge>
