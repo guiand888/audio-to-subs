@@ -1,6 +1,9 @@
 # Deployment quickstart
 
 Two ways to run the stack. Both boot `backend` + `worker` + `frontend` + `redis`.
+Both build `backend`/`worker`/`frontend` directly from the GitHub repo at a
+pinned tag (`docker-compose.yml` / `docker-compose.docker.yml`'s `build.context`
+is a Git URL) — no local clone needed, `up -d --build` alone is enough.
 
 ## Option A — Podman secrets (recommended)
 
@@ -54,6 +57,17 @@ Once HTTPS is in front, set `BEHIND_TLS=true` in `.env` (both deployment
 paths read it) so the session cookie gets the `Secure` flag, then
 recreate the containers.
 
+## Local development builds
+
+Building from the working tree (instead of the pinned GitHub tag) needs the
+dev override, which restores a local `build.context`:
+
+```bash
+podman compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+# or, for the env-file path:
+podman compose -f docker-compose.docker.yml -f docker-compose.dev.yml up -d --build
+```
+
 ## Notes
 
 - `SESSION_SECRET` is generated automatically into the shared `/data` volume on
@@ -61,4 +75,6 @@ recreate the containers.
 - Bazarr/Sonarr/Radarr are optional and live in `docker-compose.override.yml`
   (auto-included by `docker compose`/`podman compose`). The core app boots
   without them.
+- `docker-compose.dev.yml` (local-build override, see above) is **not**
+  auto-included — it only applies when passed explicitly via `-f`.
 - The full deployment reference lives in `dev/v2/DEPLOYMENT.md`.

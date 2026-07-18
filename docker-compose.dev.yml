@@ -1,0 +1,25 @@
+# Local development override: build from the working tree instead of the
+# pinned GitHub tag baked into docker-compose.yml / docker-compose.docker.yml.
+#
+# Not auto-included (unlike docker-compose.override.yml, which is the
+# optional Sonarr/Radarr/Bazarr stack) — layer it explicitly:
+#
+#   podman compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+#   # or, for the env-file path:
+#   podman compose -f docker-compose.docker.yml -f docker-compose.dev.yml up -d --build
+
+services:
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile

@@ -62,14 +62,23 @@ run:  ## Run production container (requires videos/ directory and Podman secret)
 shell:  ## Open a nix develop shell (backend + frontend toolchain)
 	nix develop
 
-compose-up:  ## Start services with Podman Compose
-	podman-compose up
+compose-up:  ## Start services with Podman Compose (builds from the pinned GitHub tag, not this checkout)
+	podman-compose up -d --build
 
 compose-down:  ## Stop services with Podman Compose
 	podman-compose down
 
 compose-logs:  ## View logs from services
 	podman-compose logs -f
+
+compose-dev-up:  ## Start services with Podman Compose, building from this checkout
+	podman-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+compose-dev-down:  ## Stop services started with compose-dev-up
+	podman-compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+compose-dev-logs:  ## View logs from services started with compose-dev-up
+	podman-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 secret-create:  ## Create Podman secret for API key (interactive)
 	@read -p "Enter Mistral API Key: " api_key; \
