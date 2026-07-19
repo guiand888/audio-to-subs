@@ -1,7 +1,7 @@
 // Wanted page: search, tabs (All/Movies/Series), only-no-subs toggle,
 // missing-lang filter, table, live active-job indicator, Transcribe dialog.
 
-import { useState, useEffect, useMemo, useRef } from "react"
+import { useState, useEffect, useMemo } from "react"
 import { useQueryClient } from "@tanstack/react-query"
 import { Loader2, Search, RefreshCw } from "lucide-react"
 import { toast } from "sonner"
@@ -35,8 +35,7 @@ import {
 } from "@/components/ui/select"
 import { useWanted } from "@/hooks/useWanted"
 import { useCreateJob } from "@/hooks/useJobs"
-import { useRefreshWanted } from "@/hooks/useRefreshWanted"
-import { useRefreshProgress } from "@/hooks/useRefreshProgress"
+import { useWantedRefresh } from "@/hooks/useWantedRefresh"
 import { useJobsStore } from "@/lib/jobsStore"
 import { ApiError } from "@/lib/api"
 import { Progress } from "@/components/ui/progress"
@@ -277,10 +276,11 @@ export function WantedPage() {
   const [pageSize, setPageSize] = useState(50)
   const [transcribeItem, setTranscribeItem] = useState<WantedItem | null>(null)
 
-  // Refresh state. The refresh runs in the background on the backend and
-  // streams progress over SSE; refreshId pins the in-flight run.
-  const [refreshId, setRefreshId] = useState<string | null>(null)
-  const refresh = useRefreshProgress(refreshId)
+  // Refresh lifecycle (subscribe-first + SSE progress + persisted-state
+  // fallback) is encapsulated in useWantedRefresh. The button and progress
+  // bar below read directly off `refresh.progress`; finalization (toast,
+  // table invalidate, 3s reset) happens inside the hook.
+  const refresh = useWantedRefresh()
 
   // Invalidate wanted query when a job finishes
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
@@ -290,57 +290,9 @@ export function WantedPage() {
     }
   }, [lastTerminalJobId, queryClient])
 
-  // When the SSE stream reports the refresh finished, surface the result and
-  // refresh the table. Clear the bar after a short delay.
-  const didFinalize = useRef(false)
-  useEffect(() => {
-    // "started" is set as soon as the SSE subscription opens, before any
-    // real progress arrives - only "completed"/"failed" are terminal.
-    const isTerminal = refresh.status === "completed" || refresh.status === "failed"
-    if (!refresh.active || !isTerminal || didFinalize.current) return
-    didFinalize.current = true
-
-    void queryClient.invalidateQueries({ queryKey: ["wanted"] })
-    if (refresh.status === "completed") {
-      toast.success(`Refreshed ${refresh.processed} items`)
-    } else {
-      toast.error(refresh.error || "Failed to refresh wanted list")
-    }
-
-    const t = setTimeout(() => {
-      setRefreshId(null)
-      didFinalize.current = false
-    }, 3000)
-    return () => clearTimeout(t)
-  }, [refresh.active, refresh.status, refresh.processed, refresh.error, queryClient])
-
-  // Refresh mutation
-  const refreshMutation = useRefreshWanted()
-
   // Refresh wanted list handler
   const handleRefresh = () => {
-    didFinalize.current = false
-    refreshMutation.mutate(
-      { item_type: itemType },
-      {
-        onSuccess: (data) => {
-          if (data.status === "failed") {
-            toast.error(data.error || "Failed to refresh wanted list")
-            return
-          }
-          // status === "started": backend will stream progress via SSE.
-          setRefreshId(data.refresh_id)
-        },
-        onError: (error) => {
-          if (error instanceof ApiError) {
-            toast.error(`Failed to refresh wanted list: ${error.detail}`)
-          } else {
-            const errorMessage = error instanceof Error ? error.message : "Unknown error"
-            toast.error("Failed to refresh wanted list: " + errorMessage)
-          }
-        },
-      },
-    )
+    refresh.start({ item_type: itemType })
   }
 
   const { data, isLoading } = useWanted({
@@ -471,9 +423,9 @@ export function WantedPage() {
             variant="outline"
             size="sm"
             onClick={handleRefresh}
-            disabled={refresh.active}
+            disabled={refresh.progress.active}
           >
-            {refresh.active ? (
+            {refresh.progress.active ? (
               <>
                 <Loader2 className="h-4 w-4 animate-spin" />
                 Refreshing...
@@ -486,16 +438,20 @@ export function WantedPage() {
             )}
           </Button>
 
-          {refresh.active && (
+          {refresh.progress.active && (
             <div className="flex items-center gap-2 min-w-[200px]">
               <Progress
-                value={refresh.total != null ? refresh.percent : undefined}
+                value={
+                  refresh.progress.total != null
+                    ? refresh.progress.percent
+                    : undefined
+                }
                 className="h-2 w-32"
               />
               <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                {refresh.total != null
-                  ? `${refresh.processed} / ${refresh.total}`
-                  : `${refresh.processed} items`}
+                {refresh.progress.total != null
+                  ? `${refresh.progress.processed} / ${refresh.progress.total}`
+                  : `${refresh.progress.processed} items`}
               </span>
             </div>
           )}

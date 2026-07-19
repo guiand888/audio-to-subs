@@ -5,18 +5,20 @@ import logging
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Annotated
+from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 
-from audio_to_subs.api.deps import SettingsDep, get_db
+from audio_to_subs.api.deps import SettingsDep, get_db, get_redis
 from audio_to_subs.api.routes._helpers import UTCAwareModel
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import BazarrCache, Job, JobStatus, LogLevel
 
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -347,6 +349,15 @@ class WantedRefreshRequest(BaseModel):
         default=WantedItemType.ALL,
         description="Filter by item type: all, movie, or episode",
     )
+    # Optional client-supplied id. When the client opens its SSE subscription
+    # *before* POSTing (so it doesn't miss the refresh_done event on a fast
+    # refresh), it generates the id itself and passes it here. When omitted,
+    # the server generates one (back-compat for any caller that doesn't care
+    # about progress streaming).
+    refresh_id: UUID | None = Field(
+        default=None,
+        description="Client-supplied refresh id (UUID). If omitted, server generates one.",
+    )
 
 
 class WantedRefreshResponse(BaseModel):
@@ -359,6 +370,29 @@ class WantedRefreshResponse(BaseModel):
         default=0, description="Number of episodes processed"
     )
     error: str | None = Field(default=None, description="Error message if failed")
+
+
+class WantedRefreshStatusResponse(BaseModel):
+    """Persisted snapshot of an in-flight or completed refresh.
+
+    Returned by GET /api/wanted/refresh/{refresh_id} so clients that missed
+    the terminal SSE event can recover (see useWantedRefresh's watchdog).
+    """
+
+    refresh_id: str = Field(description="Unique id for this refresh run")
+    status: str = Field(
+        description="Refresh status: started (in progress), completed, or failed"
+    )
+    processed: int = Field(default=0, description="Items processed so far")
+    total: int | None = Field(
+        default=None, description="Known total when stage has a denominator"
+    )
+    percent: int = Field(default=0, description="Progress percentage (0-100)")
+    stage: str = Field(default="", description="Human-readable current stage")
+    movies_processed: int = Field(default=0, description="Movies processed")
+    episodes_processed: int = Field(default=0, description="Episodes processed")
+    error: str | None = Field(default=None, description="Error message if failed")
+    updated_at: datetime = Field(description="When this snapshot was written")
 
 
 @router.post(
@@ -396,6 +430,7 @@ async def refresh_wanted_list(
     """
     import uuid
 
+    from audio_to_subs.api.deps import get_redis_client
     from audio_to_subs.bazarr.poller import (
         ProgressReporter,
         get_bazarr_client_with_settings,
@@ -406,6 +441,7 @@ async def refresh_wanted_list(
     from audio_to_subs.queue_.events import (
         publish_refresh_done,
         publish_refresh_progress,
+        set_refresh_state,
     )
 
     # Validate Bazarr is configured before spawning the background task, so we
@@ -440,12 +476,42 @@ async def refresh_wanted_list(
             error="Bazarr not configured",
         )
 
-    refresh_id = str(uuid.uuid4())
+    # Prefer the client-supplied refresh_id (the client opens its SSE
+    # subscription *before* POSTing so it can't miss refresh_done on a fast
+    # refresh). Fall back to a server-generated one for callers that don't
+    # care about progress streaming.
+    refresh_id = (
+        str(refresh_request.refresh_id)
+        if refresh_request.refresh_id is not None
+        else str(uuid.uuid4())
+    )
     item_type = refresh_request.item_type.value
 
-    async def _run_refresh() -> None:
-        from audio_to_subs.api.deps import get_redis_client
+    # Persist the initial "started" state before scheduling the task, so a
+    # client that opens its EventSource slightly late can still recover via
+    # GET /api/wanted/refresh/{refresh_id} even if the bg task finishes
+    # before it subscribes.
+    redis_for_state = get_redis_client()
+    try:
+        await set_refresh_state(
+            redis_for_state,
+            refresh_id,
+            {
+                "refresh_id": refresh_id,
+                "status": "started",
+                "processed": 0,
+                "total": None,
+                "percent": 0,
+                "stage": "starting",
+                "movies_processed": 0,
+                "episodes_processed": 0,
+                "error": None,
+            },
+        )
+    finally:
+        await redis_for_state.aclose()
 
+    async def _run_refresh() -> None:
         redis = get_redis_client()
         try:
             async with get_async_session(settings.DATABASE_URL) as bg_db:
@@ -505,4 +571,47 @@ async def refresh_wanted_list(
         movies_processed=0,
         episodes_processed=0,
         error=None,
+    )
+
+
+@router.get(
+    "/refresh/{refresh_id}",
+    response_model=WantedRefreshStatusResponse,
+)
+async def get_refresh_status(
+    refresh_id: UUID,
+    redis: Annotated["Redis", Depends(get_redis)],
+) -> WantedRefreshStatusResponse:
+    """Recover the latest state of a refresh run by id.
+
+    Used by clients that missed the terminal ``refresh_done`` SSE event -
+    typically because the EventSource was opened after the refresh finished,
+    or the connection dropped mid-stream. The state is persisted in Redis
+    with a 10-minute TTL keyed by ``refresh_id``.
+
+    Returns 404 when the id is unknown or has expired, so the client can
+    surface a generic "status unknown" error to the user.
+    """
+    from audio_to_subs.queue_.events import get_refresh_state
+
+    state = await get_refresh_state(redis, str(refresh_id))
+    if state is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Refresh {refresh_id} not found or expired",
+        )
+
+    # The persisted dict carries updated_at as an ISO string; Pydantic will
+    # parse it back into datetime via the UTCAwareModel-aware field.
+    return WantedRefreshStatusResponse(
+        refresh_id=state.get("refresh_id", str(refresh_id)),
+        status=state.get("status", "started"),
+        processed=state.get("processed", 0),
+        total=state.get("total"),
+        percent=state.get("percent", 0),
+        stage=state.get("stage", ""),
+        movies_processed=state.get("movies_processed", 0),
+        episodes_processed=state.get("episodes_processed", 0),
+        error=state.get("error"),
+        updated_at=state.get("updated_at", datetime.fromtimestamp(0).isoformat()),
     )

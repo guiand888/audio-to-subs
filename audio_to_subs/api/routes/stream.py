@@ -3,6 +3,7 @@
 import asyncio
 import json
 import logging
+import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID, uuid4
@@ -20,6 +21,12 @@ if TYPE_CHECKING:
 logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/api/jobs", tags=["stream"])
+
+# SSE comment frame emitted on the idle loop every HEARTBEAT_INTERVAL_SECONDS
+# to keep the connection alive through proxies and to make dropped connections
+# detectable. Browsers ignore comment frames (per the SSE spec) but the bytes
+# on the wire prevent idle-timeout disconnects.
+HEARTBEAT_INTERVAL_SECONDS = 15.0
 
 
 def _subscribe_job_stream(job_id: str, client_id: str) -> asyncio.Queue[dict[str, Any]]:
@@ -71,6 +78,14 @@ async def _redis_listener_coro(
         pubsub = redis.pubsub()
         await pubsub.subscribe(*channels)
         logger.debug(f"SSE client {client_id} subscribed to Redis channels: {channels}")
+
+        # Signal readiness so the client knows its subscription is active.
+        # This is critical for the Wanted-list refresh flow: pub/sub has no
+        # backlog, so if the client POSTs /api/wanted/refresh before this
+        # subscribe() completed, early refresh_progress / refresh_done events
+        # would be silently dropped. Waiting for stream_ready on the client
+        # guarantees the subscription is in place before the bg task starts.
+        await queue.put({"event": "stream_ready"})
 
         while True:
             try:
@@ -141,14 +156,25 @@ async def _event_generator(  # noqa: C901
         )
 
     try:
+        last_yield = time.monotonic()
         while True:
             if await request.is_disconnected():
                 logger.debug("SSE client disconnected for job %s", job_id)
                 break
             try:
                 event_data = await asyncio.wait_for(queue.get(), timeout=1.0)
+                last_yield = time.monotonic()
                 yield f"data: {json.dumps(event_data)}\n\n"
             except asyncio.TimeoutError:
+                # No real event in the last 1s. Emit a heartbeat comment frame
+                # at most once per HEARTBEAT_INTERVAL_SECONDS so idle
+                # connections stay alive through proxies without flooding the
+                # log. The leading ": " marks this as a comment per the SSE
+                # spec; EventSource ignores it but the bytes hit the wire.
+                now = time.monotonic()
+                if now - last_yield >= HEARTBEAT_INTERVAL_SECONDS:
+                    last_yield = now
+                    yield ": keepalive\n\n"
                 continue  # re-check disconnect on next iteration
     except asyncio.CancelledError:
         logger.debug("SSE connection cancelled for job %s", job_id)

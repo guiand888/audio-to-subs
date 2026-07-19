@@ -213,3 +213,128 @@ async def test_publish_progress_includes_step_fields():
     finally:
         await pubsub.unsubscribe()
         await redis.aclose()
+
+
+# ── Refresh state persistence ──────────────────────────────────────────────
+# These tests cover the side-channel that closes the SSE race: the publish
+# helpers also persist a snapshot under refresh:state:{id} so a client that
+# missed the live event can recover via GET /api/wanted/refresh/{id}.
+
+
+@pytest.mark.asyncio
+async def test_set_get_refresh_state_round_trip():
+    """set_refresh_state writes JSON under refresh:state:{id} and
+    get_refresh_state reads it back as a dict."""
+    from audio_to_subs.queue_.events import get_refresh_state, set_refresh_state
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        state = {
+            "refresh_id": "rid-1",
+            "status": "started",
+            "processed": 5,
+            "total": 10,
+            "percent": 50,
+            "stage": "refreshing wanted",
+            "movies_processed": 0,
+            "episodes_processed": 0,
+            "error": None,
+        }
+        await set_refresh_state(redis, "rid-1", state, ttl_seconds=60)
+
+        result = await get_refresh_state(redis, "rid-1")
+        assert result is not None
+        assert result["refresh_id"] == "rid-1"
+        assert result["status"] == "started"
+        assert result["processed"] == 5
+        # set_refresh_state stamps an updated_at; get_refresh_state returns it.
+        assert "updated_at" in result
+    finally:
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_get_refresh_state_returns_none_for_missing_id():
+    """Unknown or expired ids return None (callers treat both as unknown)."""
+    from audio_to_subs.queue_.events import get_refresh_state
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        result = await get_refresh_state(redis, "never-existed")
+        assert result is None
+    finally:
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_refresh_state_ttl_expires():
+    """After the TTL elapses, get_refresh_state returns None."""
+    from audio_to_subs.queue_.events import get_refresh_state, set_refresh_state
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        await set_refresh_state(
+            redis, "rid-short", {"status": "started"}, ttl_seconds=1
+        )
+        # fakeredis honors TTLs; sleep past it.
+        await asyncio.sleep(1.1)
+        result = await get_refresh_state(redis, "rid-short")
+        assert result is None
+    finally:
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_publish_refresh_progress_persists_state():
+    """publish_refresh_progress must also write the snapshot so a client
+    that misses the live SSE frame can recover via GET."""
+    from audio_to_subs.queue_.events import get_refresh_state, publish_refresh_progress
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        await publish_refresh_progress(
+            redis, "rid-progress", 7, 10, 70, "refreshing wanted"
+        )
+        state = await get_refresh_state(redis, "rid-progress")
+        assert state is not None
+        assert state["status"] == "started"
+        assert state["processed"] == 7
+        assert state["total"] == 10
+        assert state["percent"] == 70
+        assert state["stage"] == "refreshing wanted"
+    finally:
+        await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_publish_refresh_done_persists_terminal_state():
+    """publish_refresh_done must persist the final status/counts so the
+    client's watchdog can finalize even if the SSE event was missed."""
+    from audio_to_subs.queue_.events import get_refresh_state, publish_refresh_done
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        await publish_refresh_done(
+            redis,
+            "rid-done",
+            "completed",
+            movies_processed=4,
+            episodes_processed=3,
+        )
+        state = await get_refresh_state(redis, "rid-done")
+        assert state is not None
+        assert state["status"] == "completed"
+        assert state["movies_processed"] == 4
+        assert state["episodes_processed"] == 3
+        assert state["processed"] == 7
+        assert state["percent"] == 100
+
+        # Failure path persists error and 0 percent.
+        await publish_refresh_done(redis, "rid-fail", "failed", error="Refresh failed")
+        fail_state = await get_refresh_state(redis, "rid-fail")
+        assert fail_state is not None
+        assert fail_state["status"] == "failed"
+        assert fail_state["error"] == "Refresh failed"
+        assert fail_state["percent"] == 0
+    finally:
+        await redis.aclose()

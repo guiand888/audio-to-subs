@@ -109,7 +109,14 @@ class TestEventGeneratorErrorPaths:
 class TestRedisListenerErrorPaths:
     @pytest.mark.asyncio
     async def test_malformed_redis_message_is_skipped(self):
-        """A non-JSON message is logged and skipped; the listener keeps going."""
+        """A non-JSON message is logged and skipped; the listener keeps going.
+
+        Note: the listener now also queues a single ``stream_ready`` frame
+        right after ``subscribe`` completes (race fix for the refresh flow).
+        That frame is legitimate, so we drain it before asserting the queue
+        is empty - the assertion is about the malformed message NOT being
+        forwarded, not about the queue being totally empty.
+        """
         queue: asyncio.Queue = asyncio.Queue()
 
         class _Pubsub:
@@ -143,7 +150,12 @@ class TestRedisListenerErrorPaths:
             _redis_listener_coro(redis, queue, ["jobs:global"], "cid")
         )
         await asyncio.sleep(0.1)
-        # queue must remain empty (bad JSON is dropped, not forwarded)
+        # Drain the legitimate stream_ready frame queued right after subscribe.
+        assert queue.qsize() == 1
+        ready = queue.get_nowait()
+        assert ready == {"event": "stream_ready"}
+        # After draining stream_ready, the malformed message must NOT have
+        # been forwarded (queue stays empty).
         assert queue.empty()
         task.cancel()
         try:
@@ -156,7 +168,12 @@ class TestRedisListenerErrorPaths:
     @pytest.mark.asyncio
     async def test_redis_transport_error_is_handled(self):
         """A transport error in get_message is logged and ends the listener
-        cleanly (no exception escapes)."""
+        cleanly (no exception escapes).
+
+        ``stream_ready`` is still queued (subscribe completes before the
+        first get_message call), so the queue contains exactly that frame
+        and nothing else.
+        """
         queue: asyncio.Queue = asyncio.Queue()
 
         class _Pubsub:
@@ -177,4 +194,7 @@ class TestRedisListenerErrorPaths:
 
         # The coroutine must complete without raising.
         await _redis_listener_coro(redis, queue, ["jobs:global"], "cid")
-        assert queue.empty()
+        # Only the legitimate stream_ready frame is present; the transport
+        # error didn't produce any additional queued items.
+        assert queue.qsize() == 1
+        assert queue.get_nowait() == {"event": "stream_ready"}

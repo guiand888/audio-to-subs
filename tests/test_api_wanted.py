@@ -1,7 +1,8 @@
 """Tests for API wanted endpoints."""
 
 from datetime import datetime, timezone
-from unittest.mock import AsyncMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
+from uuid import uuid4
 
 import pytest
 from sqlalchemy import select
@@ -494,3 +495,120 @@ class TestWantedRefreshEndpoint:
         ).scalar_one()
         assert log.job_id is None
         assert "Bazarr sync failed" in log.message
+
+
+class TestWantedRefreshStatusEndpoint:
+    """Tests for GET /api/wanted/refresh/{refresh_id}.
+
+    This endpoint is the recovery path for clients that missed the terminal
+    SSE event - the persisted snapshot lets the frontend's watchdog
+    finalize rather than hang on "Refreshing...".
+    """
+
+    def test_get_status_returns_404_for_unknown_id(self, authenticated_client):
+        """Unknown or expired refresh ids return 404 so the client can
+        surface a clear error instead of guessing.
+
+        The Redis miss path is covered by test_queue_events; here we patch
+        get_refresh_state to return None and verify the route maps that to
+        a 404 with a useful detail message.
+        """
+        with patch(
+            "audio_to_subs.queue_.events.get_refresh_state",
+            new=AsyncMock(return_value=None),
+        ):
+            response = authenticated_client.get(f"/api/wanted/refresh/{uuid4()}")
+        assert response.status_code == 404
+        assert "not found" in response.json()["detail"].lower()
+
+    def test_get_status_returns_404_for_non_uuid_id(self, authenticated_client):
+        """Non-UUID ids are rejected at the route level (path validation)."""
+        response = authenticated_client.get("/api/wanted/refresh/not-a-uuid")
+        assert response.status_code == 422
+
+    def test_get_status_returns_persisted_snapshot(self, authenticated_client):
+        """When the persisted state exists, GET returns it as a typed
+        WantedRefreshStatusResponse.
+
+        The Redis round-trip is covered by test_queue_events; here we patch
+        get_refresh_state to focus on the route's response shaping.
+        """
+        refresh_id = str(uuid4())
+        snapshot = {
+            "refresh_id": refresh_id,
+            "status": "completed",
+            "processed": 7,
+            "total": None,
+            "percent": 100,
+            "stage": "done",
+            "movies_processed": 4,
+            "episodes_processed": 3,
+            "error": None,
+            "updated_at": "2026-01-01T00:00:00+00:00",
+        }
+        with patch(
+            "audio_to_subs.queue_.events.get_refresh_state",
+            new=AsyncMock(return_value=snapshot),
+        ):
+            response = authenticated_client.get(f"/api/wanted/refresh/{refresh_id}")
+
+        assert response.status_code == 200
+        data = response.json()
+        assert data["refresh_id"] == refresh_id
+        assert data["status"] == "completed"
+        assert data["processed"] == 7
+        assert data["movies_processed"] == 4
+        assert data["episodes_processed"] == 3
+
+
+class TestWantedRefreshIdAcceptance:
+    """The route accepts an optional client-supplied refresh_id so the
+    frontend can subscribe to SSE *before* POSTing (closing the race)."""
+
+    def test_refresh_accepts_client_supplied_refresh_id(self, authenticated_client):
+        """POST with a refresh_id uses that id verbatim (the client has
+        already opened its SSE subscription filtered to that id)."""
+        client_id = str(uuid4())
+        # Stub Bazarr probe so the route reaches the "started" path.
+        fake_client = MagicMock()
+        fake_client.close = AsyncMock()
+        with patch(
+            "audio_to_subs.bazarr.poller.get_bazarr_client_with_settings",
+            new=AsyncMock(return_value=(fake_client, "http://bazarr", "key", 30)),
+        ):
+            response = authenticated_client.post(
+                "/api/wanted/refresh",
+                json={"item_type": "all", "refresh_id": client_id},
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+        assert data["refresh_id"] == client_id
+
+    def test_refresh_generates_id_when_client_omits_it(self, authenticated_client):
+        """POST without refresh_id keeps working (back-compat for any caller
+        that doesn't participate in the SSE protocol)."""
+        fake_client = MagicMock()
+        fake_client.close = AsyncMock()
+        with patch(
+            "audio_to_subs.bazarr.poller.get_bazarr_client_with_settings",
+            new=AsyncMock(return_value=(fake_client, "http://bazarr", "key", 30)),
+        ):
+            response = authenticated_client.post(
+                "/api/wanted/refresh", json={"item_type": "all"}
+            )
+        assert response.status_code == 200
+        data = response.json()
+        assert data["status"] == "started"
+        # Server-generated id is a non-empty UUID string.
+        assert data["refresh_id"]
+        assert data["refresh_id"] != ""
+
+    def test_refresh_rejects_non_uuid_refresh_id(self, authenticated_client):
+        """A malformed refresh_id fails Pydantic validation (422) rather
+        than being silently coerced."""
+        response = authenticated_client.post(
+            "/api/wanted/refresh",
+            json={"item_type": "all", "refresh_id": "not-a-uuid"},
+        )
+        assert response.status_code == 422
