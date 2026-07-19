@@ -21,6 +21,16 @@ vi.mock("@/hooks/useJobsStream", () => ({
   useJobsStream: () => {},
 }))
 
+// Shared mutable state so individual tests can drive collapsed/toggle.
+const sidebarState = { collapsed: false, toggle: vi.fn() }
+vi.mock("@/hooks/useSidebarCollapse", () => ({
+  useSidebarCollapse: () => ({
+    collapsed: sidebarState.collapsed,
+    set: vi.fn(),
+    toggle: sidebarState.toggle,
+  }),
+}))
+
 vi.mock("@/hooks/useAuth", () => ({
   useMe: vi.fn(),
   useLogout: () => ({ mutate: vi.fn(), isPending: false }),
@@ -104,5 +114,48 @@ describe("AppLayout - backend unreachable", () => {
       to: "/login",
       search: { next: "/wanted" },
     })
+  })
+})
+
+describe("AppLayout - collapsible sidebar", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    sidebarState.collapsed = false
+    sidebarState.toggle = vi.fn()
+    vi.mocked(useMe).mockReturnValue({
+      data: { username: "tester" },
+      isLoading: false,
+      error: null,
+      isFetching: false,
+      refetch: vi.fn(),
+    } as unknown as ReturnType<typeof useMe>)
+  })
+
+  it("renders the collapse toggle button", () => {
+    render(<AppLayout />)
+    expect(
+      screen.getByRole("button", { name: "Collapse sidebar" }),
+    ).toBeInTheDocument()
+  })
+
+  it("calls toggle when the collapse button is clicked", async () => {
+    const user = userEvent.setup()
+    render(<AppLayout />)
+    await user.click(
+      screen.getByRole("button", { name: "Collapse sidebar" }),
+    )
+    expect(sidebarState.toggle).toHaveBeenCalledTimes(1)
+  })
+
+  it("hides nav labels and shows a thin rail when collapsed", () => {
+    sidebarState.collapsed = true
+    render(<AppLayout />)
+    // Brand collapses to a monogram
+    expect(screen.queryByText("Parolesub")).not.toBeInTheDocument()
+    expect(screen.getByText("P")).toBeInTheDocument()
+    // Toggle now offers to expand
+    expect(
+      screen.getByRole("button", { name: "Expand sidebar" }),
+    ).toBeInTheDocument()
   })
 })
