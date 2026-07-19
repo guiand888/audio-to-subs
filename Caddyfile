@@ -1,4 +1,4 @@
-# Reverse proxy for Parolesub, terminating HTTPS via automatic Let's
+# Reverse proxy for ParoleSub, terminating HTTPS via automatic Let's
 # Encrypt certificates.
 #
 # Standalone: not wired into docker-compose.yml or docker-compose.docker.yml.

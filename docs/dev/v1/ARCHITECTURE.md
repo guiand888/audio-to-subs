@@ -1,8 +1,8 @@
-# parolesub Architecture
+# ParoleSub Architecture
 
 ## Overview
 
-**parolesub** is a Python-based CLI tool that automates the conversion of video audio to subtitle files using AI-powered transcription.
+**ParoleSub** is a Python-based CLI tool that automates the conversion of video audio to subtitle files using AI-powered transcription.
 
 ### Pipeline Flow
 

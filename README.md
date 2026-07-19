@@ -1,4 +1,4 @@
-# parolesub
+# ParoleSub
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![standard-readme compliant](https://img.shields.io/badge/readme-standard-brightgreen.svg)](https://github.com/RichardLitt/standard-readme)
@@ -6,21 +6,22 @@
 ![Coverage](https://raw.githubusercontent.com/guiand888/parolesub/badges/coverage.svg)
 [![Tests](https://github.com/guiand888/parolesub/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/parolesub/actions/workflows/tests.yml)
 
-Convert video audio to subtitles using Mistral Voxtral Mini transcription.
+<img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" /> Convert video audio to subtitles using Mistral Voxtral Mini transcription.
 
-![parolesub frontend screenshot](docs/assets/screenshot-frontpage.png)
+![ParoleSub frontend screenshot](docs/assets/screenshot-frontpage.png)
 
 ## Table of Contents
 
 - [Background](#background)
 - [Install](#install)
+- [Security](#security)
 - [Usage](#usage)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Background
 
-parolesub is a self-hosted web application that automates video transcription for media libraries. It integrates with Bazarr to detect missing subtitles, queues transcription jobs, and processes them using Mistral's Voxtral Mini model. The system includes a web UI for monitoring progress, viewing history, and managing settings.
+ParoleSub is a self-hosted web application that automates video transcription for media libraries. It integrates with Bazarr to detect missing subtitles, queues transcription jobs, and processes them using Mistral's Voxtral Mini model. The system includes a web UI for monitoring progress, viewing history, and managing settings.
 
 The original CLI functionality is preserved - you can still run one-off transcriptions from the command line while the web application handles automated workflows.
 
@@ -78,9 +79,17 @@ docker compose -f docker-compose.docker.yml up -d --build
 
 Do not merge it with `docker-compose.yml` — run one or the other.
 
+## Security
+
+ParoleSub does not terminate TLS itself; it expects to sit behind a reverse
+proxy for any exposure beyond localhost. A ready-to-use [`Caddyfile`](Caddyfile)
+is included for this — point Caddy at it for automatic Let's Encrypt HTTPS in
+front of the frontend's port 8080. Set `BEHIND_TLS=true` in `.env` once a proxy
+is in front, so the session cookie gets the `Secure` flag.
+
 ## Usage
 
-Parolesub is primarily used through its web application. The CLI commands below are optional, for one-off or advanced transcriptions.
+ParoleSub is primarily used through its web application. The CLI commands below are optional, for one-off or advanced transcriptions.
 
 ### Web Application Workflow
 

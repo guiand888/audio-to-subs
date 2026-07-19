@@ -23,7 +23,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.7 — Deep mypy cleanup: transcription_client, app lifecycle, worker signals | ✅ Done | 2026-07-10 | Independent cleanup; live Mistral wire-semantics diff is a manual step (needs `MISTRAL_API_KEY`) |
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
 | M6 — Polish, coverage, security | ✅ Done | 2026-07-12 | M6.a-f done (2026-07-11); M6.g, M6.h done (2026-07-12). Depends on M5.6, M5.7, M5.8 |
-| M6.i — Post-M6 hardening batch (unplanned): Parolesub rebrand + deploy hardening | ✅ Done | 2026-07-18 | Depends on M6; see note below |
+| M6.i — Post-M6 hardening batch (unplanned): ParoleSub rebrand + deploy hardening | ✅ Done | 2026-07-18 | Depends on M6; see note below |
 | M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6; now M16 below — deferred until after the v2.1–v4.0 feature work |
 | M8 — v2.1 Wanted scope: sync everything, filter client-side | ⏳ Not Started | - | Depends on M6; refines M3 polling + Wanted UI |
 | M9 — v2.2 (TBD — scope to be defined) | ⏳ Not Started | - | Depends on M8 |
@@ -31,7 +31,7 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M11 — v3.0 Redis/jobs-progress architecture refactor | ⏳ In progress (branch `investigate-progress-bar`) | - | Absorbs the in-flight `investigate-progress-bar` work; depends on M5.8 |
 | M12 — v2.4 Queue: Auto-refresh On by default | ⏳ Not Started | - | Depends on M4 (Queue UI) |
 | M13 — v2.5 History: Retry action for failed jobs | ⏳ Not Started | - | Depends on M5 (History UI) + M6.g retry machinery |
-| M14 — v2.6 Visual polish: History filter buttons + Parolesub logo | ⏳ Not Started | - | Depends on M4/M5 UI |
+| M14 — v2.6 Visual polish: History filter buttons + ParoleSub logo | ⏳ Not Started | - | Depends on M4/M5 UI |
 | M15 — v4.0 Periodic, configurable jobs (Bazarr sync + auto-schedule) | ⏳ Not Started | - | Depends on M3 (Bazarr) + M11 (progress arch) |
 | M16 — Documentation rewrite & dev-docs reorganization (deferred) | ⏳ Not Started | - | Depends on M6; deferred until after M8–M15 |
 
@@ -700,8 +700,8 @@ Notable changes:
   `Caddyfile` (public-domain + automatic Let's Encrypt) for TLS-terminating
   in front of the frontend's now-sole exposed port, documented in
   `DEPLOY_QUICKSTART.md`.
-- **Parolesub rebrand** (`c8850e5`, `4a242b7`): renamed product-facing names
-  to the **Parolesub** brand — CLI binary, Docker images/volumes, SQLite db
+- **ParoleSub rebrand** (`c8850e5`, `4a242b7`): renamed product-facing names
+  to the **ParoleSub** brand — CLI binary, Docker images/volumes, SQLite db
   filename, config file, frontend package name, session cookie
   (`ats_session` → the new name), sidebar/login-page casing, and docs. The
   `audio_to_subs` Python package name is intentionally unchanged — it stays
@@ -955,11 +955,11 @@ in flight / tracked as a new job).
   "Rename" buttons remain unchanged.
 - Frontend `vitest` + `tsc --noEmit` clean.
 
-## M14 — v2.6 Visual polish: History filter buttons + Parolesub logo
+## M14 — v2.6 Visual polish: History filter buttons + ParoleSub logo
 
 **Goal**: two UI polish items — (1) in the History panel, make the filter
 **Reset** and **Apply** buttons the same size and **swap their order** so Apply is
-on the **left** and Reset on the **right**; (2) add a **Parolesub logo** to the
+on the **left** and Reset on the **right**; (2) add a **ParoleSub logo** to the
 product UI (sidebar / login / topbar) as part of the rebrand completed in M6.i.
 
 **Depends on**: M4/M5 UI (History filters at `frontend/src/pages/HistoryPage.tsx`
@@ -971,11 +971,11 @@ product UI (sidebar / login / topbar) as part of the rebrand completed in M6.i.
   equal `size` (e.g. `size="sm"` already shared — ensure identical width via a
   shared class / `w-*` or `flex-1`), so they read as a matched pair. Behaviour
   unchanged (Apply submits filters, Reset clears).
-- **Parolesub logo**: add a logo asset (SVG, e.g. `frontend/src/assets/logo.svg`
+- **ParoleSub logo**: add a logo asset (SVG, e.g. `frontend/src/assets/logo.svg`
   or `frontend/public/`) and render it in `AppLayout.tsx` (sidebar header) and
-  `LoginPage.tsx` (above the form). Pick a mark consistent with the M6.i Parolesub
+  `LoginPage.tsx` (above the form). Pick a mark consistent with the M6.i ParoleSub
   rebrand / `dev/NAMING.md` umbrella. Provide light/dark variants or a
-  theme-aware single asset. Keep the existing text wordmark ("Parolesub") as
+  theme-aware single asset. Keep the existing text wordmark ("ParoleSub") as
   fallback/alt text.
 - Tests: `AppLayout.test.tsx` / `LoginPage` render the logo `img`/`svg` with
   accessible alt; `HistoryPage.test.tsx` asserts Apply appears before Reset in
@@ -983,7 +983,7 @@ product UI (sidebar / login / topbar) as part of the rebrand completed in M6.i.
 
 ### Acceptance (proposed)
 - History filter buttons are equal size; Apply is left of Reset.
-- Parolesub logo shows in the sidebar and on the login page; alt text present.
+- ParoleSub logo shows in the sidebar and on the login page; alt text present.
 - No regression to filter behaviour (Apply still applies, Reset still clears).
 - Frontend `vitest` + `tsc --noEmit` clean.
 

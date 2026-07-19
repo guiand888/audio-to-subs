@@ -138,7 +138,7 @@ Stable release. No functional changes since v2.0.0-beta.13 — this release fina
 ### Changed
 
 - Deployment: build production images from GitHub repo, keep local build for development
-- Parolesub rebranding: session cookie and sidebar brand updated
+- ParoleSub rebranding: session cookie and sidebar brand updated
 
 ---
 
@@ -146,7 +146,7 @@ Stable release. No functional changes since v2.0.0-beta.13 — this release fina
 
 ### Added
 
-- Parolesub rebranding complete (product renamed to "parolesub")
+- ParoleSub rebranding complete (product renamed to "ParoleSub")
 - Post-M6 hardening batch: deployment hardening, volume mount alignment
 
 ---
@@ -233,7 +233,7 @@ This is the first v2 beta release, representing the culmination of milestones M0
 
 - **M5.6.1**: Session release before sleep regression fix, UUID binding, path resolution fixes
 - **M5.8**: Structured progress reporting with stage/step tracking, SSE architecture improvements
-- **M6.i**: Parolesub rebranding, deployment hardening, volume mount alignment
+- **M6.i**: ParoleSub rebranding, deployment hardening, volume mount alignment
 
 ---
 

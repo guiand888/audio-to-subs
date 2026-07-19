@@ -93,7 +93,7 @@ Status/log severity (kept off the brand hue except `info`):
 
 ## Reference implementation
 
-Parolesub's current theme ("Ayu Tint") is the worked example of this
+ParoleSub's current theme ("Ayu Tint") is the worked example of this
 recipe — see `frontend/src/index.css`. Brand `222 35% 44%`, light bg
 `218 28% 94%`, dark bg `222 26% 11%`. Copy that file's `:root`/`.dark` block
 as a starting point when re-deriving for a new brand hue; just substitute

@@ -1,6 +1,6 @@
 # Quality Checks
 
-This document describes code quality standards and tools for the parolesub project.
+This document describes code quality standards and tools for the ParoleSub project.
 
 ## Quick Start
 
