@@ -28,15 +28,16 @@ version-check:  ## Verify VERSION is non-empty and (on a tagged commit) equals t
 	fi
 	@echo "Version coherence OK ($(APP_VERSION))"
 
-release:  ## Bump version: make release VERSION=v2.0.0-beta.11
+release:  ## Bump version and create an annotated tag: make release VERSION=v2.0.0-beta.11
 	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=vX.Y.Z"; exit 1; }
 	@printf '%s\n' "$(VERSION)" > VERSION
+	@git tag -a "$(VERSION)" -m "$(VERSION)"
 	@echo ""
 	@echo "VERSION is now $(VERSION) (the single source of truth; baked into the"
 	@echo "package at build time from this file)."
+	@echo "Annotated tag $(VERSION) created (so 'git push --follow-tags' pushes it)."
 	@echo "Next (run manually):"
 	@echo "  git commit -am 'release: $(VERSION)'"
-	@echo "  git tag $(VERSION)"
 	@echo "  git push --follow-tags"
 
 test:  ## Run tests (nix develop)
