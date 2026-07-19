@@ -4,6 +4,7 @@ import type {
   JobCreate,
   JobLanguagePatch,
   JobListResponse,
+  JobLogsResponse,
   JobResponse,
 } from "@/lib/types"
 
@@ -61,5 +62,27 @@ export function useUpdateJobLanguage() {
       void queryClient.invalidateQueries({ queryKey: ["jobs"] })
       void queryClient.invalidateQueries({ queryKey: ["history"] })
     },
+  })
+}
+
+// Fetch a single job by id for the job detail page.
+export function useJob(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ["job", jobId],
+    queryFn: () => api.get<JobResponse>(`/api/jobs/${jobId}`),
+    enabled: !!jobId,
+    retry: false,
+  })
+}
+
+// Fetch the logs scoped to a single job for the job detail page.
+export function useJobLogs(jobId: string | undefined) {
+  return useQuery({
+    queryKey: ["job-logs", jobId],
+    queryFn: () => api.get<JobLogsResponse>(`/api/jobs/${jobId}/logs`),
+    enabled: !!jobId,
+    retry: false,
+    staleTime: 5000,
+    refetchInterval: 10000,
   })
 }

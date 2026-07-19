@@ -7,7 +7,6 @@ user-facing milestones and failures, not a mirror of every logger call.
 
 import logging
 from datetime import datetime, timezone
-from uuid import UUID
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -20,7 +19,7 @@ async def write_job_log(
     session: AsyncSession,
     level: LogLevel,
     message: str,
-    job_id: UUID | str | None = None,
+    job_id: str | None = None,
 ) -> None:
     """Write an entry to the job_logs activity log.
 

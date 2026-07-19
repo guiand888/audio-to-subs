@@ -64,6 +64,12 @@ export interface JobListResponse {
   cancelled: number
 }
 
+// GET /api/jobs/{id}/logs response.
+export interface JobLogsResponse {
+  logs: LogEntry[]
+  total: number
+}
+
 export interface JobCreate {
   source: JobSource
   source_ref?: string | null

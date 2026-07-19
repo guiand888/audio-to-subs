@@ -5,7 +5,6 @@ import os
 import re
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated, Literal
-from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
@@ -110,7 +109,7 @@ class JobResponse(UTCAwareModel):
 
     model_config = {"from_attributes": True}
 
-    id: UUID
+    id: str
     status: JobStatus
     source: JobSource
     source_ref: str | None
@@ -273,7 +272,7 @@ async def create_job(
 
 @router.get("/{job_id}", response_model=JobResponse)
 async def get_job(
-    job_id: UUID,
+    job_id: str,
     db: Annotated["AsyncSession", Depends(get_db)],
 ) -> JobResponse:
     """Get details for a specific job."""
@@ -284,7 +283,7 @@ async def get_job(
 
 @router.post("/{job_id}/cancel", response_model=JobResponse)
 async def cancel_job(
-    job_id: UUID,
+    job_id: str,
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
 ) -> JobResponse:
@@ -351,7 +350,7 @@ class JobLanguagePatchRequest(BaseModel):
 
 @router.patch("/{job_id}/language", response_model=JobResponse)
 async def update_job_language(
-    job_id: UUID,
+    job_id: str,
     db: Annotated["AsyncSession", Depends(get_db)],
     patch: JobLanguagePatchRequest,
 ) -> JobResponse:
@@ -409,7 +408,7 @@ async def update_job_language(
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_job(
-    job_id: UUID,
+    job_id: str,
     db: Annotated["AsyncSession", Depends(get_db)],
 ) -> None:
     """Delete a job.
@@ -434,7 +433,7 @@ logger = logging.getLogger(__name__)
 
 @router.post("/{job_id}/notify-bazarr", status_code=status.HTTP_202_ACCEPTED)
 async def notify_bazarr(
-    job_id: UUID,
+    job_id: str,
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,
 ) -> dict[str, str | None]:

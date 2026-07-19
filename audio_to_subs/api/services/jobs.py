@@ -5,7 +5,8 @@ import logging
 from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
-from uuid import uuid4
+
+from audio_to_subs.core.ids import generate_job_id
 
 from fastapi import HTTPException, status
 from sqlalchemy import select
@@ -355,7 +356,7 @@ async def create_job_service(
 
     # Create job
     job = Job(
-        id=str(uuid4()),
+        id=generate_job_id(),
         status=JobStatus.QUEUED,
         source=source,
         source_ref=resolved_source_ref or source_ref,

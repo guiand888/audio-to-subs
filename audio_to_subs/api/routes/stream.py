@@ -6,7 +6,7 @@ import logging
 import time
 from collections.abc import AsyncGenerator
 from typing import TYPE_CHECKING, Annotated, Any
-from uuid import UUID, uuid4
+from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
 from sse_starlette.sse import EventSourceResponse
@@ -215,7 +215,7 @@ async def global_stream(
 
 @router.get("/{job_id}/stream")
 async def job_stream(
-    job_id: UUID,
+    job_id: str,
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
     settings: SettingsDep,

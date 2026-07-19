@@ -104,7 +104,7 @@ async def publish_new(redis: Redis, job_id: str) -> None:
 
     Args:
         redis: Redis async client
-        job_id: UUID of the newly created job
+        job_id: ID of the newly created job
     """
     payload = {"job_id": job_id}
     # Publish to specific channel
@@ -127,7 +127,7 @@ async def publish_progress(
 
     Args:
         redis: Redis async client
-        job_id: UUID of the job
+        job_id: ID of the job
         percent: Progress percentage (0-100)
         stage: Current pipeline stage
         message: Progress message
@@ -254,7 +254,7 @@ async def publish_cancel(redis: Redis, job_id: str) -> None:
 
     Args:
         redis: Redis async client
-        job_id: UUID of the job to cancel
+        job_id: ID of the job to cancel
     """
     payload: dict[str, Any] = {}
     # Publish to job-specific channel
@@ -274,7 +274,7 @@ async def publish_done(
 
     Args:
         redis: Redis async client
-        job_id: UUID of the job
+        job_id: ID of the job
         status: Final status ('done', 'failed', 'cancelled')
         error: Optional error message for failed jobs
     """
