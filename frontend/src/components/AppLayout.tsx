@@ -11,6 +11,8 @@ import {
   History,
   List,
   LogOut,
+  PanelLeft,
+  PanelLeftClose,
   Settings,
   Tv,
 } from "lucide-react"
@@ -18,8 +20,15 @@ import { toast } from "sonner"
 import { Button } from "./ui/button"
 import { Separator } from "./ui/separator"
 import { ThemeToggle } from "./ThemeToggle"
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "./ui/tooltip"
 import { useJobsStream } from "@/hooks/useJobsStream"
 import { useMe, useLogout } from "@/hooks/useAuth"
+import { useSidebarCollapse } from "@/hooks/useSidebarCollapse"
 import { cn } from "@/lib/utils"
 
 const navLinks = [
@@ -35,6 +44,7 @@ export function AppLayout() {
   const pathname = useRouterState({ select: (s) => s.location.pathname })
   const { data: user, isLoading, error, isFetching, refetch } = useMe()
   const logout = useLogout()
+  const { collapsed, toggle } = useSidebarCollapse()
 
   // True when useMe failed with a non-401 error (backend unreachable,
   // 502/503, network failure). A 401 is swallowed inside useMe's queryFn
@@ -104,65 +114,103 @@ export function AppLayout() {
   }
 
   return (
-    <div className="flex h-screen overflow-hidden bg-background">
-      {/* Sidebar — 200px fixed */}
-      <aside className="w-[200px] flex-none flex flex-col border-r bg-background">
-        {/* Brand */}
-        <div className="flex h-16 items-center px-4 font-semibold text-sm tracking-tight">
-          Parolesub
-        </div>
-        <Separator />
-
-        {/* Nav links */}
-        <nav className="flex-1 overflow-y-auto py-2">
-          {navLinks.map(({ to, label, icon: Icon }) => {
-            const active = pathname.startsWith(to)
-            return (
-              <Link
-                key={to}
-                to={to}
-                className={cn(
-                  "flex items-center gap-3 px-4 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
-                  active
-                    ? "border-l-2 border-primary bg-accent/50 font-medium"
-                    : "border-l-2 border-transparent",
-                )}
-              >
-                <Icon className="h-4 w-4 flex-none" />
-                {label}
-              </Link>
-            )
-          })}
-        </nav>
-      </aside>
-
-      {/* Main area */}
-      <div className="flex flex-1 flex-col min-w-0">
-        {/* Topbar — 64px */}
-        <header className="flex h-16 flex-none items-center justify-between border-b px-4">
-          <span className="text-sm text-muted-foreground">
-            {user.username}
-          </span>
-          <div className="flex items-center gap-1">
-            <ThemeToggle />
-            <Button
-              variant="ghost"
-              size="sm"
-              onClick={handleLogout}
-              disabled={logout.isPending}
-              className="gap-2"
-            >
-              <LogOut className="h-4 w-4" />
-              Logout
-            </Button>
+    <TooltipProvider delayDuration={0}>
+      <div className="flex h-screen overflow-hidden bg-background">
+        {/* Sidebar — 200px expanded, 56px icon rail when collapsed */}
+        <aside
+          className={cn(
+            "flex-none flex flex-col border-r bg-background transition-[width] duration-200 ease-in-out",
+            collapsed ? "w-[56px]" : "w-[200px]",
+          )}
+        >
+          {/* Brand */}
+          <div className="flex h-16 items-center px-4 font-semibold text-sm tracking-tight">
+            {collapsed ? "P" : "Parolesub"}
           </div>
-        </header>
+          <Separator />
 
-        {/* Page content */}
-        <main className="flex-1 overflow-auto">
-          <Outlet />
-        </main>
+          {/* Nav links */}
+          <nav className="flex-1 overflow-y-auto py-2">
+            {navLinks.map(({ to, label, icon: Icon }) => {
+              const active = pathname.startsWith(to)
+              const link = (
+                <Link
+                  to={to}
+                  className={cn(
+                    "flex items-center gap-3 py-2 text-sm transition-colors hover:bg-accent hover:text-accent-foreground",
+                    collapsed ? "justify-center px-0" : "px-4",
+                    active
+                      ? "border-l-2 border-primary bg-accent/50 font-medium"
+                      : "border-l-2 border-transparent",
+                  )}
+                >
+                  <Icon className="h-4 w-4 flex-none" />
+                  {!collapsed && label}
+                </Link>
+              )
+
+              return collapsed ? (
+                <Tooltip key={to}>
+                  <TooltipTrigger asChild>{link}</TooltipTrigger>
+                  <TooltipContent side="right">{label}</TooltipContent>
+                </Tooltip>
+              ) : (
+                <div key={to}>{link}</div>
+              )
+            })}
+          </nav>
+        </aside>
+
+        {/* Main area */}
+        <div className="flex flex-1 flex-col min-w-0">
+          {/* Topbar — 64px */}
+          <header className="flex h-16 flex-none items-center justify-between border-b px-4">
+            <div className="flex items-center gap-2">
+              <Button
+                variant="ghost"
+                size="icon"
+                onClick={toggle}
+                title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+                aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
+              >
+                {collapsed ? (
+                  <PanelLeft className="h-4 w-4" />
+                ) : (
+                  <PanelLeftClose className="h-4 w-4" />
+                )}
+              </Button>
+            </div>
+            <div className="flex items-center gap-2">
+              <ThemeToggle />
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground"
+                  title={user.username}
+                  aria-label={user.username}
+                >
+                  {user.username.charAt(0).toUpperCase()}
+                </span>
+                <span className="text-sm">{user.username}</span>
+              </div>
+              <Button
+                variant="ghost"
+                size="sm"
+                onClick={handleLogout}
+                disabled={logout.isPending}
+                className="gap-2"
+              >
+                <LogOut className="h-4 w-4" />
+                Logout
+              </Button>
+            </div>
+          </header>
+
+          {/* Page content */}
+          <main className="flex-1 overflow-auto">
+            <Outlet />
+          </main>
+        </div>
       </div>
-    </div>
+    </TooltipProvider>
   )
 }
