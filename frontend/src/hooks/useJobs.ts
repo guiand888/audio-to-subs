@@ -12,21 +12,10 @@ interface JobsFilters {
   source_filter?: string
   limit?: number
   offset?: number
-  // Opt-in fallback polling. SSE is the primary live mechanism; this is only
-  // used when the user toggles auto-refresh on (e.g. after an SSE drop).
-  autoRefresh?: boolean
-  refreshInterval?: number
 }
 
 export function useJobs(filters: JobsFilters = {}) {
-  const {
-    status_filter,
-    source_filter,
-    limit,
-    offset,
-    autoRefresh = false,
-    refreshInterval = 10000,
-  } = filters
+  const { status_filter, source_filter, limit, offset } = filters
   const params = new URLSearchParams()
   if (status_filter) params.set("status_filter", status_filter)
   if (source_filter) params.set("source_filter", source_filter)
@@ -40,7 +29,6 @@ export function useJobs(filters: JobsFilters = {}) {
     queryKey: ["jobs", filters],
     queryFn: () => api.get<JobListResponse>(url),
     staleTime: 10_000,
-    refetchInterval: autoRefresh ? refreshInterval : undefined,
   })
 }
 
