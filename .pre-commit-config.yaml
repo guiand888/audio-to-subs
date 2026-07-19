@@ -31,3 +31,12 @@ repos:
           - types-PyYAML
         args: [--strict]
         exclude: ^(tests/|features/)
+
+  - repo: local
+    hooks:
+      - id: version-coherence
+        name: version coherence (VERSION / .env.example / git tag)
+        entry: make version-check
+        language: system
+        pass_filenames: false
+        files: ^(VERSION|\.env\.example)$

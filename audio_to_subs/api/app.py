@@ -16,7 +16,9 @@ configure_logging_from_env()
 from fastapi import Depends, FastAPI  # noqa: E402
 from fastapi.middleware.cors import CORSMiddleware  # noqa: E402
 
+from audio_to_subs import __version__  # noqa: E402
 from audio_to_subs.api.routes import auth, healthz  # noqa: E402
+from audio_to_subs.api.routes import version as version_route  # noqa: E402
 from audio_to_subs.api.routes.history import router as history_router  # noqa: E402
 from audio_to_subs.api.routes.jobs import router as jobs_router  # noqa: E402
 from audio_to_subs.api.routes.logs import (  # noqa: E402
@@ -182,7 +184,7 @@ def create_app() -> FastAPI:
     app = FastAPI(
         title="parolesub v2 API",
         description="API for parolesub v2 transcription service",
-        version="2.0.0",
+        version=__version__,
         lifespan=lifespan,
         debug=settings.DEBUG,
     )
@@ -206,6 +208,7 @@ def create_app() -> FastAPI:
 
     # Healthz and auth endpoints stay open (no authentication required)
     app.include_router(healthz.router)
+    app.include_router(version_route.router)
     app.include_router(auth.router)
 
     # All other routers require authentication

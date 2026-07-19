@@ -25,6 +25,10 @@ vi.mock("@tanstack/react-router", () => ({
   useBlocker: () => ({ status: "idle" as const, proceed: undefined, reset: undefined }),
 }))
 
+vi.mock("@/hooks/useVersion", () => ({
+  useVersion: () => "v9.9.9-test",
+}))
+
 vi.mock("@/lib/api", () => ({
   api: {
     get: vi.fn(),

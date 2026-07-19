@@ -36,6 +36,10 @@ vi.mock("@/hooks/useAuth", () => ({
   useLogout: () => ({ mutate: vi.fn(), isPending: false }),
 }))
 
+vi.mock("@/hooks/useVersion", () => ({
+  useVersion: () => "v9.9.9-test",
+}))
+
 vi.mock("./ThemeToggle", () => ({
   ThemeToggle: () => <div data-testid="theme-toggle" />,
 }))
@@ -167,5 +171,16 @@ describe("AppLayout - collapsible sidebar", () => {
     expect(screen.getByText("tester")).toBeInTheDocument()
     // Avatar carries the username for a11y/tooltip
     expect(screen.getByLabelText("tester")).toBeInTheDocument()
+  })
+
+  it("shows the app version in the sidebar footer when expanded", () => {
+    render(<AppLayout />)
+    expect(screen.getByText("v9.9.9-test")).toBeInTheDocument()
+  })
+
+  it("hides the version in the collapsed rail", () => {
+    sidebarState.collapsed = true
+    render(<AppLayout />)
+    expect(screen.queryByText("v9.9.9-test")).not.toBeInTheDocument()
   })
 })

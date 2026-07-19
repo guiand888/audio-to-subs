@@ -4,6 +4,11 @@
 ARG USER_UID=1000
 ARG USER_GID=1000
 
+# Application version (single source of truth: repo-root VERSION / .env
+# APP_VERSION, passed as a compose build arg). Baked into the image below so
+# audio_to_subs.__version__ and GET /api/version report the running release.
+ARG APP_VERSION=unknown
+
 # Stage 1: Builder
 FROM docker.io/library/python:3.11.9-alpine3.19 AS builder
 
@@ -36,6 +41,11 @@ FROM docker.io/library/python:3.11.9-alpine3.19
 # Build arguments for user configuration
 ARG USER_UID=1000
 ARG USER_GID=1000
+
+# Re-declare in this stage (ARGs before the first FROM aren't inherited) and
+# persist as an env var so the app reads it at runtime.
+ARG APP_VERSION=unknown
+ENV APP_VERSION=${APP_VERSION}
 
 # Install only runtime dependencies
 RUN apk add --no-cache \

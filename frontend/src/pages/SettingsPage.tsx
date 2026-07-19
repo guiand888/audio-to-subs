@@ -39,6 +39,7 @@ import { LocalizationSettingsForm } from "@/components/settings/LocalizationSett
 
 // Import the form state hook
 import { useSettingsForm } from "@/hooks/useSettingsForm"
+import { useVersion } from "@/hooks/useVersion"
 
 // Output format options
 const FORMAT_OPTIONS: { value: string; label: string }[] = [
@@ -65,6 +66,7 @@ const LANGUAGE_OPTIONS = [
 // Main SettingsPage component
 export function SettingsPage() {
   const queryClient = useQueryClient()
+  const version = useVersion()
   const {
     data: settings,
     isLoading,
@@ -315,6 +317,22 @@ export function SettingsPage() {
           </CardHeader>
           <CardContent>
             <LocalizationSettingsForm formData={formData} onChange={updateFormData} />
+          </CardContent>
+        </Card>
+
+        {/* About */}
+        <Card>
+          <CardHeader>
+            <CardTitle>About</CardTitle>
+            <CardDescription>
+              Application information
+            </CardDescription>
+          </CardHeader>
+          <CardContent>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Version</span>
+              <span className="font-mono tabular-nums">{version}</span>
+            </div>
           </CardContent>
         </Card>
       </div>

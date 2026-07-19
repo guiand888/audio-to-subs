@@ -3,7 +3,8 @@
 Two ways to run the stack. Both boot `backend` + `worker` + `frontend` + `redis`.
 Both build `backend`/`worker`/`frontend` directly from the GitHub repo at a
 pinned tag (`docker-compose.yml` / `docker-compose.docker.yml`'s `build.context`
-is a Git URL) — no local clone needed, `up -d --build` alone is enough.
+is a Git URL, pinned via `${APP_VERSION}`) — no local clone needed,
+`up -d --build` alone is enough.
 
 ## Option A — Podman secrets (recommended)
 
@@ -67,6 +68,27 @@ podman compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 # or, for the env-file path:
 podman compose -f docker-compose.docker.yml -f docker-compose.dev.yml up -d --build
 ```
+
+## Versioning & releasing
+
+The app version has **one source of truth**: the repo-root `VERSION` file.
+It drives (a) the Git ref the compose files build from and (b) the version
+baked into the images, which the API (`GET /api/version`) and the web UI
+(sidebar footer + Settings → About) report. Never hand-edit the version in
+multiple places — use the Make targets:
+
+```bash
+make release VERSION=v2.0.0-beta.11   # writes VERSION, .env.example and .env
+git commit -am "release: v2.0.0-beta.11"
+git tag v2.0.0-beta.11                 # tag MUST equal the VERSION file
+git push --follow-tags
+```
+
+`make version-check` (also run as a pre-commit hook) fails if `VERSION`,
+`.env.example` and — on a tagged commit — the git tag disagree. For an
+existing checkout, `make version-sync` copies `VERSION` into your local
+`.env`. Local dev builds (`make compose-dev-up`) instead show
+`git describe --tags --dirty` so an unreleased build is unmistakable.
 
 ## Notes
 
