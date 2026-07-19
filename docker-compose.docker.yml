@@ -21,10 +21,10 @@ services:
       # APP_VERSION is the single source of truth (repo-root VERSION file,
       # mirrored into .env — see `make version-sync`). It pins the Git ref
       # built here AND is baked into the image so the app can report it.
-      context: https://github.com/guiand888/parolesub.git#${APP_VERSION:-v2.0.0-beta.11}
+      context: https://github.com/guiand888/parolesub.git#${APP_VERSION:-v2.0.0-beta.12}
       dockerfile: Dockerfile
       args:
-        APP_VERSION: ${APP_VERSION:-v2.0.0-beta.11}
+        APP_VERSION: ${APP_VERSION:-v2.0.0-beta.12}
     image: parolesub:backend
     container_name: parolesub-backend
     environment:
@@ -92,10 +92,10 @@ services:
 
   worker:
     build:
-      context: https://github.com/guiand888/parolesub.git#${APP_VERSION:-v2.0.0-beta.11}
+      context: https://github.com/guiand888/parolesub.git#${APP_VERSION:-v2.0.0-beta.12}
       dockerfile: Dockerfile
       args:
-        APP_VERSION: ${APP_VERSION:-v2.0.0-beta.11}
+        APP_VERSION: ${APP_VERSION:-v2.0.0-beta.12}
     image: parolesub:worker
     container_name: parolesub-worker
     environment:
@@ -134,11 +134,11 @@ services:
 
   frontend:
     build:
-      context: https://github.com/guiand888/parolesub.git#${APP_VERSION:-v2.0.0-beta.11}:frontend
+      context: https://github.com/guiand888/parolesub.git#${APP_VERSION:-v2.0.0-beta.12}:frontend
       dockerfile: Dockerfile
       args:
         # Baked into the JS bundle at build (Vite define) so the UI shows it.
-        VITE_APP_VERSION: ${APP_VERSION:-v2.0.0-beta.11}
+        VITE_APP_VERSION: ${APP_VERSION:-v2.0.0-beta.12}
     image: parolesub:frontend
     container_name: parolesub-frontend
     # Single host-exposed entry point. Put a TLS-terminating reverse proxy
