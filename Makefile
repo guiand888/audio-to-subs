@@ -30,12 +30,18 @@ version-sync:  ## Sync APP_VERSION in .env from the VERSION file (creates .env f
 	fi
 	@echo "APP_VERSION=$(APP_VERSION) written to .env"
 
-version-check:  ## Verify VERSION, .env.example and (on a tagged commit) the git tag all agree
+version-check:  ## Verify VERSION, .env.example, compose fallbacks and (on a tagged commit) the git tag all agree
 	@test -n "$(APP_VERSION)" || { echo "VERSION file is empty or missing"; exit 1; }
 	@env_ex=$$(grep '^APP_VERSION=' .env.example | cut -d= -f2-); \
 	if [ "$$env_ex" != "$(APP_VERSION)" ]; then \
 		echo "MISMATCH: .env.example APP_VERSION=$$env_ex != VERSION=$(APP_VERSION)"; exit 1; \
 	fi
+	@for f in docker-compose.yml docker-compose.docker.yml; do \
+		bad=$$(grep -oE 'APP_VERSION:-v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?' $$f | sed 's/APP_VERSION:-//' | sort -u | grep -v -x -F "$(APP_VERSION)"); \
+		if [ -n "$$bad" ]; then \
+			echo "MISMATCH: $$f APP_VERSION fallback(s) [$$bad] != VERSION=$(APP_VERSION)"; exit 1; \
+		fi; \
+	done
 	@tag=$$(git describe --tags --exact-match 2>/dev/null); \
 	if [ -n "$$tag" ] && [ "$$tag" != "$(APP_VERSION)" ]; then \
 		echo "MISMATCH: git tag $$tag != VERSION=$(APP_VERSION)"; exit 1; \
@@ -47,8 +53,13 @@ release:  ## Bump version everywhere: make release VERSION=v2.0.0-beta.11
 	@printf '%s\n' "$(VERSION)" > VERSION
 	@sed -i.bak "s|^APP_VERSION=.*|APP_VERSION=$(VERSION)|" .env.example && rm -f .env.example.bak
 	@$(MAKE) --no-print-directory version-sync APP_VERSION=$(VERSION)
+	@old=$$(grep -oE 'APP_VERSION:-v[0-9]+\.[0-9]+\.[0-9]+(-[A-Za-z0-9.]+)?' docker-compose.yml | head -1 | sed 's/APP_VERSION:-//'); \
+	if [ -n "$$old" ] && [ "$$old" != "$(VERSION)" ]; then \
+		sed -i.bak "s|APP_VERSION:-$$old|APP_VERSION:-$(VERSION)|g" docker-compose.yml docker-compose.docker.yml && \
+		rm -f docker-compose.yml.bak docker-compose.docker.yml.bak; \
+	fi
 	@echo ""
-	@echo "VERSION, .env.example and .env now set to $(VERSION)."
+	@echo "VERSION, .env.example, .env and compose fallback defaults now set to $(VERSION)."
 	@echo "Next (run manually):"
 	@echo "  git commit -am 'release: $(VERSION)'"
 	@echo "  git tag $(VERSION)"
