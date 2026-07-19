@@ -5,6 +5,18 @@ export function cn(...inputs: ClassValue[]) {
   return twMerge(clsx(inputs))
 }
 
+// Locale-aware "natural" collator: compares embedded numbers by magnitude
+// ("Episode 2" < "Episode 10" < "Episode 100") while staying case- and
+// accent-insensitive. Use for any user-facing title/name ordering.
+export const naturalCollator = new Intl.Collator(undefined, {
+  numeric: true,
+  sensitivity: "base",
+})
+
+export function naturalCompare(a: string, b: string): number {
+  return naturalCollator.compare(a, b)
+}
+
 // Format cost as USD
 export function formatCost(cost: number | null | undefined): string {
   if (cost === null || cost === undefined) return "—"

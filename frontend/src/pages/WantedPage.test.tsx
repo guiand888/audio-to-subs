@@ -738,6 +738,89 @@ describe("WantedPage - Default title sort & search", () => {
     expect(renderedTitles).toEqual(["Alpha Movie", "mango Movie", "zebra Movie"])
   })
 
+  it("sorts titles with embedded numbers by magnitude (natural sort), not lexicographically", async () => {
+    vi.mocked(api.get).mockResolvedValue({
+      items: [
+        {
+          id: "ep:100",
+          kind: "episode",
+          ext_id: 100,
+          title: "Show — Episode 100",
+          media_path: "/series/s100.mkv",
+          has_any_subs: false,
+          missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+          audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+          last_polled: "2024-01-01T00:00:00Z",
+          active_job_id: null,
+          active_job_status: null,
+          active_job_progress: null,
+        },
+        {
+          id: "ep:10",
+          kind: "episode",
+          ext_id: 10,
+          title: "Show — Episode 10",
+          media_path: "/series/s10.mkv",
+          has_any_subs: false,
+          missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+          audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+          last_polled: "2024-01-02T00:00:00Z",
+          active_job_id: null,
+          active_job_status: null,
+          active_job_progress: null,
+        },
+        {
+          id: "ep:1",
+          kind: "episode",
+          ext_id: 1,
+          title: "Show — Episode 1",
+          media_path: "/series/s1.mkv",
+          has_any_subs: false,
+          missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+          audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+          last_polled: "2024-01-03T00:00:00Z",
+          active_job_id: null,
+          active_job_status: null,
+          active_job_progress: null,
+        },
+        {
+          id: "ep:2",
+          kind: "episode",
+          ext_id: 2,
+          title: "Show — Episode 2",
+          media_path: "/series/s2.mkv",
+          has_any_subs: false,
+          missing_subtitles: [{ code2: "en", name: "English", hi: false, forced: false }],
+          audio_language: [{ code2: "en", code3: "eng", name: "English", hi: false, forced: false }],
+          last_polled: "2024-01-04T00:00:00Z",
+          active_job_id: null,
+          active_job_status: null,
+          active_job_progress: null,
+        },
+      ],
+      total: 4,
+      last_refreshed_at: null,
+    })
+
+    render(<WantedPage />, { wrapper })
+
+    const rows = await waitFor(() => {
+      const dataRows = within(screen.getByRole("table")).getAllByRole("row").slice(1)
+      expect(dataRows.length).toBe(4)
+      return dataRows
+    })
+
+    const renderedTitles = rows.map((row) =>
+      within(row).getAllByRole("cell")[0].textContent,
+    )
+    expect(renderedTitles).toEqual([
+      "Show — Episode 1",
+      "Show — Episode 2",
+      "Show — Episode 10",
+      "Show — Episode 100",
+    ])
+  })
+
   it("sends the typed search term to the server instead of filtering client-side", async () => {
     // Search is applied server-side (see audio_to_subs/api/routes/wanted.py),
     // so the client's only job is to forward the term as a query param - it
