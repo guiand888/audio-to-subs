@@ -29,6 +29,13 @@ from audio_to_subs.core.subtitle_generator import (
     SubtitleFormatError,
     SubtitleGenerator,
 )
+
+__all__ = [
+    "Pipeline",
+    "PipelineResult",
+    "SubtitleFileExistsError",
+    "SubtitleFormatError",
+]
 from audio_to_subs.core.transcription_client import (
     TranscriptionClient,
     TranscriptionError,
@@ -802,7 +809,7 @@ class Pipeline:
 
     def _generate_subtitles(
         self,
-        segments: list[dict],
+        segments: list[dict[str, Any]],
         output_path: str,
         output_format: str = "srt",
         language_code: Optional[str] = None,

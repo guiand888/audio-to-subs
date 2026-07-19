@@ -81,13 +81,20 @@
               # Backend service dependency (mirrors docker-compose redis service)
               redis
 
-              # Linters/type-checkers. The venv (requirements-dev.txt) also
-              # installs pinned ruff/mypy, which take PATH precedence once the
-              # shellHook activates it - these native copies guarantee `ruff`
-              # and `mypy` are runnable under `nix develop` even before the
-              # venv is bootstrapped, matching CI's `make lint`/`make typecheck`.
+              # Linter. The venv (requirements-dev.txt) also installs a pinned
+              # `ruff`, which takes PATH precedence once the shellHook activates
+              # it; this native copy guarantees `ruff` is runnable under
+              # `nix develop` even before the venv is bootstrapped, matching
+              # CI's `make lint`.
+              #
+              # NOTE: `mypy` is intentionally NOT provided natively here. The
+              # Nix `mypy` package wrapper injects a `PYTHONPATH` pointing at its
+              # own python3.13 site-packages, which is inherited by the venv's
+              # python3.11 and shadows the venv's pinned `mypy==1.9.0`, causing
+              # `ModuleNotFoundError: No module named 'librt.base64'` (the
+              # nix python3.13 mypy 1.20.1 crash). The venv's pinned `mypy` is
+              # the sole type-checker; run it via `nix develop -c mypy ...`.
               ruff
-              mypy
             ]);
 
             env = pythonEnv;
