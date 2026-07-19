@@ -4,23 +4,21 @@ import asyncio
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated
+from typing import Annotated
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
+from redis.asyncio import Redis
 from sqlalchemy import func, select
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from audio_to_subs.api.deps import SettingsDep, get_db, get_redis
 from audio_to_subs.api.routes._helpers import UTCAwareModel
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import BazarrCache, Job, JobStatus, LogLevel
-from audio_to_subs.queue_.events import get_job_progress
-
-if TYPE_CHECKING:
-    from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncSession
+from audio_to_subs.queue_.events import get_job_progress, get_job_progress_many
 
 logger = logging.getLogger(__name__)
 
@@ -275,20 +273,23 @@ async def list_wanted(  # noqa: C901
             str(job_id): str(job_status) for job_id, job_status in job_result.all()
         }  # noqa: C416
 
-    # Read live progress from Redis for active jobs (best-effort: missing or
-    # errored snapshot => 0, which the Wanted item renders as no bar).
+    # Read live progress from Redis for active jobs in a single round-trip
+    # (best-effort: missing/errored snapshot => 0, which the Wanted item
+    # renders as no bar). Batching avoids the N+1 round-trip of a per-job loop.
     progress_by_id: dict[str, int] = {}
-    for job_id in jobs_by_id:
-        snap = await get_job_progress(redis, job_id)
-        pct = 0
-        if snap:
-            raw = snap.get("percent")
-            if raw:
-                try:
-                    pct = int(raw)
-                except (ValueError, TypeError):
-                    pct = 0
-        progress_by_id[job_id] = pct
+    if jobs_by_id:
+        snapshots = await get_job_progress_many(redis, list(jobs_by_id))
+        for job_id in jobs_by_id:
+            snap = snapshots.get(job_id)
+            pct = 0
+            if snap:
+                raw = snap.get("percent")
+                if raw:
+                    try:
+                        pct = int(raw)
+                    except (ValueError, TypeError):
+                        pct = 0
+            progress_by_id[job_id] = pct
 
     # Get active job status/progress for each item
     wanted_items: list[WantedItem] = []

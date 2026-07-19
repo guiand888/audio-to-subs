@@ -155,19 +155,31 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
 
 async def _run_reaper_periodically(database_url: str) -> None:
-    """Run the reaper periodically to clean up stale jobs."""
-    while True:
-        try:
-            from audio_to_subs.db.session import get_async_session
+    """Run the reaper periodically to clean up stale jobs.
 
-            async with get_async_session(database_url) as session:
-                reaped = await reap_stale_running(session, stale_seconds=120)
-                if reaped > 0:
-                    logger.info(f"Reaper: {reaped} stale jobs requeued")
-        except Exception:
-            logger.exception("Reaper error")
+    Pass a Redis client so reaped jobs have their now-stale live-progress
+    snapshot cleared (mirrors the worker's own startup reaper call). A missing
+    Redis only degrades the progress read path, never the requeue itself.
+    """
+    from audio_to_subs.api.deps import get_redis_client
+    from audio_to_subs.db.session import get_async_session
 
-        await asyncio.sleep(60)  # Run every 60 seconds
+    redis = get_redis_client()
+    try:
+        while True:
+            try:
+                async with get_async_session(database_url) as session:
+                    reaped = await reap_stale_running(
+                        session, stale_seconds=120, redis=redis
+                    )
+                    if reaped > 0:
+                        logger.info(f"Reaper: {reaped} stale jobs requeued")
+            except Exception:
+                logger.exception("Reaper error")
+
+            await asyncio.sleep(60)  # Run every 60 seconds
+    finally:
+        await redis.aclose()
 
 
 def create_app() -> FastAPI:

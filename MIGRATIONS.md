@@ -3,22 +3,38 @@
 This document collects one-time manual SQL commands needed when the ORM model
 changes but we deliberately do **not** ship an Alembic migration (e.g. for
 homelab Docker/Podman deployments where recreating the database from scratch is
-acceptable). The application is written to tolerate "extra" columns it no
-longer knows about, so you can deploy the new code first and run these
-commands at your leisure.
+acceptable).
+
+**Read this before deploying:** the application tolerates *extra nullable*
+columns it no longer writes — but it does **not** tolerate a column it used to
+write that is now `NOT NULL` with no default. If such a column lingers and the
+app never writes it, every `INSERT` hits a `NOT NULL` violation. So these
+commands are required, not optional, for the affected release — run them
+**before** deploying the new code (or the new code will fail at runtime).
 
 Run each command **once**, with the app/worker stopped so no process holds the
 SQLite writer lock.
 
 ---
 
-## Phase 2: drop the `progress_*` columns from `jobs`
+## Phase 2: drop the `progress_*` columns from `jobs` (REQUIRED)
 
 Commit that removes these columns from the ORM: Phase 2 (Redis-only progress).
 After this change the database no longer needs `progress_percent`,
 `progress_message`, `progress_stage`, `progress_step_index`,
-`progress_step_total`. The app ignores them if they linger, but dropping them
-keeps the schema clean.
+`progress_step_total`.
+
+`progress_percent` is the dangerous one: in the legacy schema it is
+`INTEGER NOT NULL` with **no `server_default`**. The ORM used to provide a
+client-side `default=0`, but that default lives on the (now-removed) column, so
+once the model stops writing the column, a lingering `NOT NULL` column makes
+every job `INSERT` fail. The other four are `nullable=True` and are tolerated
+if they linger, but drop them all for a clean schema.
+
+**Deploy order:** run the DROP below *before* starting the new app/worker, or
+recreate the database from scratch. (A NOT NULL violation during job creation
+is deliberately surfaced as a real 500 by the API, not disguised as a 409, so
+an un-migrated DB fails loudly rather than silently.)
 
 **Prerequisites**
 

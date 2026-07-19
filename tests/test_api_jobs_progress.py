@@ -15,7 +15,7 @@ from fakeredis.aioredis import FakeRedis
 
 from audio_to_subs.api.deps import get_redis
 from audio_to_subs.db.models import JobSource, JobStatus
-from audio_to_subs.queue_.events import set_job_progress
+from audio_to_subs.queue_.events import JOB_PROGRESS_KEY_PREFIX, set_job_progress
 
 from .conftest import make_job
 
@@ -45,6 +45,7 @@ def progress_client(authenticated_client):
             loop.close()
 
     authenticated_client.set_progress = _set
+    authenticated_client.redis_server = server
     yield authenticated_client
     authenticated_client.app.dependency_overrides.pop(get_redis, None)
 
@@ -122,3 +123,84 @@ def test_get_single_job_overlays_redis(progress_client, sync_session):
     data = resp.json()
     assert data["progress_percent"] == 88
     assert data["progress_stage"] == "formatting"
+
+
+def test_malformed_step_index_does_not_crash(progress_client, sync_session):
+    """A corrupted step_index (non-int string) must degrade to None per job,
+    not raise or drop the whole overlay (per-job isolation)."""
+    job_id = _seed_job(sync_session, JobStatus.RUNNING)
+    # Write a deliberately unparseable step_index directly to the shared
+    # FakeServer backing the progress_client's redis override.
+    server = progress_client.redis_server
+
+    loop = asyncio.new_event_loop()
+    try:
+        loop.run_until_complete(
+            FakeRedis(server=server).hset(
+                f"{JOB_PROGRESS_KEY_PREFIX}{job_id}",
+                mapping={
+                    "percent": "50",
+                    "stage": "x",
+                    "message": "m",
+                    "step_index": "not-an-int",
+                },
+            )
+        )
+    finally:
+        loop.close()
+
+    resp = progress_client.get("/api/jobs")
+    assert resp.status_code == 200, resp.text
+    match = next(j for j in resp.json()["jobs"] if j["id"] == job_id)
+    assert match["progress_percent"] == 50
+    assert match["progress_step_index"] is None
+
+
+def test_cancel_running_job_overlays_live_progress(progress_client, sync_session):
+    """POST /api/jobs/{id}/cancel on a RUNNING job must reply with the live
+    Redis progress overlay, not a hardcoded 0 (regression: the RUNNING branch
+    used to return JobResponse.model_validate(job) directly)."""
+    job_id = _seed_job(sync_session, JobStatus.RUNNING)
+    progress_client.set_progress(
+        job_id, percent=37, stage="transcription", message="Transcribing"
+    )
+
+    resp = progress_client.post(f"/api/jobs/{job_id}/cancel")
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["status"] == "running"
+    assert data["cancel_requested"] is True
+    assert data["progress_percent"] == 37
+    assert data["progress_stage"] == "transcription"
+
+
+def test_cancel_done_job_reports_100(progress_client, sync_session):
+    """POST /api/jobs/{id}/cancel on a terminal (DONE) job must derive progress
+    from status (100), not 0."""
+    job_id = _seed_job(sync_session, JobStatus.DONE)
+
+    resp = progress_client.post(f"/api/jobs/{job_id}/cancel")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["progress_percent"] == 100
+
+
+def test_patch_language_done_job_reports_100(progress_client, sync_session):
+    """PATCH /api/jobs/{id}/language on a DONE job must derive progress (100),
+    not 0 (regression: it returned JobResponse.model_validate(job) directly)."""
+    # rename_subtitle_language actually moves the file on disk, so create the
+    # source file first (otherwise the rename raises FileNotFoundError).
+    src = "/tmp/out.en.srt"
+    with open(src, "w") as fh:
+        fh.write("")
+    job_id = _seed_job(
+        sync_session, JobStatus.DONE, output_path=src, language_code="en"
+    )
+
+    resp = progress_client.patch(
+        f"/api/jobs/{job_id}/language",
+        json={"language_code": "fr", "overwrite": True},
+    )
+    assert resp.status_code == 200, resp.text
+    data = resp.json()
+    assert data["progress_percent"] == 100
+    assert data["language_code"] == "fr"

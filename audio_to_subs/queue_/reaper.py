@@ -122,13 +122,17 @@ async def reap_stale_running(
         count = len(reaped_ids)
 
         if count > 0:
-            await session.commit()
-            logger.info(f"Reaped {count} stale running jobs")
             # Drop the now-stale Redis progress snapshots for the reaped jobs
-            # so the live read path doesn't surface old progress.
+            # BEFORE committing the status change, so a concurrent read can
+            # never observe the requeued 'queued' status merged with the
+            # previous run's live snapshot (TOCTOU). The DB row is invisible to
+            # other processes until the commit below, but the Redis keys are
+            # cleared first.
             if redis is not None:
                 for rid in reaped_ids:
                     await clear_job_progress(redis, str(rid))
+            await session.commit()
+            logger.info(f"Reaped {count} stale running jobs")
         else:
             await session.rollback()
 

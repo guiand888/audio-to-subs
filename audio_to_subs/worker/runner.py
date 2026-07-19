@@ -112,13 +112,14 @@ async def persist_result(
                 job.needs_language_review = result.detected_language is None
 
             # Progress is no longer stored in the DB; the in-flight values lived
-            # in Redis via the progress bridge. Clear the Redis snapshot so the
-            # next GET sees the terminal state (progress derived from status),
-            # not a stale live snapshot.
-            await session.commit()
-
+            # in Redis via the progress bridge. Clear the Redis snapshot BEFORE
+            # committing so a concurrent read never observes the terminal status
+            # merged with the previous run's live snapshot (TOCTOU). The DB row
+            # is invisible to other processes until the commit below.
             if redis is not None:
                 await clear_job_progress(redis, job_id)
+
+            await session.commit()
         else:
             logger.error(f"Job {job_id} not found for result persistence")
 

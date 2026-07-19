@@ -127,6 +127,9 @@ async def set_job_progress(
     for the debounced DB write. The key carries a generous TTL that each event
     refreshes, so a key for an abandoned job expires on its own.
 
+    The HSET and EXPIRE are issued through a single pipeline so they cost one
+    round-trip instead of two.
+
     Args:
         redis: Redis async client
         job_id: Job id
@@ -138,23 +141,39 @@ async def set_job_progress(
     """
     key = f"{JOB_PROGRESS_KEY_PREFIX}{job_id}"
     try:
-        await redis.hset(  # type: ignore[misc]
-            key,
-            mapping={
-                "percent": percent,
-                "stage": stage or "",
-                "message": message or "",
-                "step_index": step_index if step_index is not None else "",
-                "step_total": step_total if step_total is not None else "",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
-            },
-        )
-        await redis.expire(key, JOB_PROGRESS_TTL_SECONDS)
+        async with redis.pipeline() as pipe:
+            await pipe.hset(  # type: ignore[misc]
+                key,
+                mapping={
+                    "percent": percent,
+                    "stage": stage or "",
+                    "message": message or "",
+                    "step_index": step_index if step_index is not None else "",
+                    "step_total": step_total if step_total is not None else "",
+                    "updated_at": datetime.now(timezone.utc).isoformat(),
+                },
+            )
+            await pipe.expire(key, JOB_PROGRESS_TTL_SECONDS)
+            await pipe.execute()
     except Exception as e:  # noqa: BLE001
         # Best-effort: a snapshot miss must never break the job. The SSE
         # pub/sub path is independent, and terminal progress is derived from
         # job status (no DB column is involved).
         logger.error("Failed to persist live progress snapshot for %s: %s", job_id, e)
+
+
+def _decode_progress_hash(raw: dict[Any, Any]) -> dict[str, Any]:
+    """Normalize a raw Redis hash (bytes or str keys/values) to str-keyed str.
+
+    Single source of truth for decoding job-progress snapshots so the read
+    paths don't each re-implement bytes handling.
+    """
+    return {
+        (k.decode() if isinstance(k, bytes) else k): (
+            v.decode() if isinstance(v, bytes) else v
+        )
+        for k, v in raw.items()
+    }
 
 
 async def get_job_progress(redis: Redis, job_id: str) -> dict[str, Any] | None:
@@ -168,8 +187,7 @@ async def get_job_progress(redis: Redis, job_id: str) -> dict[str, Any] | None:
         job_id: Job id
 
     Returns:
-        The raw hash (values may be ``bytes`` or ``str`` depending on whether
-        ``decode_responses`` was set) keyed by percent/stage/message/step_index/
+        The decoded hash keyed by percent/stage/message/step_index/
         step_total/updated_at, or ``None``.
     """
     key = f"{JOB_PROGRESS_KEY_PREFIX}{job_id}"
@@ -180,13 +198,42 @@ async def get_job_progress(redis: Redis, job_id: str) -> dict[str, Any] | None:
         return None
     if not raw:
         return None
-    # Decode to str regardless of whether the client uses decode_responses.
-    return {
-        k.decode() if isinstance(k, bytes) else k: (
-            v.decode() if isinstance(v, bytes) else v
-        )
-        for k, v in raw.items()
-    }
+    return _decode_progress_hash(raw)
+
+
+async def get_job_progress_many(
+    redis: Redis, job_ids: list[str]
+) -> dict[str, dict[str, Any]]:
+    """Batch-read live progress snapshots for several jobs in one round-trip.
+
+    Mirrors ``get_job_progress`` per job but pipelines the ``HGETALL`` calls so
+    the caller avoids the N+1 round-trip that a per-job loop would incur (e.g.
+    ``GET /api/wanted`` over many active jobs). Jobs with no snapshot are
+    simply absent from the returned dict.
+
+    Args:
+        redis: Redis async client
+        job_ids: Job ids to read
+
+    Returns:
+        Mapping of job id to its decoded progress hash (only present when a
+        snapshot exists and decodes without error).
+    """
+    if not job_ids:
+        return {}
+    try:
+        pipe = redis.pipeline()
+        for job_id in job_ids:
+            pipe.hgetall(f"{JOB_PROGRESS_KEY_PREFIX}{job_id}")
+        raws = await pipe.execute()
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to read batch live progress snapshots: %s", e)
+        return {}
+    result: dict[str, dict[str, Any]] = {}
+    for job_id, raw in zip(job_ids, raws):
+        if raw:
+            result[job_id] = _decode_progress_hash(raw)
+    return result
 
 
 async def clear_job_progress(redis: Redis, job_id: str) -> None:

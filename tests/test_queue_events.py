@@ -338,3 +338,29 @@ async def test_publish_refresh_done_persists_terminal_state():
         assert fail_state["percent"] == 0
     finally:
         await redis.aclose()
+
+
+@pytest.mark.asyncio
+async def test_get_job_progress_many_batches():
+    """get_job_progress_many reads multiple snapshots in one call and omits
+    jobs with no snapshot (used by GET /api/wanted to avoid N+1 round-trips)."""
+    from audio_to_subs.queue_.events import (
+        get_job_progress_many,
+        set_job_progress,
+    )
+
+    redis = fakeredis.aioredis.FakeRedis()
+    try:
+        await set_job_progress(redis, "j1", percent=10, stage="extract", message="a")
+        await set_job_progress(redis, "j2", percent=20, stage="transcribe", message="b")
+        # j3 intentionally has no snapshot.
+
+        result = await get_job_progress_many(redis, ["j1", "j2", "j3"])
+        assert set(result) == {"j1", "j2"}
+        assert result["j1"]["percent"] == "10"
+        assert result["j2"]["stage"] == "transcribe"
+
+        # Empty input returns empty dict without touching Redis.
+        assert await get_job_progress_many(redis, []) == {}
+    finally:
+        await redis.aclose()

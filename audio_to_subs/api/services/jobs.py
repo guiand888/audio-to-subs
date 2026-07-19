@@ -31,6 +31,22 @@ if TYPE_CHECKING:
 
 logger = logging.getLogger(__name__)
 
+# Name of the partial unique index guarding against a second active job for the
+# same (media_path, language_code, output_format). See Job.__table_args__.
+_ACTIVE_DUPGUARD_INDEX = "ix_jobs_active_dupguard"
+
+
+def _is_active_dupguard_violation(err: IntegrityError) -> bool:
+    """Return True only if ``err`` is the active-duplicate-guard conflict.
+
+    We must distinguish the intended 409 (duplicate active job) from any other
+    integrity failure (NOT NULL on a lingering column, FK error, etc.). The
+    underlying driver error message names the conflicting index, so we match on
+    that rather than blanket-mapping every IntegrityError to 409.
+    """
+    msg = str(getattr(err, "orig", err)).lower()
+    return _ACTIVE_DUPGUARD_INDEX in msg or "active_dupguard" in msg
+
 
 async def get_path_map(db: "AsyncSession") -> PathMap:
     """Get PathMap from database settings.
@@ -225,7 +241,7 @@ async def _preflight_subtitle_exists(
         )
 
 
-async def create_job_service(
+async def create_job_service(  # noqa: C901
     db: "AsyncSession",
     settings: "Settings",
     source: JobSource,
@@ -375,13 +391,20 @@ async def create_job_service(
     except IntegrityError as err:
         # M6.g duplicate guard: the partial unique index
         # (ix_jobs_active_dupguard) rejects a second active job for the same
-        # (media_path, language_code, output_format). Roll back and surface a
-        # clean 409 the frontend's existing dead toast handler expects.
+        # (media_path, language_code, output_format). That is the ONLY integrity
+        # failure we reinterpret as a 409; any other IntegrityError (e.g. a NOT
+        # NULL violation from a lingering schema column, or an FK error) is a
+        # genuine server fault and must NOT be disguised as job_already_active.
+        # Roll back and only map the dupguard violation to 409; re-raise the
+        # rest so it surfaces as a real 500 (and is logged) rather than
+        # misleading the client into thinking the active job already exists.
         await db.rollback()
-        raise HTTPException(
-            status_code=status.HTTP_409_CONFLICT,
-            detail={"code": "job_already_active"},
-        ) from err
+        if _is_active_dupguard_violation(err):
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail={"code": "job_already_active"},
+            ) from err
+        raise
     await db.refresh(job)
 
     await write_job_log(

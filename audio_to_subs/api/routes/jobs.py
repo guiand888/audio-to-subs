@@ -5,12 +5,14 @@ import os
 import re
 from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Annotated, Any, Literal
+from typing import Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
+from redis.asyncio import Redis
 from sqlalchemy import and_, desc, func, select, true
+from sqlalchemy.ext.asyncio import AsyncSession
 
 from audio_to_subs.api.deps import SettingsDep, get_db, get_redis
 from audio_to_subs.api.routes._helpers import (
@@ -32,14 +34,10 @@ from audio_to_subs.db.models import (
     OutputFormat,
 )
 from audio_to_subs.queue_.events import (
-    JOB_PROGRESS_KEY_PREFIX,
+    get_job_progress,
     publish_cancel,
     publish_new,
 )
-
-if TYPE_CHECKING:
-    from redis.asyncio import Redis
-    from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
 
@@ -174,74 +172,76 @@ class JobStatsResponse(BaseModel):
     cancelled: int
 
 
-def _decode(value: object) -> str | None:
-    """Decode a Redis hash value (bytes or str) to str, or None."""
-    if value is None:
-        return None
-    if isinstance(value, bytes):
-        return value.decode()
-    return str(value)
-
-
-async def _overlay_live_progress(  # noqa: C901
+async def _overlay_live_progress(
     redis: Redis, jobs: Sequence[Any]
 ) -> dict[str, dict[str, Any]]:
     """Build live-progress overrides for non-terminal jobs from Redis.
 
     For each job that is not in a terminal state, read its
-    ``job:progress:{id}`` hash and return a dict keyed by job id whose value is
-    the live ``progress_percent``/``progress_message``/``progress_stage``/
+    ``job:progress:{id}`` hash (via the shared ``get_job_progress`` helper) and
+    return a dict keyed by job id whose value is the live
+    ``progress_percent``/``progress_message``/``progress_stage``/
     ``progress_step_index``/``progress_step_total`` to overlay onto the
     serialized ``JobResponse``. Terminal jobs are skipped (their Redis key was
     cleared on completion, and their progress is inferred from status).
 
-    Best-effort: a Redis error or missing key yields no override for that job,
-    so the caller falls back to the terminal-status-derived default.
+    Best-effort and per-job isolated: a Redis error or malformed snapshot for
+    one job yields no override for *that* job only, so the caller falls back to
+    the terminal-status-derived default for it; other jobs are unaffected.
     """
     overrides: dict[str, dict[str, Any]] = {}
     live = [job for job in jobs if not getattr(job, "is_terminal", False)]
     if not live:
         return overrides
-    try:
-        pipe = redis.pipeline()
-        for job in live:
-            pipe.hgetall(f"{JOB_PROGRESS_KEY_PREFIX}{job.id}")
-        snapshots = await pipe.execute()
-    except Exception as e:  # noqa: BLE001
-        logger.error(f"Failed to overlay live progress: {e}")
-        return overrides
-    for job, snap in zip(live, snapshots):
+    for job in live:
+        snap = await get_job_progress(redis, str(job.id))
         if not snap:
             continue
+        # Per-job isolation: a malformed snapshot must not drop overrides for
+        # the rest of the batch (previous versions wrapped the whole pipeline
+        # in one try/except and lost every job on a single failure).
+        try:
+            override: dict[str, Any] = {}
 
-        # hgetall returns bytes keys unless decode_responses is set; normalize.
-        decoded = {
-            (k.decode() if isinstance(k, bytes) else k): v for k, v in snap.items()
-        }
+            pct = snap.get("percent")
+            if pct:
+                try:
+                    override["progress_percent"] = int(pct)
+                except (ValueError, TypeError):
+                    pass
 
-        def _val(key: str, snap: Mapping[Any, Any] = decoded) -> str | None:
-            return _decode(snap.get(key))
+            stage = snap.get("stage")
+            if stage:
+                override["progress_stage"] = stage
 
-        override: dict[str, Any] = {}
-        pct = _val("percent")
-        if pct:
-            try:
-                override["progress_percent"] = int(pct)
-            except (ValueError, TypeError):
-                pass
-        stage = _val("stage")
-        if stage:
-            override["progress_stage"] = stage
-        msg = _val("message")
-        override["progress_message"] = msg if msg else None
-        si = _val("step_index")
-        override["progress_step_index"] = int(si) if si else None
-        st = _val("step_total")
-        override["progress_step_total"] = int(st) if st else None
+            msg = snap.get("message")
+            override["progress_message"] = msg if msg else None
+
+            si = snap.get("step_index")
+            override["progress_step_index"] = _safe_int(si)
+            st = snap.get("step_total")
+            override["progress_step_total"] = _safe_int(st)
+        except (ValueError, TypeError) as e:  # noqa: BLE001
+            logger.error(f"Malformed progress snapshot for job {job.id}: {e}")
+            continue
 
         if override:
             overrides[str(job.id)] = override
     return overrides
+
+
+def _safe_int(value: object) -> int | None:
+    """Parse an optional step index/total to int, returning None on bad input.
+
+    ``step_index``/``step_total`` are stored as strings in the Redis hash; a
+    corrupt value must degrade to ``None`` (no step UI) rather than raise.
+    """
+    if value is None or value == "":
+        return None
+    try:
+        return int(str(value))
+    except (ValueError, TypeError):
+        return None
 
 
 def _terminal_progress(status: JobStatus) -> int:
@@ -398,27 +398,16 @@ async def get_job(
     """Get details for a specific job."""
     job = await get_job_or_404(db, job_id)
 
-    # Same live-progress overlay as list_jobs (only matters for non-terminal jobs).
+    # Apply the same live-progress overlay + terminal derivation as list_jobs.
     progress_overrides = await _overlay_live_progress(redis, [job])
-    resp = JobResponse.model_validate(job)
-    if getattr(job, "is_terminal", False):
-        resp.progress_percent = _terminal_progress(job.status)
-        resp.progress_message = None
-        resp.progress_stage = None
-        resp.progress_step_index = None
-        resp.progress_step_total = None
-    override = progress_overrides.get(str(job.id))
-    if override:
-        for key, value in override.items():
-            setattr(resp, key, value)
-
-    return resp
+    return _to_job_response(job, progress_overrides)
 
 
 @router.post("/{job_id}/cancel", response_model=JobResponse)
 async def cancel_job(
     job_id: UUID,
     db: Annotated["AsyncSession", Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
     settings: SettingsDep,
 ) -> JobResponse:
     """Request cancellation of a job.
@@ -441,9 +430,10 @@ async def cancel_job(
         await publish_job_event(settings, publish_cancel, str(job_id), "cancel")
 
         await db.refresh(job)
-        return JobResponse.model_validate(job)
+        return _to_job_response(job, {})
 
-    # If job is running, set cancel_requested flag
+    # If job is running, set cancel_requested flag. Reply with the live
+    # progress overlay so the client sees the in-flight percent/message, not 0.
     elif job.status == JobStatus.RUNNING:
         job.cancel_requested = True
         job.updated_at = datetime.now(timezone.utc)
@@ -452,11 +442,12 @@ async def cancel_job(
         await publish_job_event(settings, publish_cancel, str(job_id), "cancel")
 
         await db.refresh(job)
-        return JobResponse.model_validate(job)
+        progress_overrides = await _overlay_live_progress(redis, [job])
+        return _to_job_response(job, progress_overrides)
 
-    # If job is already terminal, just return it
+    # If job is already terminal, derive progress from status (done => 100).
     elif job.is_terminal:
-        return JobResponse.model_validate(job)
+        return _to_job_response(job, {})
 
     # For other states, still try to set cancel_requested
     else:
@@ -464,7 +455,8 @@ async def cancel_job(
         job.updated_at = datetime.now(timezone.utc)
         await db.commit()
         await db.refresh(job)
-        return JobResponse.model_validate(job)
+        progress_overrides = await _overlay_live_progress(redis, [job])
+        return _to_job_response(job, progress_overrides)
 
 
 class JobLanguagePatchRequest(BaseModel):
@@ -486,6 +478,7 @@ class JobLanguagePatchRequest(BaseModel):
 async def update_job_language(
     job_id: UUID,
     db: Annotated["AsyncSession", Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
     patch: JobLanguagePatchRequest,
 ) -> JobResponse:
     """Correct a completed job's language after the fact.
@@ -537,7 +530,8 @@ async def update_job_language(
     await db.commit()
     await db.refresh(job)
 
-    return JobResponse.model_validate(job)
+    # DONE job => terminal progress derivation (100). No live overlay applies.
+    return _to_job_response(job, {})
 
 
 @router.delete("/{job_id}", status_code=status.HTTP_204_NO_CONTENT)

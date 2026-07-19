@@ -13,6 +13,7 @@ the high-frequency, ephemeral progress stream off the relational store
 
 import asyncio
 import logging
+import time
 from dataclasses import dataclass, field
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Optional
@@ -55,6 +56,13 @@ class ProgressBridge:
 
     _last_stage: Optional[str] = field(default=None, init=False)
     _write_lock: asyncio.Lock = field(default_factory=asyncio.Lock, init=False)
+    # Redis snapshot write debounce (carried over from the old DB write): we
+    # refresh the live-progress hash at most once per SNAPSHOT_MIN_INTERVAL and
+    # whenever the percent/stage changes, so a chatty pipeline can't flood
+    # Redis with no-op HSETs. The SSE pub/sub publish below stays immediate.
+    _snapshot_min_interval: float = field(default=1.0, init=False)
+    _last_snapshot_at: float = field(default=0.0, init=False)
+    _last_snapshot_key: Optional[str] = field(default=None, init=False)
 
     def on_event(self, event: ProgressEvent) -> None:
         """Synchronous progress callback for the pipeline.
@@ -106,15 +114,26 @@ class ProgressBridge:
 
             # Mirror into the Redis progress snapshot (drives GET /api/jobs
             # polling). This is the authoritative live-progress store now.
-            await set_job_progress(
-                self.redis,
-                str(self.job_id),
-                percent,
-                stage,
-                message,
-                step_index=step_index,
-                step_total=step_total,
-            )
+            # Debounce: write immediately on percent/stage change or once per
+            # SNAPSHOT_MIN_INTERVAL, otherwise skip — the SSE pub/sub above is
+            # always immediate, so the live stream is unaffected.
+            snapshot_key = f"{percent}:{stage}"
+            now = time.monotonic()
+            if (
+                snapshot_key != self._last_snapshot_key
+                or now - self._last_snapshot_at >= self._snapshot_min_interval
+            ):
+                await set_job_progress(
+                    self.redis,
+                    str(self.job_id),
+                    percent,
+                    stage,
+                    message,
+                    step_index=step_index,
+                    step_total=step_total,
+                )
+                self._last_snapshot_key = snapshot_key
+                self._last_snapshot_at = now
 
             # Capture the previous stage before any updates below can change it,
             # so the stage-transition check isn't comparing stage against itself.

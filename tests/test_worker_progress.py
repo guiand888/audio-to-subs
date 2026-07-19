@@ -198,6 +198,43 @@ class TestHandleProgressEvent:
         assert len(logs) == 1
         assert logs[0].message == "[extraction] test message"
 
+    @pytest.mark.asyncio
+    async def test_snapshot_write_is_debounced(self, mock_db_session, monkeypatch):
+        """The Redis snapshot must be written immediately on percent/stage
+        change but debounced (~1s) for repeated identical events, so a chatty
+        pipeline can't flood Redis with no-op HSETs. The SSE pub/sub publish is
+        always immediate and unaffected (verified separately)."""
+        import audio_to_subs.worker.progress as progress_mod
+        from audio_to_subs.queue_.events import set_job_progress as real_set
+
+        calls = []
+
+        async def spy_set(redis, job_id, percent, stage, message, step_index=None,
+                          step_total=None):
+            calls.append((percent, stage))
+            await real_set(redis, job_id, percent, stage, message,
+                           step_index=step_index, step_total=step_total)
+
+        monkeypatch.setattr(progress_mod, "set_job_progress", spy_set)
+
+        job_id = uuid4()
+        await make_job_row(mock_db_session, job_id)
+        redis = FakeRedis()
+        bridge = make_bridge(job_id=job_id, redis=redis)
+
+        # Two identical events back-to-back: only the first should snapshot.
+        await bridge._handle({"percent": 10, "stage": "extraction", "message": "a"})
+        await bridge._handle({"percent": 10, "stage": "extraction", "message": "a"})
+
+        # A percent change must force a new snapshot immediately.
+        await bridge._handle({"percent": 55, "stage": "extraction", "message": "b"})
+
+        assert calls == [(10, "extraction"), (55, "extraction")]
+
+        snapshot = await get_job_progress(redis, job_id)
+        assert snapshot is not None
+        assert snapshot["percent"] == "55"
+
 
 class TestConcurrentProgress:
     """Test concurrent progress updates don't corrupt data (D21 fix)."""

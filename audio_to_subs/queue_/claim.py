@@ -108,14 +108,16 @@ async def claim_one(
             await session.rollback()
             return None
 
-        # Commit the claim
-        await session.commit()
-
         # A freshly claimed job starts at 0; drop any stale Redis progress
-        # snapshot from a previous run so the live read path doesn't show old
-        # progress for this job id.
+        # snapshot from a previous run BEFORE committing the status change so a
+        # concurrent read can never observe the new 'running' status merged with
+        # the previous run's snapshot (TOCTOU). The DB row is invisible to other
+        # processes until the commit below, but the Redis key is cleared first.
         if redis is not None:
             await clear_job_progress(redis, str(row[0]))
+
+        # Commit the claim
+        await session.commit()
 
         return ClaimedJob(
             id=str(row[0]),

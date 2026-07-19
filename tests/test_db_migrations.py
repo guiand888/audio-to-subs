@@ -76,8 +76,13 @@ async def test_migration_can_be_applied():
         expected_tables = {"users", "jobs", "job_logs", "settings", "bazarr_cache"}
         assert expected_tables.issubset(set(tables))
 
-        # Phase 2: jobs table must NOT carry the old persisted progress columns
-        # (progress now lives in Redis, not the DB).
+        # Phase 2 migration policy (Option B): Alembic migrations intentionally
+        # KEEP creating the legacy progress_* columns (0001 / 0004). The ORM no
+        # longer writes them and tolerates their presence on existing DBs; they
+        # are only dropped by the manual one-off DROP COLUMN documented in
+        # MIGRATIONS.md. So a fresh `alembic upgrade head` DB MUST still contain
+        # all five columns — this guards against someone accidentally adding a
+        # migration that drops them (which would contradict the chosen policy).
         import sqlite3 as _sqlite3
 
         conn2 = _sqlite3.connect(db_path)
@@ -89,7 +94,7 @@ async def test_migration_can_be_applied():
             "progress_stage",
             "progress_step_index",
             "progress_step_total",
-        }.isdisjoint(cols)
+        }.issubset(cols)
 
     finally:
         # Cleanup
