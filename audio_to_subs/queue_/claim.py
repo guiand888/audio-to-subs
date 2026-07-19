@@ -11,7 +11,10 @@ from typing import TYPE_CHECKING, Optional
 from sqlalchemy import text
 from sqlalchemy.exc import IntegrityError
 
+from audio_to_subs.queue_.events import clear_job_progress
+
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
 logger = logging.getLogger(__name__)
@@ -50,6 +53,7 @@ async def claim_one(
     session: "AsyncSession",
     worker_id: str,
     busy_timeout_ms: int = 5000,
+    redis: "Redis | None" = None,
 ) -> Optional[ClaimedJob]:
     """Atomically claim one queued job and mark it as running.
 
@@ -80,9 +84,7 @@ async def claim_one(
                 status = 'running',
                 worker_id = :worker_id,
                 started_at = CURRENT_TIMESTAMP,
-                updated_at = CURRENT_TIMESTAMP,
-                progress_percent = 0,
-                progress_message = 'Starting job processing'
+                updated_at = CURRENT_TIMESTAMP
             WHERE id IN (
                 SELECT id FROM jobs
                 WHERE status = 'queued'
@@ -108,6 +110,12 @@ async def claim_one(
 
         # Commit the claim
         await session.commit()
+
+        # A freshly claimed job starts at 0; drop any stale Redis progress
+        # snapshot from a previous run so the live read path doesn't show old
+        # progress for this job id.
+        if redis is not None:
+            await clear_job_progress(redis, str(row[0]))
 
         return ClaimedJob(
             id=str(row[0]),

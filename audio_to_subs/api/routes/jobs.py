@@ -3,15 +3,16 @@
 import logging
 import os
 import re
+from collections.abc import Mapping, Sequence
 from datetime import datetime, timezone
-from typing import TYPE_CHECKING, Annotated, Literal
+from typing import TYPE_CHECKING, Annotated, Any, Literal
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, desc, func, select, true
 
-from audio_to_subs.api.deps import SettingsDep, get_db
+from audio_to_subs.api.deps import SettingsDep, get_db, get_redis
 from audio_to_subs.api.routes._helpers import (
     UTCAwareModel,
     get_job_or_404,
@@ -30,9 +31,14 @@ from audio_to_subs.db.models import (
     LogLevel,
     OutputFormat,
 )
-from audio_to_subs.queue_.events import publish_cancel, publish_new
+from audio_to_subs.queue_.events import (
+    JOB_PROGRESS_KEY_PREFIX,
+    publish_cancel,
+    publish_new,
+)
 
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
 router = APIRouter(prefix="/api/jobs", tags=["jobs"])
@@ -122,13 +128,16 @@ class JobResponse(UTCAwareModel):
     needs_language_review: bool
     output_format: OutputFormat
     priority: int
-    progress_percent: int
-    progress_message: str | None
+    # Progress is no longer stored in the DB; it is supplied by the Redis
+    # live-progress overlay (non-terminal jobs) or derived from status
+    # (terminal jobs). Defaults keep the response valid when neither applies.
+    progress_percent: int = 0
+    progress_message: str | None = None
     # M5.8 (#4, verified): persisted step/stage for step-based UX + refresh
     # survival. Nullable; step_index/step_total are None until extracted.
-    progress_stage: str | None
-    progress_step_index: int | None
-    progress_step_total: int | None
+    progress_stage: str | None = None
+    progress_step_index: int | None = None
+    progress_step_total: int | None = None
     cancel_requested: bool
     worker_id: str | None
     audio_duration_seconds: float | None
@@ -165,10 +174,112 @@ class JobStatsResponse(BaseModel):
     cancelled: int
 
 
+def _decode(value: object) -> str | None:
+    """Decode a Redis hash value (bytes or str) to str, or None."""
+    if value is None:
+        return None
+    if isinstance(value, bytes):
+        return value.decode()
+    return str(value)
+
+
+async def _overlay_live_progress(  # noqa: C901
+    redis: Redis, jobs: Sequence[Any]
+) -> dict[str, dict[str, Any]]:
+    """Build live-progress overrides for non-terminal jobs from Redis.
+
+    For each job that is not in a terminal state, read its
+    ``job:progress:{id}`` hash and return a dict keyed by job id whose value is
+    the live ``progress_percent``/``progress_message``/``progress_stage``/
+    ``progress_step_index``/``progress_step_total`` to overlay onto the
+    serialized ``JobResponse``. Terminal jobs are skipped (their Redis key was
+    cleared on completion, and their progress is inferred from status).
+
+    Best-effort: a Redis error or missing key yields no override for that job,
+    so the caller falls back to the terminal-status-derived default.
+    """
+    overrides: dict[str, dict[str, Any]] = {}
+    live = [job for job in jobs if not getattr(job, "is_terminal", False)]
+    if not live:
+        return overrides
+    try:
+        pipe = redis.pipeline()
+        for job in live:
+            pipe.hgetall(f"{JOB_PROGRESS_KEY_PREFIX}{job.id}")
+        snapshots = await pipe.execute()
+    except Exception as e:  # noqa: BLE001
+        logger.error(f"Failed to overlay live progress: {e}")
+        return overrides
+    for job, snap in zip(live, snapshots):
+        if not snap:
+            continue
+
+        # hgetall returns bytes keys unless decode_responses is set; normalize.
+        decoded = {
+            (k.decode() if isinstance(k, bytes) else k): v for k, v in snap.items()
+        }
+
+        def _val(key: str, snap: Mapping[Any, Any] = decoded) -> str | None:
+            return _decode(snap.get(key))
+
+        override: dict[str, Any] = {}
+        pct = _val("percent")
+        if pct:
+            try:
+                override["progress_percent"] = int(pct)
+            except (ValueError, TypeError):
+                pass
+        stage = _val("stage")
+        if stage:
+            override["progress_stage"] = stage
+        msg = _val("message")
+        override["progress_message"] = msg if msg else None
+        si = _val("step_index")
+        override["progress_step_index"] = int(si) if si else None
+        st = _val("step_total")
+        override["progress_step_total"] = int(st) if st else None
+
+        if override:
+            overrides[str(job.id)] = override
+    return overrides
+
+
+def _terminal_progress(status: JobStatus) -> int:
+    """Progress percent for a terminal job, derived from status.
+
+    ``done`` ⇒ 100; ``failed``/``cancelled`` ⇒ 0. Used because the DB no
+    longer stores a progress column; the live Redis snapshot is cleared when a
+    job reaches a terminal state.
+    """
+    return 100 if status == JobStatus.DONE else 0
+
+
+def _to_job_response(job: Any, progress_overrides: Mapping[str, Any]) -> JobResponse:
+    """Build a JobResponse, applying the Redis live-progress overlay.
+
+    Terminal jobs have no Redis snapshot, so their progress is derived from
+    status (done ⇒ 100, otherwise 0). Non-terminal jobs adopt the live
+    override when present.
+    """
+    resp = JobResponse.model_validate(job)
+    if getattr(job, "is_terminal", False):
+        resp.progress_percent = _terminal_progress(job.status)
+        resp.progress_message = None
+        resp.progress_stage = None
+        resp.progress_step_index = None
+        resp.progress_step_total = None
+    override = progress_overrides.get(str(job.id))
+    if override:
+        for key, value in override.items():
+            setattr(resp, key, value)
+    return resp
+
+
 @router.get("", response_model=JobListResponse)
 async def list_jobs(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
     status_filter: JobStatus | None = None,
     source_filter: JobSource | None = None,
     limit: int = 100,
@@ -220,8 +331,15 @@ async def list_jobs(
     result = await db.execute(query)
     jobs = result.scalars().all()
 
+    # Overlay fresh live progress from Redis onto non-terminal jobs. In-flight
+    # progress lives in Redis (the worker no longer writes it to the DB); the
+    # DB has no progress columns. This makes polling see fresh progress
+    # immediately instead of waiting for a debounced write. Best-effort: any
+    # Redis failure degrades to the terminal-status-derived default.
+    progress_overrides = await _overlay_live_progress(redis, jobs)
+
     return JobListResponse(
-        jobs=[JobResponse.model_validate(job) for job in jobs],
+        jobs=[_to_job_response(job, progress_overrides) for job in jobs],
         total=total_count,
         queued=counts[JobStatus.QUEUED],
         running=counts[JobStatus.RUNNING],
@@ -275,11 +393,26 @@ async def create_job(
 async def get_job(
     job_id: UUID,
     db: Annotated["AsyncSession", Depends(get_db)],
+    redis: Annotated[Redis, Depends(get_redis)],
 ) -> JobResponse:
     """Get details for a specific job."""
     job = await get_job_or_404(db, job_id)
 
-    return JobResponse.model_validate(job)
+    # Same live-progress overlay as list_jobs (only matters for non-terminal jobs).
+    progress_overrides = await _overlay_live_progress(redis, [job])
+    resp = JobResponse.model_validate(job)
+    if getattr(job, "is_terminal", False):
+        resp.progress_percent = _terminal_progress(job.status)
+        resp.progress_message = None
+        resp.progress_stage = None
+        resp.progress_step_index = None
+        resp.progress_step_total = None
+    override = progress_overrides.get(str(job.id))
+    if override:
+        for key, value in override.items():
+            setattr(resp, key, value)
+
+    return resp
 
 
 @router.post("/{job_id}/cancel", response_model=JobResponse)

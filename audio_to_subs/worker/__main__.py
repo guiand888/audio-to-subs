@@ -68,7 +68,9 @@ class Worker:
 
         # Run reaper on startup to clean up any stale jobs
         async with get_async_session(self._settings.DATABASE_URL) as session:
-            reaped = await reap_stale_running(session, stale_seconds=120)
+            reaped = await reap_stale_running(
+                session, stale_seconds=120, redis=self._redis
+            )
             logger.info(f"Reaper cleanup: {reaped} stale jobs requeued")
 
     async def shutdown(self) -> None:
@@ -97,7 +99,9 @@ class Worker:
                 # Claim in a short-lived session so the SQLite write lock is
                 # released immediately whether or not a job was available.
                 async with get_async_session(dsn) as session:
-                    claimed = await claim_one(session, self._worker_id)
+                    claimed = await claim_one(
+                        session, self._worker_id, redis=self._redis
+                    )
 
                 if claimed is None:
                     # No job: sleep OUTSIDE any session so we never hold the
@@ -136,7 +140,7 @@ class Worker:
 
                 # Persist the result in a short-lived session.
                 async with get_async_session(dsn) as session:
-                    await persist_result(session, claimed.id, result)
+                    await persist_result(session, claimed.id, result, redis=self._redis)
 
                 logger.info(
                     f"Worker {self._worker_id} completed job {claimed.id}: "

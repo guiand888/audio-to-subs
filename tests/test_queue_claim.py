@@ -4,8 +4,11 @@ from unittest.mock import AsyncMock, MagicMock
 from uuid import uuid4
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 
 from audio_to_subs.queue_.claim import ClaimedJob, claim_one
+from audio_to_subs.queue_.events import set_job_progress
+from tests.conftest import make_job
 
 
 class TestClaimedJob:
@@ -91,6 +94,34 @@ class TestClaimOne:
             await claim_one(mock_session, "worker-1")
 
         mock_session.rollback.assert_called_once()
+
+    async def test_claim_one_clears_stale_redis_snapshot(
+        self, mock_db_session
+    ) -> None:
+        """Claiming a job must drop any stale Redis progress snapshot so the
+        live read path doesn't surface a previous run's progress for this id."""
+        from audio_to_subs.db.models import JobStatus
+
+        job = make_job(
+            status=JobStatus.QUEUED,
+            source="manual",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.commit()
+        job_id = str(job.id)
+
+        redis = FakeRedis()
+        await set_job_progress(
+            redis, job_id, percent=99, stage="extract", message="old run"
+        )
+
+        result = await claim_one(mock_db_session, "worker-1", redis=redis)
+        assert result is not None
+        assert result.id == job_id
+
+        # Snapshot must be gone after claim.
+        raw = await redis.hgetall(f"job:progress:{job_id}")
+        assert raw == {}
 
 
 @pytest.fixture

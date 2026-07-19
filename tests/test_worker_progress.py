@@ -1,15 +1,23 @@
-"""Tests for the worker ProgressBridge (progress -> DB/Redis/log fan-out)."""
+"""Tests for the worker ProgressBridge (progress -> Redis/DB/log fan-out).
+
+Phase 1: live progress is mirrored to a Redis hash (the authoritative live store)
+rather than written to the DB on every event. The DB only receives terminal
+progress via persist_result. These tests assert progress lands in the Redis
+snapshot and that stage-transition logs are still written to the DB.
+"""
 
 import asyncio
 from unittest.mock import AsyncMock
 from uuid import uuid4
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 from sqlalchemy import select
 
 from audio_to_subs.api.settings import get_settings
 from audio_to_subs.core.cancel import CancelToken
 from audio_to_subs.db.models import Job, JobLog, JobSource, JobStatus
+from audio_to_subs.queue_.events import get_job_progress
 from audio_to_subs.worker.progress import ProgressBridge
 
 
@@ -48,10 +56,11 @@ class TestHandleProgressEvent:
 
     @pytest.mark.asyncio
     async def test_persists_stage_and_step_fields(self, mock_db_session):
-        """M5.8 #4: progress_stage/step_index/step_total must persist to the DB."""
+        """M5.8 #4: progress_stage/step_index/step_total must land in Redis."""
         job_id = uuid4()
         await make_job_row(mock_db_session, job_id)
-        bridge = make_bridge(job_id=job_id)
+        redis = FakeRedis()
+        bridge = make_bridge(job_id=job_id, redis=redis)
 
         await bridge._handle(
             {
@@ -63,33 +72,39 @@ class TestHandleProgressEvent:
             }
         )
 
-        mock_db_session.expire_all()
-        refreshed = (
-            await mock_db_session.execute(select(Job).where(Job.id == str(job_id)))
-        ).scalar_one()
-        assert refreshed.progress_stage == "extract"
-        assert refreshed.progress_step_index == 1
-        assert refreshed.progress_step_total == 4
+        snapshot = await get_job_progress(redis, job_id)
+        assert snapshot is not None
+        assert snapshot["stage"] == "extract"
+        assert snapshot["step_index"] == "1"
+        assert snapshot["step_total"] == "4"
+        assert snapshot["percent"] == "42"
 
     @pytest.mark.asyncio
-    async def test_first_event_updates_db_and_publishes(self, mock_db_session):
+    async def test_first_event_publishes_and_mirrors_to_redis(self, mock_db_session):
         job_id = uuid4()
         await make_job_row(mock_db_session, job_id)
-        redis = AsyncMock()
+        redis = FakeRedis()
         bridge = make_bridge(job_id=job_id, redis=redis)
+
+        pubsub = redis.pubsub()
+        await pubsub.subscribe(f"jobs:progress:{job_id}", "jobs:global")
+        # Drain the subscription confirmation messages.
+        await pubsub.get_message()
+        await pubsub.get_message()
 
         await bridge._handle(
             {"percent": 10, "stage": "extraction", "message": "Extracting"}
         )
 
-        redis.publish.assert_called()
+        msg = await pubsub.get_message()
+        await pubsub.unsubscribe()
+        assert msg is not None
+        assert msg["type"] == "message"
 
-        mock_db_session.expire_all()
-        refreshed = (
-            await mock_db_session.execute(select(Job).where(Job.id == str(job_id)))
-        ).scalar_one()
-        assert refreshed.progress_percent == 10
-        assert refreshed.progress_message == "Extracting"
+        snapshot = await get_job_progress(redis, job_id)
+        assert snapshot is not None
+        assert snapshot["percent"] == "10"
+        assert snapshot["message"] == "Extracting"
 
     @pytest.mark.asyncio
     async def test_stage_transition_writes_job_log(self, mock_db_session):
@@ -189,23 +204,20 @@ class TestConcurrentProgress:
 
     @pytest.mark.asyncio
     async def test_concurrent_progress_updates_and_log_writes(self, mock_db_session):
-        """Concurrent progress events should not corrupt the database.
+        """Concurrent progress events should not corrupt the snapshot or DB.
 
-        This tests that multiple concurrent _handle coroutines can safely
-        update progress and write logs without AsyncSession concurrency issues.
-        Each write uses its own session, serialized by _write_lock.
+        Multiple concurrent _handle coroutines must safely mirror the final
+        progress into the Redis snapshot and write stage-transition logs
+        without AsyncSession concurrency issues (each write uses its own
+        session, serialized by _write_lock).
         """
         job_id = uuid4()
         await make_job_row(mock_db_session, job_id)
-        redis = AsyncMock()
+        redis = FakeRedis()
         bridge = make_bridge(job_id=job_id, redis=redis)
 
         # Simulate multiple concurrent progress events (like the pipeline
         # calling bridge.on_event multiple times quickly from a thread).
-        # Each _handle call should:
-        # 1. Publish to Redis
-        # 2. Update progress in DB (with debouncing)
-        # 3. Write log on stage transition
         events = [
             {"percent": 10, "stage": "extraction", "message": "Extracting audio"},
             {"percent": 20, "stage": "extraction", "message": "Still extracting"},
@@ -217,13 +229,11 @@ class TestConcurrentProgress:
         # Run all _handle calls concurrently
         await asyncio.gather(*[bridge._handle(event) for event in events])
 
-        # Verify progress was updated to the final state
-        mock_db_session.expire_all()
-        refreshed = (
-            await mock_db_session.execute(select(Job).where(Job.id == str(job_id)))
-        ).scalar_one()
-        assert refreshed.progress_percent == 100
-        assert "Complete" in refreshed.progress_message
+        # Verify the Redis snapshot reflects the final state
+        snapshot = await get_job_progress(redis, job_id)
+        assert snapshot is not None
+        assert snapshot["percent"] == "100"
+        assert "Complete" in snapshot["message"]
 
         # Verify stage transitions were logged
         logs = (
@@ -247,12 +257,13 @@ class TestConcurrentProgress:
     async def test_concurrent_writes_serialize_with_lock(self, mock_db_session):
         """Verify that concurrent writes are serialized by the write lock.
 
-        This ensures that even with multiple concurrent _handle calls, the
-        database writes don't interleave or cause conflicts.
+        Even with multiple concurrent _handle calls, all stage transitions
+        must be logged (no data loss) and the Redis snapshot reflects the
+        last event.
         """
         job_id = uuid4()
         await make_job_row(mock_db_session, job_id)
-        redis = AsyncMock()
+        redis = FakeRedis()
         bridge = make_bridge(job_id=job_id, redis=redis)
 
         # Create many rapid stage transitions
@@ -278,3 +289,9 @@ class TestConcurrentProgress:
 
         # Should have one log per distinct stage
         assert len(logs) == len(stages)
+
+        # Final snapshot reflects the last event
+        snapshot = await get_job_progress(redis, job_id)
+        assert snapshot is not None
+        assert snapshot["percent"] == "80"
+        assert snapshot["stage"] == "compress"

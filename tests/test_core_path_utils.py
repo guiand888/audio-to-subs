@@ -1,6 +1,5 @@
 """Tests for path utilities."""
 
-import os
 
 from audio_to_subs.core.path_utils import (
     generate_output_path,

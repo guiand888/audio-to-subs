@@ -12,10 +12,12 @@ from sqlalchemy import delete, update
 from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.db.models import Job
+from audio_to_subs.queue_.events import clear_job_progress
 
 logger = logging.getLogger(__name__)
 
 if TYPE_CHECKING:
+    from redis.asyncio import Redis
     from sqlalchemy.ext.asyncio import AsyncSession
 
 
@@ -71,14 +73,13 @@ async def reap_stale_running(
     session: "AsyncSession",
     stale_seconds: int = 120,
     busy_timeout_ms: int = 5000,
+    redis: "Redis | None" = None,
 ) -> int:
     """Requeue jobs that have been running without updates for stale_seconds.
 
     Executes an UPDATE to reset running jobs that haven't been updated recently:
     - status -> 'queued'
     - worker_id -> NULL
-    - progress_percent -> 0
-    - progress_message -> 'Requeued after worker restart'
     - updated_at -> CURRENT_TIMESTAMP
 
     Args:
@@ -110,20 +111,24 @@ async def reap_stale_running(
             .values(
                 status="queued",
                 worker_id=None,
-                progress_percent=0,
-                progress_message="Requeued after worker restart",
                 started_at=None,
                 updated_at=now,
             )
         )
 
-        result = await session.execute(reap_stmt)
+        result = await session.execute(reap_stmt.returning(Job.id))
 
-        count = result.rowcount
+        reaped_ids = result.scalars().all()
+        count = len(reaped_ids)
 
         if count > 0:
             await session.commit()
             logger.info(f"Reaped {count} stale running jobs")
+            # Drop the now-stale Redis progress snapshots for the reaped jobs
+            # so the live read path doesn't surface old progress.
+            if redis is not None:
+                for rid in reaped_ids:
+                    await clear_job_progress(redis, str(rid))
         else:
             await session.rollback()
 

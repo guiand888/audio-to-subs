@@ -366,8 +366,6 @@ async def create_job_service(
         output_format=final_output_format,
         priority=priority,
         overwrite=overwrite,
-        progress_percent=0,
-        progress_message="Job created, waiting for worker",
         cancel_requested=False,
     )
 

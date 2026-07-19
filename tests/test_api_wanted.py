@@ -8,6 +8,43 @@ import pytest
 from sqlalchemy import select
 
 from audio_to_subs.db.models import BazarrCache, JobLog, JobStatus, LogLevel
+from audio_to_subs.queue_.events import set_job_progress
+
+
+@pytest.fixture
+def progress_client(authenticated_client):
+    """authenticated_client with get_redis overridden by a shared fakeredis."""
+    import asyncio
+
+    from fakeredis import FakeServer
+    from fakeredis.aioredis import FakeRedis
+
+    from audio_to_subs.api.deps import get_redis
+
+    server = FakeServer()
+
+    def _override():
+        return FakeRedis(server=server)
+
+    authenticated_client.app.dependency_overrides[get_redis] = _override
+
+    def _set(job_id, **fields):
+        loop = asyncio.new_event_loop()
+        try:
+            loop.run_until_complete(
+                set_job_progress(
+                    FakeRedis(server=server),
+                    job_id,
+                    message=fields.pop("message", ""),
+                    **fields,
+                )
+            )
+        finally:
+            loop.close()
+
+    authenticated_client.set_progress = _set
+    yield authenticated_client
+    authenticated_client.app.dependency_overrides.pop(get_redis, None)
 
 
 class TestWantedItemModel:
@@ -95,7 +132,7 @@ class TestListWantedEndpoint:
         assert len(data["items"]) <= 50
 
     def test_list_wanted_batches_active_job_status_per_item(
-        self, sync_session, authenticated_client
+        self, sync_session, progress_client
     ):
         """Each item's active_job_status/progress must come from its OWN job.
 
@@ -113,21 +150,24 @@ class TestListWantedEndpoint:
         # job status mapping, which is independent of media_path.
         queued_job = make_job(
             status=JobStatus.QUEUED,
-            progress_percent=0,
             media_path="/test/video-queued.mp4",
         )
         running_job = make_job(
             status=JobStatus.RUNNING,
-            progress_percent=42,
             media_path="/test/video-running.mp4",
         )
         done_job = make_job(
             status=JobStatus.DONE,
-            progress_percent=100,
             media_path="/test/video-done.mp4",
         )
         sync_session.add_all([queued_job, running_job, done_job])
         sync_session.flush()
+
+        # Progress now lives in Redis, not the DB column. Seed the running job's
+        # live snapshot so list_wanted reads it via get_job_progress.
+        progress_client.set_progress(
+            str(running_job.id), percent=42, stage="transcribing", message="working"
+        )
 
         sync_session.add_all(
             [
@@ -168,7 +208,7 @@ class TestListWantedEndpoint:
         )
         sync_session.commit()
 
-        response = authenticated_client.get("/api/wanted")
+        response = progress_client.get("/api/wanted")
 
         assert response.status_code == 200
         items = {item["id"]: item for item in response.json()["items"]}
@@ -271,7 +311,7 @@ class TestGetWantedItemEndpoint:
 
         assert response.status_code == 404
 
-    def test_get_wanted_item_with_active_job(self, sync_session, authenticated_client):
+    def test_get_wanted_item_with_active_job(self, sync_session, progress_client):
         """Test get_wanted_item returns correct item with active job status.
 
         Verifies that get_wanted_item:
@@ -282,9 +322,12 @@ class TestGetWantedItemEndpoint:
         from tests.conftest import make_job
 
         # Create a running job
-        running_job = make_job(status=JobStatus.RUNNING, progress_percent=50)
+        running_job = make_job(status=JobStatus.RUNNING)
         sync_session.add(running_job)
         sync_session.flush()
+
+        # Progress now lives in Redis; seed the running job's live snapshot.
+        progress_client.set_progress(str(running_job.id), percent=50, stage="transcribing")
 
         # Create a cached item with the running job
         sync_session.add(
@@ -302,7 +345,7 @@ class TestGetWantedItemEndpoint:
         )
         sync_session.commit()
 
-        response = authenticated_client.get("/api/wanted/episode:123")
+        response = progress_client.get("/api/wanted/episode:123")
 
         assert response.status_code == 200
         item = response.json()
@@ -326,7 +369,7 @@ class TestGetWantedItemEndpoint:
         """
         from tests.conftest import make_job
 
-        done_job = make_job(status=JobStatus.DONE, progress_percent=100)
+        done_job = make_job(status=JobStatus.DONE)
         sync_session.add(done_job)
         sync_session.flush()
 

@@ -30,7 +30,7 @@ from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import Job, JobStatus, LogLevel, Setting
 from audio_to_subs.db.session import get_async_session
 from audio_to_subs.queue_.claim import ClaimedJob
-from audio_to_subs.queue_.events import publish_done
+from audio_to_subs.queue_.events import clear_job_progress, publish_done
 from audio_to_subs.worker.progress import ProgressBridge
 
 if TYPE_CHECKING:
@@ -82,6 +82,7 @@ async def persist_result(
     session: "AsyncSession",
     job_id: str,
     result: JobResult,
+    redis: "Redis | None" = None,
 ) -> None:
     """Persist job result to database."""
     try:
@@ -92,12 +93,15 @@ async def persist_result(
             job.updated_at = datetime.now(timezone.utc)
             job.error_message = result.error_message
 
-            if result.audio_duration_seconds is not None:
-                job.audio_duration_seconds = result.audio_duration_seconds
-            if result.mistral_usage_json is not None:
-                job.mistral_usage_json = result.mistral_usage_json
-            if result.estimated_cost_usd is not None:
-                job.estimated_cost_usd = result.estimated_cost_usd
+            # Copy optional scalar result fields onto the job when present.
+            for attr in (
+                "audio_duration_seconds",
+                "mistral_usage_json",
+                "estimated_cost_usd",
+            ):
+                value = getattr(result, attr)
+                if value is not None:
+                    setattr(job, attr, value)
             if result.output_path:
                 job.output_path = result.output_path
             if result.detected_language is not None:
@@ -107,7 +111,14 @@ async def persist_result(
                 job.language_code = resolved
                 job.needs_language_review = result.detected_language is None
 
+            # Progress is no longer stored in the DB; the in-flight values lived
+            # in Redis via the progress bridge. Clear the Redis snapshot so the
+            # next GET sees the terminal state (progress derived from status),
+            # not a stale live snapshot.
             await session.commit()
+
+            if redis is not None:
+                await clear_job_progress(redis, job_id)
         else:
             logger.error(f"Job {job_id} not found for result persistence")
 

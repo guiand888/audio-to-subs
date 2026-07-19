@@ -32,6 +32,17 @@ CHANNEL_GLOBAL = "jobs:global"
 REFRESH_STATE_KEY_PREFIX = "refresh:state:"
 REFRESH_STATE_TTL_SECONDS = 600
 
+# Live per-job progress is mirrored into a Redis hash so the REST read paths
+# (GET /api/jobs, GET /api/jobs/{id}, and the Wanted endpoints) can serve fresh
+# progress for running jobs. The worker publishes to pub/sub for the live SSE
+# stream AND writes this snapshot for the polling/REST fallback. The DB no
+# longer stores a progress column - Redis is the sole source for in-flight
+# progress, and a terminal job's progress is derived from its status (done =>
+# 100, otherwise 0). A generous TTL lets an abandoned key expire on its own;
+# each progress event refreshes it.
+JOB_PROGRESS_KEY_PREFIX = "job:progress:"
+JOB_PROGRESS_TTL_SECONDS = 3600
+
 
 async def set_refresh_state(
     redis: Redis,
@@ -97,6 +108,103 @@ async def _publish(
     except Exception as e:
         logger.error(f"Failed to publish to {channel}: {e}")
         raise
+
+
+async def set_job_progress(
+    redis: Redis,
+    job_id: str,
+    percent: int,
+    stage: str,
+    message: str,
+    step_index: int | None = None,
+    step_total: int | None = None,
+) -> None:
+    """Mirror live job progress into a Redis hash for the REST read paths.
+
+    The worker calls this on every progress event (in addition to the pub/sub
+    publish used for the SSE stream). ``GET /api/jobs`` overlays this snapshot
+    onto non-terminal jobs so polling reflects fresh progress without waiting
+    for the debounced DB write. The key carries a generous TTL that each event
+    refreshes, so a key for an abandoned job expires on its own.
+
+    Args:
+        redis: Redis async client
+        job_id: Job id
+        percent: Progress percentage (0-100)
+        stage: Current pipeline stage
+        message: Progress message
+        step_index: Optional 1-based step number within the job
+        step_total: Optional total number of steps for the job
+    """
+    key = f"{JOB_PROGRESS_KEY_PREFIX}{job_id}"
+    try:
+        await redis.hset(  # type: ignore[misc]
+            key,
+            mapping={
+                "percent": percent,
+                "stage": stage or "",
+                "message": message or "",
+                "step_index": step_index if step_index is not None else "",
+                "step_total": step_total if step_total is not None else "",
+                "updated_at": datetime.now(timezone.utc).isoformat(),
+            },
+        )
+        await redis.expire(key, JOB_PROGRESS_TTL_SECONDS)
+    except Exception as e:  # noqa: BLE001
+        # Best-effort: a snapshot miss must never break the job. The SSE
+        # pub/sub path is independent, and terminal progress is derived from
+        # job status (no DB column is involved).
+        logger.error("Failed to persist live progress snapshot for %s: %s", job_id, e)
+
+
+async def get_job_progress(redis: Redis, job_id: str) -> dict[str, Any] | None:
+    """Read the live progress snapshot for ``job_id``, or ``None`` if absent.
+
+    Returns ``None`` on a Redis error as well as on a missing key, so callers
+    can treat both as "no fresh data" and fall back to the DB column.
+
+    Args:
+        redis: Redis async client
+        job_id: Job id
+
+    Returns:
+        The raw hash (values may be ``bytes`` or ``str`` depending on whether
+        ``decode_responses`` was set) keyed by percent/stage/message/step_index/
+        step_total/updated_at, or ``None``.
+    """
+    key = f"{JOB_PROGRESS_KEY_PREFIX}{job_id}"
+    try:
+        raw = await redis.hgetall(key)  # type: ignore[misc]
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to read live progress snapshot for %s: %s", job_id, e)
+        return None
+    if not raw:
+        return None
+    # Decode to str regardless of whether the client uses decode_responses.
+    return {
+        k.decode() if isinstance(k, bytes) else k: (
+            v.decode() if isinstance(v, bytes) else v
+        )
+        for k, v in raw.items()
+    }
+
+
+async def clear_job_progress(redis: Redis, job_id: str) -> None:
+    """Delete the live progress snapshot for ``job_id``.
+
+    Called when a job reaches a terminal state (so the next GET sees the DB's
+    authoritative terminal progress, not a stale snapshot) and on claim/reap so
+    a freshly (re)started job doesn't inherit a previous run's snapshot.
+
+    Args:
+        redis: Redis async client
+        job_id: Job id
+    """
+    key = f"{JOB_PROGRESS_KEY_PREFIX}{job_id}"
+    try:
+        await redis.delete(key)
+    except Exception as e:  # noqa: BLE001
+        logger.error("Failed to clear live progress snapshot for %s: %s", job_id, e)
 
 
 async def publish_new(redis: Redis, job_id: str) -> None:

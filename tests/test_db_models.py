@@ -122,7 +122,6 @@ async def test_job_model():
         assert job.status == JobStatus.QUEUED
         assert job.source == JobSource.MANUAL
         assert job.output_format == OutputFormat.SRT
-        assert job.progress_percent == 0
         assert job.cancel_requested is False
 
     await engine.dispose()

@@ -4,9 +4,11 @@ from datetime import datetime, timedelta, timezone
 from uuid import uuid4
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 from sqlalchemy import select
 
 from audio_to_subs.db.models import Job, JobSource, JobStatus
+from audio_to_subs.queue_.events import set_job_progress
 from audio_to_subs.queue_.reaper import delete_stale_jobs, reap_stale_running
 
 
@@ -185,4 +187,30 @@ async def test_reap_stale_running_requeues_only_stale_jobs(mock_db_session):
     ).scalar_one()
     assert stale_refreshed.status == JobStatus.QUEUED.value
     assert stale_refreshed.worker_id is None
-    assert stale_refreshed.progress_percent == 0
+
+
+async def test_reap_clears_stale_redis_snapshots(mock_db_session):
+    """Reaping a stale running job must drop its Redis progress snapshot."""
+    now = datetime.now(timezone.utc)
+    stale_running = Job(
+        id=str(uuid4()),
+        status=JobStatus.RUNNING,
+        source=JobSource.MANUAL,
+        media_path="/test/stale_running.mp4",
+        output_format="srt",
+        updated_at=now - timedelta(seconds=300),
+        worker_id="dead-worker",
+    )
+    mock_db_session.add(stale_running)
+    await mock_db_session.flush()
+
+    redis = FakeRedis()
+    await set_job_progress(
+        redis, str(stale_running.id), percent=55, stage="extract", message="old"
+    )
+
+    count = await reap_stale_running(mock_db_session, stale_seconds=120, redis=redis)
+    assert count == 1
+
+    raw = await redis.hgetall(f"job:progress:{stale_running.id}")
+    assert raw == {}

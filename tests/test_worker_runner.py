@@ -4,6 +4,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 from uuid import uuid4
 
 import pytest
+from fakeredis.aioredis import FakeRedis
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
@@ -11,6 +12,7 @@ from audio_to_subs.core.cancel import Cancelled
 from audio_to_subs.core.pipeline import PipelineResult
 from audio_to_subs.db.models import Job, JobLog, JobSource, JobStatus, LogLevel, Setting
 from audio_to_subs.queue_.claim import ClaimedJob
+from audio_to_subs.queue_.events import set_job_progress
 from audio_to_subs.worker.runner import (
     JobResult,
     WorkerDeps,
@@ -103,6 +105,39 @@ class TestPersistResult:
         assert refreshed.audio_duration_seconds == 42.5
         assert refreshed.estimated_cost_usd == 0.01
         assert refreshed.finished_at is not None
+
+    @pytest.mark.asyncio
+    async def test_persist_result_clears_redis_snapshot(self, mock_db_session):
+        """On terminal persist, the Redis live snapshot must be cleared so the
+        next GET sees the DB's authoritative terminal progress."""
+        job = Job(
+            id=str(uuid4()),
+            status=JobStatus.RUNNING,
+            source=JobSource.MANUAL,
+            media_path="/test/video.mp4",
+            output_format="srt",
+        )
+        mock_db_session.add(job)
+        await mock_db_session.flush()
+        await mock_db_session.commit()
+        job_id = job.id
+
+        redis = FakeRedis()
+        await set_job_progress(
+            redis, job_id, percent=73, stage="formatting", message="almost"
+        )
+
+        result = JobResult(status=JobStatus.DONE)
+        await persist_result(mock_db_session, job_id, result, redis=redis)
+
+        raw = await redis.hgetall(f"job:progress:{job_id}")
+        assert raw == {}
+
+        mock_db_session.expire_all()
+        refreshed = (
+            await mock_db_session.execute(select(Job).where(Job.id == job_id))
+        ).scalar_one()
+        assert refreshed.status == JobStatus.DONE.value
 
     @pytest.mark.asyncio
     async def test_persist_result_failure_sets_error_message(self, mock_db_session):

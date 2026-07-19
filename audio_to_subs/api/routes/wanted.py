@@ -16,6 +16,7 @@ from audio_to_subs.api.routes._helpers import UTCAwareModel
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import BazarrCache, Job, JobStatus, LogLevel
+from audio_to_subs.queue_.events import get_job_progress
 
 if TYPE_CHECKING:
     from redis.asyncio import Redis
@@ -152,6 +153,7 @@ def _to_wanted_item(
 @router.get("", response_model=WantedListResponse)
 async def list_wanted(  # noqa: C901
     db: Annotated["AsyncSession", Depends(get_db)],
+    redis: Annotated["Redis", Depends(get_redis)],
     item_type: WantedItemType = Query(  # noqa: B008
         default=WantedItemType.ALL, description="Filter by item type"
     ),
@@ -257,31 +259,46 @@ async def list_wanted(  # noqa: C901
     # Translate paths
     items = await _translate_paths(db, items)
 
-    # Batch-load active job status/progress for all items in one query
-    # (avoids one SELECT per item).
+    # Batch-load active job status for all items (progress comes from the
+    # Redis snapshot, not a DB column anymore). Only QUEUED/RUNNING jobs count
+    # as "active"; a finished job must not surface as an active job. Status
+    # still lives in the DB.
     active_job_ids = [item.active_job_id for item in items if item.active_job_id]
-    jobs_by_id: dict[str, tuple[str, int | None]] = {}
+    jobs_by_id: dict[str, str] = {}
     if active_job_ids:
         job_result = await db.execute(
-            select(Job.id, Job.status, Job.progress_percent)
+            select(Job.id, Job.status)
             .where(Job.id.in_(active_job_ids))
-            .where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+            .where(Job.status.in_([JobStatus.QUEUED.value, JobStatus.RUNNING.value]))
         )
         jobs_by_id = {
-            job_id: (job_status, progress_percent)
-            for job_id, job_status, progress_percent in job_result.all()
-        }
+            str(job_id): str(job_status) for job_id, job_status in job_result.all()
+        }  # noqa: C416
 
-    # Get active job status for each item
+    # Read live progress from Redis for active jobs (best-effort: missing or
+    # errored snapshot => 0, which the Wanted item renders as no bar).
+    progress_by_id: dict[str, int] = {}
+    for job_id in jobs_by_id:
+        snap = await get_job_progress(redis, job_id)
+        pct = 0
+        if snap:
+            raw = snap.get("percent")
+            if raw:
+                try:
+                    pct = int(raw)
+                except (ValueError, TypeError):
+                    pct = 0
+        progress_by_id[job_id] = pct
+
+    # Get active job status/progress for each item
     wanted_items: list[WantedItem] = []
     for item in items:
         active_job_status = None
         active_job_progress = None
 
-        if item.active_job_id:
-            job_info = jobs_by_id.get(item.active_job_id)
-            if job_info:
-                active_job_status, active_job_progress = job_info
+        if item.active_job_id and item.active_job_id in jobs_by_id:
+            active_job_status = jobs_by_id[item.active_job_id]
+            active_job_progress = progress_by_id.get(item.active_job_id, 0)
 
         wanted_items.append(
             _to_wanted_item(item, active_job_status, active_job_progress)
@@ -301,6 +318,7 @@ async def list_wanted(  # noqa: C901
 async def get_wanted_item(
     item_id: str,
     db: Annotated["AsyncSession", Depends(get_db)],
+    redis: Annotated["Redis", Depends(get_redis)],
 ) -> WantedItem:
     """Get a specific wanted item by ID.
 
@@ -322,21 +340,28 @@ async def get_wanted_item(
     # Translate path
     item = (await _translate_paths(db, [item]))[0]
 
-    # Get active job status
+    # Get active job status (progress comes from the Redis snapshot now).
     active_job_status = None
     active_job_progress = None
 
     if item.active_job_id:
         job_result = await db.execute(
-            select(Job.status, Job.progress_percent)
-            .where(Job.id == item.active_job_id)
-            .where(Job.status.in_([JobStatus.QUEUED, JobStatus.RUNNING]))
+            select(Job.status).where(Job.id == item.active_job_id)
         )
         job = job_result.one_or_none()
-        if job:
+        if job and job.status in (JobStatus.QUEUED.value, JobStatus.RUNNING.value):
             # job.status is stored as string in DB (Mapped[JobStatus] over String(20))
             active_job_status = job.status
-            active_job_progress = job.progress_percent
+            snap = await get_job_progress(redis, item.active_job_id)
+            pct = 0
+            if snap:
+                raw = snap.get("percent")
+                if raw:
+                    try:
+                        pct = int(raw)
+                    except (ValueError, TypeError):
+                        pct = 0
+            active_job_progress = pct
 
     return _to_wanted_item(item, active_job_status, active_job_progress)
 
