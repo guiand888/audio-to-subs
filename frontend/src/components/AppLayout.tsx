@@ -29,6 +29,7 @@ import {
 import { useJobsStream } from "@/hooks/useJobsStream"
 import { useMe, useLogout } from "@/hooks/useAuth"
 import { useSidebarCollapse } from "@/hooks/useSidebarCollapse"
+import { useVersion } from "@/hooks/useVersion"
 import { cn } from "@/lib/utils"
 
 const navLinks = [
@@ -45,6 +46,7 @@ export function AppLayout() {
   const { data: user, isLoading, error, isFetching, refetch } = useMe()
   const logout = useLogout()
   const { collapsed, toggle } = useSidebarCollapse()
+  const version = useVersion()
 
   // True when useMe failed with a non-401 error (backend unreachable,
   // 502/503, network failure). A 401 is swallowed inside useMe's queryFn
@@ -159,6 +161,21 @@ export function AppLayout() {
               )
             })}
           </nav>
+
+          {/* Version — ambient, tertiary metadata pinned to the sidebar
+              bottom. Aligns with the brand/nav gutter (px-4). Hidden entirely
+              in the collapsed icon rail: a version string can't render
+              meaningfully in 56px, so we drop it like the brand drops to "P". */}
+          {!collapsed && (
+            <div className="mt-auto">
+              <Separator />
+              <div className="px-4 py-2">
+                <span className="font-mono text-[11px] tabular-nums text-muted-foreground/70">
+                  {version}
+                </span>
+              </div>
+            </div>
+          )}
         </aside>
 
         {/* Main area */}

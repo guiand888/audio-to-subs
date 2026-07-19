@@ -1,9 +1,12 @@
-.PHONY: help build test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell
+.PHONY: help build test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell version-sync version-check release
 
 # Variables
 IMAGE_NAME := parolesub
 IMAGE_TAG := latest
 PROD_IMAGE := $(IMAGE_NAME):$(IMAGE_TAG)
+
+# Single source of truth for the app version (repo-root VERSION file).
+APP_VERSION := $(shell cat VERSION 2>/dev/null)
 
 # Backend dev tooling runs via `nix develop`; see flake.nix.
 NIX_RUN := nix develop --command
@@ -16,6 +19,40 @@ help:  ## Show this help message
 
 build:  ## Build production container
 	podman build -t $(PROD_IMAGE) .
+
+version-sync:  ## Sync APP_VERSION in .env from the VERSION file (creates .env from .env.example if missing)
+	@test -n "$(APP_VERSION)" || { echo "VERSION file is empty or missing"; exit 1; }
+	@test -f .env || { cp .env.example .env && echo "Created .env from .env.example"; }
+	@if grep -q '^APP_VERSION=' .env; then \
+		sed -i.bak "s|^APP_VERSION=.*|APP_VERSION=$(APP_VERSION)|" .env && rm -f .env.bak; \
+	else \
+		printf '\nAPP_VERSION=%s\n' "$(APP_VERSION)" >> .env; \
+	fi
+	@echo "APP_VERSION=$(APP_VERSION) written to .env"
+
+version-check:  ## Verify VERSION, .env.example and (on a tagged commit) the git tag all agree
+	@test -n "$(APP_VERSION)" || { echo "VERSION file is empty or missing"; exit 1; }
+	@env_ex=$$(grep '^APP_VERSION=' .env.example | cut -d= -f2-); \
+	if [ "$$env_ex" != "$(APP_VERSION)" ]; then \
+		echo "MISMATCH: .env.example APP_VERSION=$$env_ex != VERSION=$(APP_VERSION)"; exit 1; \
+	fi
+	@tag=$$(git describe --tags --exact-match 2>/dev/null); \
+	if [ -n "$$tag" ] && [ "$$tag" != "$(APP_VERSION)" ]; then \
+		echo "MISMATCH: git tag $$tag != VERSION=$(APP_VERSION)"; exit 1; \
+	fi
+	@echo "Version coherence OK ($(APP_VERSION))"
+
+release:  ## Bump version everywhere: make release VERSION=v2.0.0-beta.11
+	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=vX.Y.Z"; exit 1; }
+	@printf '%s\n' "$(VERSION)" > VERSION
+	@sed -i.bak "s|^APP_VERSION=.*|APP_VERSION=$(VERSION)|" .env.example && rm -f .env.example.bak
+	@$(MAKE) --no-print-directory version-sync APP_VERSION=$(VERSION)
+	@echo ""
+	@echo "VERSION, .env.example and .env now set to $(VERSION)."
+	@echo "Next (run manually):"
+	@echo "  git commit -am 'release: $(VERSION)'"
+	@echo "  git tag $(VERSION)"
+	@echo "  git push --follow-tags"
 
 test:  ## Run tests (nix develop)
 	$(NIX_RUN) pytest
@@ -72,7 +109,8 @@ compose-logs:  ## View logs from services
 	podman-compose logs -f
 
 compose-dev-up:  ## Start services with Podman Compose, building from this checkout
-	podman-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+	APP_VERSION=$$(git describe --tags --dirty --always) \
+		podman-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
 
 compose-dev-down:  ## Stop services started with compose-dev-up
 	podman-compose -f docker-compose.yml -f docker-compose.dev.yml down
