@@ -24,7 +24,16 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M5.8 — Queue progress reporting: live-update gaps and step-based UX | ✅ Done | 2026-07-10 | Independent; see `QUEUE_PROGRESS_REVIEW.md` |
 | M6 — Polish, coverage, security | ✅ Done | 2026-07-12 | M6.a-f done (2026-07-11); M6.g, M6.h done (2026-07-12). Depends on M5.6, M5.7, M5.8 |
 | M6.i — Post-M6 hardening batch (unplanned): Parolesub rebrand + deploy hardening | ✅ Done | 2026-07-18 | Depends on M6; see note below |
-| M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6 |
+| M7 — Documentation rewrite & dev-docs reorganization | ⏳ Not Started | - | Depends on M6; now M16 below — deferred until after the v2.1–v4.0 feature work |
+| M8 — v2.1 Wanted scope: sync everything, filter client-side | ⏳ Not Started | - | Depends on M6; refines M3 polling + Wanted UI |
+| M9 — v2.2 (TBD — scope to be defined) | ⏳ Not Started | - | Depends on M8 |
+| M10 — v2.3 Admin password sync on secret/env change | ⏳ Not Started | - | Depends on M1 (auth/bootstrap); see note |
+| M11 — v3.0 Redis/jobs-progress architecture refactor | ⏳ In progress (branch `investigate-progress-bar`) | - | Absorbs the in-flight `investigate-progress-bar` work; depends on M5.8 |
+| M12 — v2.4 Queue: Auto-refresh On by default | ⏳ Not Started | - | Depends on M4 (Queue UI) |
+| M13 — v2.5 History: Retry action for failed jobs | ⏳ Not Started | - | Depends on M5 (History UI) + M6.g retry machinery |
+| M14 — v2.6 Visual polish: History filter buttons + Parolesub logo | ⏳ Not Started | - | Depends on M4/M5 UI |
+| M15 — v4.0 Periodic, configurable jobs (Bazarr sync + auto-schedule) | ⏳ Not Started | - | Depends on M3 (Bazarr) + M11 (progress arch) |
+| M16 — Documentation rewrite & dev-docs reorganization (deferred) | ⏳ Not Started | - | Depends on M6; deferred until after M8–M15 |
 
 Every milestone ends with the same quality bar:
 
@@ -39,7 +48,7 @@ Every milestone ends with the same quality bar:
 **Goal**: relocate the v1 pipeline into a real package with a `core/` subpackage. No behaviour changes.
 
 Tasks:
-- [`MIGRATION.md`](MIGRATION.md) mechanical rename + import rewrites.
+- [`../archive/MIGRATION.md`](../archive/MIGRATION.md) mechanical rename + import rewrites.
 - Update `pyproject.toml` entry point and package config.
 - Update Dockerfile/Compose paths and `python -m` entrypoints.
 
@@ -53,7 +62,7 @@ Out of scope: any new code under `db/`, `api/`, `worker/`, etc. Add the empty `c
 
 ## M0.5 — Mistral usage probe (one-off spike, blocks M2)
 
-Run [`MISTRAL_USAGE_PROBE.md`](MISTRAL_USAGE_PROBE.md). Document the exact response shape of `mistralai==2.4.5`'s transcription endpoint in that file. Decide whether `core/cost.py` reads real usage or falls back to duration × rate.
+Run [`../archive/MISTRAL_USAGE_PROBE.md`](../archive/MISTRAL_USAGE_PROBE.md). Document the exact response shape of `mistralai==2.4.5`'s transcription endpoint in that file. Decide whether `core/cost.py` reads real usage or falls back to duration × rate.
 
 Acceptance: `MISTRAL_USAGE_PROBE.md` updated with concrete findings; `core/cost.py` field accesses are pinned to actual field names.
 
@@ -233,8 +242,7 @@ after M5.2, executed as a batch of independent, parallel-mergeable units.
 
 **Depends on**: M5.2
 
-**Authoritative plan**: [`../../../audio_to_subs_plans/REFACTOR.md`](../../../audio_to_subs_plans/REFACTOR.md)
-(sibling directory to this repo). That document is the source of truth for
+**Authoritative plan**: REFACTOR.md (external document in sibling `audio_to_subs_plans/` repo - not included in this codebase) That document is the source of truth for
 this milestone's scope, execution order, and per-item detail — this section
 only summarizes; do not duplicate its item lists here.
 
@@ -438,7 +446,7 @@ Acceptance:
 
 **Depends on**: none — independent, isolated to the pipeline's progress emission and the Queue page's SSE handling.
 
-**Authoritative plan**: [`QUEUE_PROGRESS_REVIEW.md`](QUEUE_PROGRESS_REVIEW.md) (full root-cause analysis and design). This section only summarizes; do not duplicate its detail here.
+**Authoritative plan**: [`../archive/QUEUE_PROGRESS_REVIEW.md`](../archive/QUEUE_PROGRESS_REVIEW.md) (full root-cause analysis and design). This section only summarizes; do not duplicate its detail here.
 
 Root causes (all confirmed against current code — see the linked doc for `file.py:line` references):
 
@@ -709,19 +717,337 @@ behaviour change: deploy-hardening is compose/proxy config only, and the
 rebrand is a mechanical rename (verified no residual old-name references in
 product-facing surfaces post-rename).
 
-## M7 — Documentation rewrite & dev-docs reorganization
+## M8 — v2.1 Wanted scope: sync everything, filter client-side
+
+**Goal**: change the Bazarr sync model from "only pull items missing/a completely
+without subtitles" to "sync the full library, then let the operator choose what
+to display" — without losing any of the filtering the UI already does today
+(including the scope of what gets re-synced). The Wanted panel gains an explicit
+three-way scope selector (All / Missing subtitle / No subtitles) that replaces
+the current binary "only no-subs" toggle, and the Movies/Series type filter
+stays as a separate axis.
+
+**Depends on**: M6 (and the M3 polling + Wanted UI it shipped).
+
+### Current behaviour (to be changed)
+- The poller only ingests items Bazarr flags as *wanted* (missing at least one
+  subtitle, or — opt-in via `bazarr_track_no_subs` — items with *no* subtitle at
+  all). See `bazarr/poller.py`: `_run_no_subs_pass` (expensive, opt-in) plus the
+  standard wanted pass.
+- The Wanted UI (`frontend/src/pages/WantedPage.tsx`) has:
+  - a type selector: `All` / `Movies` / `Series` (Tabs), and
+  - a binary "only no-subs" toggle (`no-subs` filtering applied server-side).
+- Re-sync is currently *scoped* by the active UI filter — the refresh endpoint
+  re-polls according to whatever the operator is currently viewing.
+
+### Target behaviour
+1. **Sync everything.** The poller ingests the entire Bazarr library (movies +
+   series + episodes), carrying each item's full state: which languages are
+   *missing* (`missing_subtitles`) and whether the item has *no* subtitle at all
+   (`missing_subtitles` empty *and* no `subtitles` present). The opt-in
+   `bazarr_track_no_subs` pass is subsumed by the full sync and can be retired
+   (or kept as a no-op compatibility flag, TBD).
+2. **Three-way scope selector** in the Wanted panel, replacing the "only no-subs"
+   toggle:
+   - `All` — every synced item (movies + series, regardless of subtitle state).
+   - `Missing subtitle` — items with ≥1 missing language (`missing_subtitles` non-empty).
+   - `No subtitles` — items with *no* subtitle at all (no `subtitles`, `missing_subtitles` empty).
+   This is a **display** filter applied client-side / server-side on top of the
+   already-synced full library — it must NOT re-trigger a scoped re-sync.
+3. **Type axis unchanged.** Movies / Series / All stays a separate filter, as
+   today (Tabs in `WantedPage.tsx`).
+4. **Retain all existing filtering logic.** Search, language filter, and the
+   live active-job indicator must keep working exactly as now. The sync scope is
+   decoupled from the display scope: a refresh re-syncs the *full* library
+   regardless of which scope/tab the operator is viewing, so the UI is never
+   stuck seeing only a subset.
+
+### Tasks (proposed)
+- `bazarr/poller.py`: switch the wanted pass to a full-library fetch; persist a
+  `has_no_subs` / `subtitle_state` discriminator per cached item (or derive it
+  from `missing_subtitles` + `subtitles` already stored). Retire or neutralize
+  `bazarr_track_no_subs` and `_run_no_subs_pass`.
+- `bazarr` cache schema (`BazarrWantedItem` / cache model): ensure it carries
+  enough state to compute `All` / `Missing` / `No subtitles` without a re-poll.
+- `api/routes/wanted.py`: add a `scope` query param (`all` | `missing` |
+  `no_subs`) alongside the existing `type`/`search`/`language` filters; keep all
+  current filters intact. Decouple the refresh/sync trigger from the active UI
+  filter (sync full library every time).
+- `frontend/src/pages/WantedPage.tsx`: replace the "only no-subs" toggle with a
+  three-way scope control (segmented control / select matching the existing
+  Movies/Series selector styling). Keep the type Tabs and every other filter.
+- `frontend/src/lib/types.ts` + `useWanted.ts`: add `scope` to the query contract.
+- Tests: `test_api_wanted.py` (all three scopes + interaction with type/language
+  filters), `test_bazarr_poller.py` (full-library ingest, discriminator
+  correctness), `WantedPage.test.tsx` (scope selector renders all three states,
+  toggle removed, refresh does not narrow the synced set).
+
+### Acceptance (proposed)
+- Poller ingests the full library; `GET /api/wanted?scope=all` returns items with
+  and without subtitles; `scope=missing` returns only items with ≥1 missing lang;
+  `scope=no_subs` returns only items with no subtitle at all.
+- The Wanted UI shows the three-way selector; selecting a scope filters the
+  displayed list without triggering a narrowed re-sync.
+- Movies/Series, search, language filter, and active-job indicator all still work.
+- `bazarr_track_no_subs` is either removed cleanly or neutralized; no behaviour
+  regression in sync coverage.
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean; frontend
+  `vitest` + `tsc --noEmit` clean; new code ≥ 80% coverage.
+- Doc note: M7 (doc rewrite, now M12) must capture the new sync model.
+
+## M9 — v2.2
+
+**Goal**: scope not yet defined. Placeholder milestone reserved immediately after
+the v2.1 Wanted refactor so the v2.x line has a clear next slot. To be filled in
+once v2.1 is shipped and the next v2 feature is chosen.
+
+**Depends on**: M8.
+
+Tasks / Acceptance: TBD.
+
+## M10 — v2.3 Admin password sync on secret/env change
+
+**Goal**: confirm (and, if missing, introduce) a workflow that updates the
+admin password whenever the deployment secret changes — i.e. when the Podman
+secret or `.env` var backing `ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE` is rotated,
+the running app picks it up and the stored admin credential is brought in line
+with the new value (rather than bootstrap only setting the password on
+first-run / when no user exists).
+
+**Depends on**: M1 (DB foundation + auth + bootstrap). Relevant surfaces:
+`audio_to_subs/admin/__main__.py` (`set-password` subcommand already exists),
+`audio_to_subs/auth/bootstrap.py` (`bootstrap_admin`), `audio_to_subs/api/app.py`
+(lifespan calls bootstrap), and `audio_to_subs/api/settings.py` /
+`audio_to_subs/auth/passwords.py`.
+
+### Tasks (proposed)
+- Audit current behaviour: does changing `ADMIN_PASSWORD` (secret or env) after
+  first boot actually update the stored hash, or is it only honoured when no
+  user exists? Today `bootstrap_admin` only creates/refuses — verify whether it
+  also reconciles on change.
+- If absent: add a reconcile step (on startup or on a `set-password`/admin
+  trigger) that, when the secret/env value differs from the stored hash, updates
+  the admin password. Reuse the existing `set-password` machinery where possible.
+- Decide trigger model: startup reconcile vs. explicit operator action (e.g.
+  `parolesub admin set-password` or a Settings action). Document the chosen model.
+- Tests: rotating the secret updates the stored credential; stale secret does
+  not silently lock the operator out; placeholder/weak values still refused
+  (reuse M6.c's refusal logic).
+
+### Acceptance (proposed)
+- Changing the Podman secret / `.env` `ADMIN_PASSWORD` and redeploying results in
+  the new password being active (verified by login with the new value).
+- No regression to M6.c's placeholder-secret refusal or to first-boot bootstrap.
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+
+## M11 — v3.0 Redis / jobs-progress architecture refactor
+
+**Goal**: land the in-depth architecture refactoring of how live job progress is
+stored, delivered, and reconciled — currently in flight on the
+`investigate-progress-bar` branch (commit `828c19e`, "store live job progress in
+Redis, drop DB columns (Phase 1+2)"). This milestone formally adopts that branch
+work as v3.0 and drives it to completion, including the phases not yet shipped.
+
+**Depends on**: M5.8 (Queue progress reporting — step-based UX, Redis-only SSE
+delivery, `progress_stage`/`step_index`/`step_total`).
+
+### Status of in-flight work (`investigate-progress-bar`)
+- **Phase 1** (live progress mirrored to Redis hash `job:progress:{id}`,
+  authoritative live store; worker writes via the progress bridge; cleared on
+  terminal/claim/reap): **done** in `828c19e`.
+- **Phase 2** (DB no longer stores `progress_*` columns; ORM dropped them;
+  removes last per-event DB write and the SQLite single-writer contention):
+  **done** in `828c19e`. No Alembic migration shipped (Option B) — orphaned
+  columns linger in existing SQLite DBs; `MIGRATIONS.md` documents the one-time
+  `DROP COLUMN` (incl. a `docker run --rm` method for hosts without sqlite3).
+- Branch is **not yet merged into `dev`** as of 2026-07-19. Suite: 704 passed /
+  4 skipped (1 pre-existing `test_db_migrations` sandbox failure — no alembic on
+  PATH).
+
+### Open scope for v3.0 (proposed phases beyond 1+2)
+- **Phase 3+**: reconcile the poller/Wanted progress read path fully onto the
+  Redis snapshot (already partially done in `828c19e` for Wanted); confirm
+  `GET /api/jobs` and `/api/jobs/{id}` overlay logic is consistent across SSE +
+  polling + refresh.
+- **Claim/reap consistency**: ensure a reaped-and-requeued job rebuilds its
+  progress snapshot from Redis (or resets cleanly) — covered by the Phase 1
+  clear-on-claim/reap logic; add regression tests.
+- **Migration hygiene**: decide whether v3.0 should ship an Alembic migration to
+  actually drop the orphaned `progress_*` columns (vs. the current Option B
+  manual DROP), so fresh + upgraded DBs match. Reconcile `MIGRATIONS.md`.
+- **Docs**: `QUEUE.md` / `ARCHITECTURE.md` / `DATABASE.md` must reflect
+  Redis-as-authoritative-progress (the M12 doc rewrite should consume this).
+
+### Acceptance (proposed)
+- `investigate-progress-bar` merged to `dev`; live progress is Redis-authoritative
+  with no per-event DB writes on the progress path.
+- Terminal jobs derive progress from status; non-terminal jobs overlay the Redis
+  snapshot consistently across SSE + REST.
+- Existing SQLite DBs either auto-migrate or have a documented, tested DROP path.
+- No SQLite single-writer contention regression; `pytest`/`black`/`ruff`/`mypy`
+  clean; frontend `vitest`/`tsc` clean.
+
+## M12 — v2.4 Queue: Auto-refresh On by default
+
+**Goal**: make the Queue panel's "Auto-refresh" toggle default to **On**, so a
+freshly opened Queue page live-updates progress without the operator having to
+manually enable it.
+
+**Depends on**: M4 (Queue UI + SSE store). Relevant surface:
+`frontend/src/pages/QueuePage.tsx` — `const [autoRefresh, setAutoRefresh] =
+useState(false)` (line ~183) should initialize to `true`.
+
+### Tasks (proposed)
+- Flip the `autoRefresh` initial state to `true` in `QueuePage.tsx`.
+- Keep the manual toggle working (operator can still turn it Off); only the
+  default changes. No backend change expected.
+- Test: `QueuePage.test.tsx` asserts auto-refresh starts On (and that the toggle
+  still flips it Off).
+
+### Acceptance (proposed)
+- Opening the Queue page starts with Auto-refresh On; progress updates live.
+- Toggling Off stops the polling; toggling back On resumes it.
+- Frontend `vitest` + `tsc --noEmit` clean.
+
+## M13 — v2.5 History: Retry action for failed jobs
+
+**Goal**: surface a **Retry** action button for any job that ended in `failed`,
+distinct from the existing M6.g "Overwrite & retry" (which only appears for the
+`output_exists` sentinel). Clicking Retry queues a fresh job that re-runs the
+failed one; once the new job is scheduled/queued, the Retry button for the
+original row must disappear (the row is no longer retryable — its re-run is now
+in flight / tracked as a new job).
+
+**Depends on**: M5 (History UI) + M6.g (`buildRetry` helper +
+`createJob.mutate` machinery already in `frontend/src/pages/HistoryPage.tsx`).
+
+### Current state (to extend)
+- `HistoryPage.tsx` already has `buildRetry(job)` (re-runs with `overwrite:
+  true`) and an "Overwrite & retry" button gated on `isOutputExists(job)` (the
+  M6.g `output_exists` sentinel, line ~493).
+- There is **no** general Retry for an ordinary `failed` job today. A plain
+  failure (transcription error, Bazarr resolution failure, crash) has no retry
+  affordance.
+- `needsLanguageRename(job)` ("Rename" button) already handles the
+  `needs_language_review` case.
+
+### Tasks (proposed)
+- Add a `Retry` button gated on `job.status === "failed"` (and not already
+  covered by the more specific `isOutputExists` / `needsLanguageRename` buttons —
+  those stay). Clicking it calls `createJob.mutate(buildRetry(job), …)` reusing
+  the M6.g flow (toast on success/error).
+- After a successful queue, the source row's Retry button must disappear. Drive
+  this from the SSE/query state: once a new job derived from this `media_path` +
+  `language` is visible as `queued`/`running` (or track the returned new job id
+  locally), hide Retry for the original row. Simplest robust approach: on
+  `onSuccess`, invalidate/refetch the history query and gate Retry on "no active
+  job already queued for this source" (reuse the existing active-job lookup the
+  Wanted/Queue pages use).
+- Tests: `HistoryPage.test.tsx` — Retry appears for a `failed` job, disappears
+  after a successful queue (assert the new job is `queued` and the original row
+  no longer shows Retry); Retry does not appear for `done`/`running`/`queued`.
+
+### Acceptance (proposed)
+- Any `failed` job shows a Retry button; clicking it queues a new job.
+- Once the new job is `queued`/`running`, the original row's Retry button is
+  gone (no duplicate retry).
+- The existing `output_exists` "Overwrite & retry" and `needs_language_review`
+  "Rename" buttons remain unchanged.
+- Frontend `vitest` + `tsc --noEmit` clean.
+
+## M14 — v2.6 Visual polish: History filter buttons + Parolesub logo
+
+**Goal**: two UI polish items — (1) in the History panel, make the filter
+**Reset** and **Apply** buttons the same size and **swap their order** so Apply is
+on the **left** and Reset on the **right**; (2) add a **Parolesub logo** to the
+product UI (sidebar / login / topbar) as part of the rebrand completed in M6.i.
+
+**Depends on**: M4/M5 UI (History filters at `frontend/src/pages/HistoryPage.tsx`
+~line 196; `AppLayout.tsx` sidebar; `LoginPage.tsx`).
+
+### Tasks (proposed)
+- **History filter buttons**: in `HistoryPage.tsx`'s filter form, reorder so
+  Apply renders first (left) and Reset second (right); give both an explicit
+  equal `size` (e.g. `size="sm"` already shared — ensure identical width via a
+  shared class / `w-*` or `flex-1`), so they read as a matched pair. Behaviour
+  unchanged (Apply submits filters, Reset clears).
+- **Parolesub logo**: add a logo asset (SVG, e.g. `frontend/src/assets/logo.svg`
+  or `frontend/public/`) and render it in `AppLayout.tsx` (sidebar header) and
+  `LoginPage.tsx` (above the form). Pick a mark consistent with the M6.i Parolesub
+  rebrand / `dev/NAMING.md` umbrella. Provide light/dark variants or a
+  theme-aware single asset. Keep the existing text wordmark ("Parolesub") as
+  fallback/alt text.
+- Tests: `AppLayout.test.tsx` / `LoginPage` render the logo `img`/`svg` with
+  accessible alt; `HistoryPage.test.tsx` asserts Apply appears before Reset in
+  DOM order.
+
+### Acceptance (proposed)
+- History filter buttons are equal size; Apply is left of Reset.
+- Parolesub logo shows in the sidebar and on the login page; alt text present.
+- No regression to filter behaviour (Apply still applies, Reset still clears).
+- Frontend `vitest` + `tsc --noEmit` clean.
+
+## M15 — v4.0 Periodic, configurable jobs (Bazarr sync + auto-schedule)
+
+**Goal**: introduce a scheduling subsystem so the app can run work on a recurring,
+operator-configured cadence: (a) periodic **Bazarr sync** (replace/extend the
+current fixed `bazarr_poll_interval` poll with a proper, user-tunable schedule),
+and (b) **auto-scheduling of transcription jobs** — automatically queue
+transcription for items matching a rule (e.g. wanted items missing a subtitle,
+optionally scoped by language/type) on a configurable interval, instead of
+requiring manual "Transcribe" clicks.
+
+**Depends on**: M3 (Bazarr client/poller/`/api/wanted`), M11 (Redis/progress
+architecture — so auto-queued jobs share the same progress/SSE path as manual
+ones). Builds on the existing `bazarr_poll_interval` setting and the
+manual-job creation service.
+
+### Tasks (proposed)
+- **Scheduling core**: a backend scheduler (APScheduler-like or a lightweight
+  periodic task in the FastAPI lifespan / worker) with CRUD over schedules stored
+  in the DB (new table + Alembic migration). Each schedule has: enabled flag,
+  cron/interval, and a job-type (`bazarr_sync` | `auto_transcribe`).
+- **Bazarr sync schedule**: promote `bazarr_poll_interval` to a first-class,
+  editable schedule (keep backward-compatible default). Settings UI lets the
+  operator switch between interval and cron and pause it.
+- **Auto-transcribe schedule**: a rule (language(s), media type All/Movies/
+  Series, scope from M8's `all`/`missing`/`no_subs`) that, on each tick, queries
+  `/api/wanted` and enqueues jobs for items not already active/done recently
+  (reuse the M6.g duplicate-job guard so re-runs are skipped). Surfaced in
+  Settings + a new "Schedules" surface (settings section or dedicated page).
+- **Frontend**: Settings section to create/edit/enable/disable schedules; show
+  next-run and last-run per schedule.
+- Tests: schedule CRUD + persistence; sync tick triggers a Bazarr refresh;
+  auto-transcribe tick enqueues only unprocessed/non-active items (duplicate
+  guard respected); disabling a schedule stops ticks.
+
+### Acceptance (proposed)
+- Operator can define a periodic Bazarr-sync schedule (interval or cron) and
+  pause/resume it from Settings; the app honours it instead of the old fixed
+  poll.
+- Operator can define an auto-transcribe rule; on each tick the app queues
+  transcription for matching wanted items not already active/recently done, and
+  skips duplicates (M6.g guard).
+- Schedules survive restart (persisted); next-run/last-run visible in UI.
+- `pytest`, `black --check`, `ruff check`, `mypy --strict` clean; frontend
+  `vitest`/`tsc` clean; new code ≥ 80% coverage.
+
+## M16 — Documentation rewrite & dev-docs reorganization
+
 
 **Goal**: bring documentation in line with reality after the full v2 rewrite, and give dev-facing docs a proper home. Most of `dev/v2/*.md` was written as a **pre-implementation spec** during M0–M5 planning (see `dev/v2/README.md`'s "meant to be read by a developer... about to implement the v2 architecture from scratch"); after M0–M6 shipped — including several rounds of structural refactor (M5.3), unplanned stabilization work (M5.6.1), and feature work not anticipated in the original plan (M5.8's step-based progress UX, B10, etc.) — that framing is stale. Root-level docs (`README.md`, `README_v2.md`, `CONTAINER_GUIDE.md`) still describe v1 as the only surface.
 
-**Depends on**: M6
+**Depends on**: M6 — but **deferred** until after the v2.1–v4.0 feature work
+(M8–M15) lands, so the rewrite documents the final shipped architecture (new
+Wanted sync model, Redis-authoritative progress, periodic jobs) rather than a
+moving target.
 
 Tasks:
-- **Root docs**: rewrite `README.md` as the v2 quickstart (web app + CLI, not CLI-only); fold `README_v2.md`'s ad-hoc Bazarr-workflow and `bazarr_track_no_subs` Q&A content into proper prose sections of the reorganized dev docs (`BAZARR_INTEGRATION.md`), then retire the standalone file; review `CONTAINER_GUIDE.md` for v1-only assumptions that no longer hold now that `worker`/`frontend`/`redis` services exist alongside the backend.
+- **Root docs**: rewrite `README.md` as the v2 quickstart (web app + CLI, not CLI-only); fold `README_v2.md`'s ad-hoc Bazarr-workflow content into proper prose sections of the reorganized dev docs (`BAZARR_INTEGRATION.md`), then retire the standalone file; review `CONTAINER_GUIDE.md` for v1-only assumptions that no longer hold now that `worker`/`frontend`/`redis` services exist alongside the backend. Note: the old `bazarr_track_no_subs` opt-in is retired by M8 — its Q&A content should be rewritten to describe the new full-sync + three-way scope model instead.
 - **Reorganize dev docs into `docs/`**: create a root `docs/` directory and move `dev/` under it (e.g. `docs/dev/v1/`, `docs/dev/v2/`, `docs/dev/reference/`), or an equivalent structure — a clear, browsable subcategory instead of a flat `dev/` folder mixing specs, plans, and reference material. Fix every relative link broken by the move (`dev/v2/README.md`'s reading-order list, `MILESTONES.md`'s links to `MIGRATION.md`/`QUEUE_PROGRESS_REVIEW.md`/etc., and any cross-links from root-level docs).
 - **Rewrite the shipped-system docs** so they describe what v2 *is*, not what it was planned to be: `ARCHITECTURE.md`, `API.md`, `DATABASE.md`, `QUEUE.md`, `FRONTEND.md`, `BAZARR_INTEGRATION.md`, `AUTH.md`, `DEPLOYMENT.md`, `TESTING.md`. Reconcile against the actual structural refactor outcome (`REFACTOR.md` in the sibling `audio_to_subs_plans/` repo — verify whether that plan doc should be linked from here or considered out of scope), the M5.8 progress/SSE architecture change (Redis-only delivery, `progress_stage`/`step_index`/`step_total`), and the M5.6.1 fixes (path resolution, logging, subtitle-naming idempotency) that changed behavior without a corresponding spec update.
 - **Archive planning-only artifacts** that are no longer live specs but are worth keeping for history: `M5_PLAN.md`, `TODO_M53.md`, `MISTRAL_USAGE_PROBE.md`, `QUEUE_PROGRESS_REVIEW.md` — move to a clearly-labeled historical/archive subfolder rather than delete or leave mixed in with current docs.
 - **`MIGRATION.md` and `PIPELINE_CHANGES.md`**: fold into `ARCHITECTURE.md` or mark explicitly as historical (M0/M2-era one-off migration records), since the migration they describe is long complete.
-- Keep `dev/v2/v3/WIP.md` (or wherever it lands post-move) clearly separated as forward-looking v3 material, distinct from the now-current v2 docs.
 - Update `.agent/` rule files if any reference the old `dev/v2/` paths directly.
 
 Acceptance:

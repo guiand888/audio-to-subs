@@ -1,3 +1,9 @@
+# Historical Note
+
+This file is archived as part of the v2 documentation reorganization. It represents planning artifacts from the M5 milestone development process and is kept for historical reference only. The current system implementation may differ from the original plans.
+
+---
+
 # Migration — v1 `src/` → v2 `audio_to_subs/`
 
 This is the **M0** milestone. Its only goal is to relocate the existing modules into a real package with a `core/` subpackage, **without changing any behaviour**. The acceptance gate is "all existing tests pass unchanged".

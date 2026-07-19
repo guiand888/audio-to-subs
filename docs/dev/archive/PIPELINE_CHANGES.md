@@ -1,3 +1,9 @@
+# Historical Note
+
+This file is archived as part of the v2 documentation reorganization. It represents planning artifacts from the M5 milestone development process and is kept for historical reference only. The current system implementation may differ from the original plans.
+
+---
+
 # v2 — Pipeline changes
 
 The existing pipeline modules under `audio_to_subs/core/` (relocated from `src/` in M0) stay the source of truth for transcription. v2 adds three things on top:

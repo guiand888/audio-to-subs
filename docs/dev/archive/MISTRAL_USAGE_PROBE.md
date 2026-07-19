@@ -1,3 +1,9 @@
+# Historical Note
+
+This file is archived as part of the v2 documentation reorganization. It represents planning artifacts from the M5 milestone development process and is kept for historical reference only. The current system implementation may differ from the original plans.
+
+---
+
 # Mistral usage probe (M0.5 spike — blocks M2)
 
 `audio_to_subs/core/cost.py` needs to know whether `mistralai==2.4.5`'s `audio.transcriptions.complete` response surfaces usage information (billed seconds / tokens / cost) — and if so, under which field names.

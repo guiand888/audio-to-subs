@@ -1,7 +1,13 @@
+# Historical Note
+
+This file is archived as part of the v2 documentation reorganization. It represents planning artifacts from the M5 milestone development process and is kept for historical reference only. The current system implementation may differ from the original plans.
+
+---
+
 # M5.3 — Refactor Todo List
 
 > **Branch**: `dev-refactor`
-> **Plan**: [`REFACTOR_zaiglm52.md`](REFACTOR_zaiglm52.md)
+> **Plan**: REFACTOR_zaiglm52.md (external document - not included in this codebase)
 > **Last updated**: 2026-07-06
 
 ## Progress

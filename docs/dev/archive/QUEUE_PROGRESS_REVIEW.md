@@ -1,9 +1,15 @@
+# Historical Note
+
+This file is archived as part of the v2 documentation reorganization. It represents planning artifacts from the M5 milestone development process and is kept for historical reference only. The current system implementation may differ from the original plans.
+
+---
+
 # Queue progress reporting — code review & redesign (M5.8)
 
 **Status**: implemented (M5.8, 2026-07-10). All five root causes addressed; see "Implementation notes" at the bottom for what changed vs. the original design.
 **Trigger**: user-reported UI bug — the Queue page (`/queue`) appeared frozen on "Extracting audio from video…" / 10% for a running job, with no live updates unless manually refreshed. Screenshot showed `bazarr_episode #324`, `Auto · SRT`, pinned at 10%.
 
-This is the authoritative detail document for [`MILESTONES.md`](MILESTONES.md)'s M5.8 entry, per the convention set by `REFACTOR.md` (M5.3) and `MISTRAL_USAGE_PROBE.md` (M0.5): the milestone section stays a short summary, this doc carries the full root-cause analysis and design so it survives context compaction.
+This is the authoritative detail document for [`../v2/MILESTONES.md`](../v2/MILESTONES.md)'s M5.8 entry, per the convention set by `REFACTOR.md` (M5.3) and `MISTRAL_USAGE_PROBE.md` (M0.5): the milestone section stays a short summary, this doc carries the full root-cause analysis and design so it survives context compaction.
 
 ## Root-cause findings
 
