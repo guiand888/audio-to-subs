@@ -13,22 +13,16 @@ services:
     build:
       context: .
       dockerfile: Dockerfile
-      # Local builds have no pinned tag. `make compose-dev-up` exports
-      # APP_VERSION=$(git describe --tags --dirty --always) so the UI/API
-      # clearly report an unreleased build (e.g. v2.0.0-beta.10-3-gabc123-dirty).
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
+      # The version is baked from the repo-root VERSION file at build time
+      # (setup.py -> package metadata). Local/unreleased builds just report
+      # whatever VERSION says; the UI fetches it from GET /api/version.
 
   worker:
     build:
       context: .
       dockerfile: Dockerfile
-      args:
-        APP_VERSION: ${APP_VERSION:-dev}
 
   frontend:
     build:
       context: ./frontend
       dockerfile: Dockerfile
-      args:
-        VITE_APP_VERSION: ${APP_VERSION:-dev}

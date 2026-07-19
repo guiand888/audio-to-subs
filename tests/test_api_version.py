@@ -1,10 +1,12 @@
 """Tests for the version API endpoint."""
 
 import os
+from importlib import metadata
 
 import pytest
 from fastapi.testclient import TestClient
 
+from audio_to_subs import _resolve_version
 from audio_to_subs.api.app import create_app
 
 
@@ -35,26 +37,59 @@ class TestVersion:
         assert isinstance(data["version"], str)
         assert data["version"]
 
-    def test_version_reflects_app_version_env(self, monkeypatch):
-        """APP_VERSION env var is reported when set."""
-        monkeypatch.setenv("APP_VERSION", "v9.9.9-test")
-        # __version__ is resolved at import; re-resolve explicitly.
-        import audio_to_subs
+    def test_version_comes_from_package_metadata(self):
+        """_resolve_version prefers the version baked into package metadata."""
+        # metadata.version("parolesub") is set at install time from the
+        # repo-root VERSION file (see setup.py / pyproject.toml).
+        expected = metadata.version("parolesub")
+        assert _resolve_version() == f"v{expected}" or _resolve_version() == expected
 
+    def test_version_falls_back_to_version_file(self, monkeypatch, tmp_path):
+        """When package metadata is unavailable, the VERSION file is used."""
         monkeypatch.setattr(
-            audio_to_subs, "__version__", audio_to_subs._resolve_version()
+            metadata,
+            "version",
+            lambda _name: (_ for _ in ()).throw(metadata.PackageNotFoundError()),
         )
-        # The route reads audio_to_subs.__version__ at request time via its
-        # module-level import, so patch that module's reference too.
-        import audio_to_subs.api.routes.version as version_route
+        version_file = tmp_path / "VERSION"
+        version_file.write_text("v9.9.9-test\n")
 
-        monkeypatch.setattr(version_route, "__version__", "v9.9.9-test")
+        # __init__.py builds the path via
+        # Path(__file__).resolve().parent.parent / "VERSION". Make that whole
+        # chain resolve to our temp file.
+        class FakePath:
+            def __init__(self, *_a):
+                pass
 
-        os.environ["DATABASE_URL"] = "sqlite+aiosqlite:///:memory:"
-        os.environ["BEHIND_TLS"] = "false"
-        app = create_app()
-        app.router.lifespan_context = None
-        client = TestClient(app, raise_server_exceptions=False)
+            def resolve(self):
+                return self
 
-        response = client.get("/api/version")
-        assert response.json()["version"] == "v9.9.9-test"
+            @property
+            def parent(self):
+                return self
+
+            def __truediv__(self, _other):
+                return self
+
+            def is_file(self):
+                return True
+
+            def read_text(self):
+                return version_file.read_text()
+
+        monkeypatch.setattr(__import__("audio_to_subs"), "Path", FakePath)
+        assert _resolve_version() == "v9.9.9-test"
+
+    def test_missing_version_resolves_to_unknown(self, monkeypatch):
+        """With no metadata and no VERSION file, resolution yields 'unknown'."""
+        monkeypatch.setattr(
+            metadata,
+            "version",
+            lambda _name: (_ for _ in ()).throw(metadata.PackageNotFoundError()),
+        )
+        # Simulate a non-existent VERSION file (parent dir has no VERSION).
+        fake_file = __import__("pathlib").Path("/nonexistent/VERSION")
+        monkeypatch.setattr(
+            __import__("audio_to_subs"), "Path", lambda *_a, **_k: fake_file
+        )
+        assert _resolve_version() == "unknown"

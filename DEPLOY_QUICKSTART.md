@@ -3,7 +3,7 @@
 Two ways to run the stack. Both boot `backend` + `worker` + `frontend` + `redis`.
 Both build `backend`/`worker`/`frontend` directly from the GitHub repo at a
 pinned tag (`docker-compose.yml` / `docker-compose.docker.yml`'s `build.context`
-is a Git URL, pinned via `${APP_VERSION}`) — no local clone needed,
+is a Git URL, pinned via `${PAROLESUB_TAG}`) — no local clone needed,
 `up -d --build` alone is enough.
 
 ## Option A — Podman secrets (recommended)
@@ -71,24 +71,28 @@ podman compose -f docker-compose.docker.yml -f docker-compose.dev.yml up -d --bu
 
 ## Versioning & releasing
 
-The app version has **one source of truth**: the repo-root `VERSION` file.
-It drives (a) the Git ref the compose files build from and (b) the version
-baked into the images, which the API (`GET /api/version`) and the web UI
-(sidebar footer + Settings → About) report. Never hand-edit the version in
-multiple places — use the Make targets:
+The app version has **one source of truth**: the repo-root `VERSION` file. It
+is baked into the installed package at build time (see `setup.py` /
+`pyproject.toml`) and reported by the backend's `GET /api/version`; the web UI
+fetches it from that endpoint (sidebar footer + Settings → About). It is **not**
+derived from any deployment variable — so it stays correct whether you run via
+compose, Helm, or a bare `pip install`, with no `APP_VERSION`/`VITE_APP_VERSION`
+build args required.
+
+`PAROLESUB_TAG` (compose only) is a *separate* concern: it merely pins which
+Git ref to build, not the reported version.
 
 ```bash
-make release VERSION=v2.0.0-beta.11   # writes VERSION, .env.example and .env
+make release VERSION=v2.0.0-beta.11   # writes the single VERSION file
 git commit -am "release: v2.0.0-beta.11"
 git tag v2.0.0-beta.11                 # tag MUST equal the VERSION file
 git push --follow-tags
 ```
 
-`make version-check` (also run as a pre-commit hook) fails if `VERSION`,
-`.env.example` and — on a tagged commit — the git tag disagree. For an
-existing checkout, `make version-sync` copies `VERSION` into your local
-`.env`. Local dev builds (`make compose-dev-up`) instead show
-`git describe --tags --dirty` so an unreleased build is unmistakable.
+`make version-check` (also run as a pre-commit hook) fails if — on a tagged
+commit — the git tag disagrees with `VERSION`. Local dev builds
+(`make compose-dev-up`) report whatever `VERSION` says; the UI always reflects
+the actually-running backend's version via the API.
 
 ## Notes
 

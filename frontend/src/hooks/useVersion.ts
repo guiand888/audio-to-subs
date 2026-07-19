@@ -1,6 +1,5 @@
 import { useQuery } from "@tanstack/react-query"
 import { api } from "@/lib/api"
-import { APP_VERSION, IS_DEV_BUILD } from "@/lib/version"
 
 interface VersionResponse {
   version: string
@@ -9,10 +8,11 @@ interface VersionResponse {
 /**
  * Resolve the version to display.
  *
- * Prefers the value baked into the bundle at build time (APP_VERSION) — no
- * network, no layout shift. When that's a local "dev" build we fall back to
- * the backend's GET /api/version, which is the authoritative runtime source
- * of truth for the actually-running deployment.
+ * The version is reported by the backend's GET /api/version, which derives it
+ * from the repo-root VERSION file baked into the package at build time. There
+ * is no value baked into the frontend bundle, so the UI always fetches it from
+ * the running backend — this stays correct regardless of how the app is
+ * deployed (compose, Helm, bare install, …).
  */
 export function useVersion(): string {
   const { data } = useQuery({
@@ -20,10 +20,7 @@ export function useVersion(): string {
     queryFn: () => api.get<VersionResponse>("/api/version"),
     staleTime: Infinity,
     retry: false,
-    // Only hit the endpoint when the baked value is a dev placeholder.
-    enabled: IS_DEV_BUILD,
   })
 
-  if (!IS_DEV_BUILD) return APP_VERSION
-  return data?.version ?? APP_VERSION
+  return data?.version ?? "unknown"
 }

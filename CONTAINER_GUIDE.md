@@ -138,8 +138,9 @@ By default, `docker-compose.yml` / `docker-compose.docker.yml` build
 `backend`/`worker`/`frontend` from the GitHub repo at a pinned tag
 (`build.context` is a Git URL), not the local checkout — so `podman compose
 up -d --build` works straight after cloning, with no separate build step.
-The pinned tag comes from `${APP_VERSION}` (single source of truth: the
-repo-root `VERSION` file, mirrored into `.env` via `make version-sync`).
+The pinned tag comes from `${PAROLESUB_TAG}` (a separate concern from the
+reported version, which is baked from the repo-root `VERSION` file at build
+time — see `setup.py` / `pyproject.toml`).
 For local development, where you want the working tree's uncommitted
 changes actually built, layer `docker-compose.dev.yml` on top to restore a
 local `build.context`:

@@ -19,7 +19,8 @@ async def version() -> VersionResponse:
     """Return the running application version.
 
     Public (no authentication) so the login screen and unauthenticated
-    states can display it. Mirrors the version baked into the frontend
-    bundle; both derive from the same APP_VERSION build arg.
+    states can display it. The version is baked into the package at build
+    time from the repo-root VERSION file (see setup.py / pyproject.toml) and
+    fetched by the frontend from this endpoint.
     """
     return VersionResponse(version=__version__)

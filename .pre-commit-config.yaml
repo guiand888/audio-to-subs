@@ -35,8 +35,8 @@ repos:
   - repo: local
     hooks:
       - id: version-coherence
-        name: version coherence (VERSION / .env.example / compose / git tag)
+        name: version coherence (VERSION ↔ git tag)
         entry: make version-check
         language: system
         pass_filenames: false
-        files: ^(VERSION|\.env\.example|docker-compose(\.docker)?\.yml)$
+        files: ^VERSION$

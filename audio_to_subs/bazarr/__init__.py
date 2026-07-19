@@ -1,3 +1,5 @@
 """Bazarr integration package for parolesub v2."""
 
-__version__ = "0.1.0"
+from audio_to_subs import __version__
+
+__version__ = __version__
