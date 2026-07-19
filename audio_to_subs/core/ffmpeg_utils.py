@@ -85,7 +85,7 @@ def probe_duration(media_path: str) -> float:
     return float(result.stdout.strip())
 
 
-def terminate_ffmpeg(process: subprocess.Popen) -> None:
+def terminate_ffmpeg(process: subprocess.Popen[str]) -> None:
     """Terminate FFmpeg process and wait for cleanup.
 
     Args:
@@ -106,7 +106,7 @@ def parse_ffmpeg_progress(  # noqa: C901
     progress_callback: Callable[[str], None],
     total_duration: float,
     operation_name: str,
-    process: subprocess.Popen,
+    process: subprocess.Popen[str],
     cancel_token: Optional[CancelToken] = None,
 ) -> None:
     """Parse FFmpeg progress output and call callback with formatted progress.
@@ -169,7 +169,7 @@ def parse_ffmpeg_progress(  # noqa: C901
 
 
 def check_cancel_periodically(
-    process: subprocess.Popen, cancel_token: CancelToken
+    process: subprocess.Popen[str], cancel_token: CancelToken
 ) -> None:
     """Check for cancellation periodically while process runs.
 

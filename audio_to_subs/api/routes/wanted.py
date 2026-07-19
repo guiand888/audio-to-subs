@@ -4,7 +4,7 @@ import asyncio
 import logging
 from datetime import datetime
 from enum import Enum
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 from uuid import UUID
 
 from fastapi import APIRouter, Body, Depends, HTTPException, Query, status
@@ -28,7 +28,7 @@ router = APIRouter(prefix="/api/wanted", tags=["wanted"])
 # Keep strong references to in-flight background refresh tasks: asyncio only
 # holds a weak reference to a task created via create_task, so an unreferenced
 # task is eligible for GC mid-run (see asyncio docs on create_task).
-_background_refresh_tasks: set[asyncio.Task] = set()
+_background_refresh_tasks: set[asyncio.Task[Any]] = set()
 
 
 class WantedItemType(str, Enum):
@@ -48,10 +48,10 @@ class WantedItem(UTCAwareModel):
     title: str = Field(description="Item title")
     media_path: str = Field(description="Translated media file path")
     has_any_subs: bool = Field(description="Whether item has any subtitles")
-    missing_subtitles: list[dict] = Field(
+    missing_subtitles: list[dict[str, Any]] = Field(
         default_factory=list, description="List of missing subtitles"
     )
-    audio_language: list[dict] = Field(
+    audio_language: list[dict[str, Any]] = Field(
         default_factory=list,
         description="Audio languages Bazarr reports for this item",
     )

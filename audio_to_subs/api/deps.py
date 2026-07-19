@@ -12,6 +12,18 @@ from audio_to_subs.auth.deps import get_current_user, get_db, get_optional_user
 from audio_to_subs.db.models import User
 
 
+__all__ = [
+    "get_settings_dep",
+    "get_redis",
+    "get_redis_client",
+    "CurrentUser",
+    "OptionalUser",
+    "DatabaseSession",
+    "SettingsDep",
+    "get_db",
+]
+
+
 def get_settings_dep() -> Settings:
     """FastAPI dependency for settings."""
     return get_settings()
@@ -25,7 +37,7 @@ async def get_redis() -> AsyncGenerator[Redis, None]:
     import redis.asyncio as redis_lib
 
     settings = get_settings()
-    redis = redis_lib.from_url(settings.REDIS_URL)
+    redis = redis_lib.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call]  # redis ships no stubs; from_url is untyped
     try:
         yield redis
     finally:
@@ -40,7 +52,7 @@ def get_redis_client() -> Redis:
     import redis.asyncio as redis_lib
 
     settings = get_settings()
-    return redis_lib.from_url(settings.REDIS_URL)
+    return redis_lib.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call,no-any-return]  # redis ships no stubs; from_url is untyped
 
 
 # Re-export from auth.deps for convenience

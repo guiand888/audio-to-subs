@@ -1,7 +1,7 @@
 """History API routes for completed jobs."""
 
 from datetime import datetime
-from typing import TYPE_CHECKING, Annotated
+from typing import TYPE_CHECKING, Annotated, Any
 
 from fastapi import APIRouter, Depends, Query, Request
 from pydantic import BaseModel, Field
@@ -142,7 +142,7 @@ async def get_history(
 async def _calculate_stats(
     db: "AsyncSession",
     statuses: list[JobStatus],
-    conditions: list,
+    conditions: list[Any],
 ) -> HistoryStats:
     """Calculate aggregate statistics for history jobs.
 

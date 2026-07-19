@@ -25,3 +25,10 @@ pre-commit==3.7.0
 types-click
 types-PyYAML==6.0.2
 types-itsdangerous
+# NOTE: types-redis is intentionally NOT used. The only published types-redis
+# release line (4.6.x) types redis.asyncio.Redis as a Generic, but this project
+# pins redis==5.0.3 where Redis is NOT generic -- importing those stubs makes
+# `Redis[Any]` raise `TypeError: <class 'redis.asyncio.client.Redis'> is not a
+# generic class` at import time and breaks the app/tests. redis's own calls
+# (from_url, etc.) are left untyped and handled with narrow, commented
+# `# type: ignore` markers instead.

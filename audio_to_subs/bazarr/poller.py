@@ -114,7 +114,7 @@ class PollerState:
 
     def __init__(self) -> None:
         self.shutdown = asyncio.Event()
-        self.poll_task: asyncio.Task | None = None
+        self.poll_task: asyncio.Task[Any] | None = None
 
 
 async def get_bazarr_client(
@@ -541,7 +541,7 @@ async def _fetch_episode_details(
     return details_by_episode
 
 
-def _build_language_list(languages: list[Any] | None) -> list[dict]:
+def _build_language_list(languages: list[Any] | None) -> list[dict[str, Any]]:
     """Build a list of language dictionaries from Bazarr SubtitleLanguage objects.
 
     Shared by missing_subtitles and audio_language - both use Bazarr's
