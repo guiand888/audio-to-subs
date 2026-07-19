@@ -52,41 +52,49 @@ parolesub -i video.mp4 -o subtitles.srt
 
 ### Web Application Deployment
 
-For the full web application with Bazarr integration:
+For the full web application with Bazarr integration, using native Podman secrets:
 
-1. Create an external media volume:
+1. Set required secrets:
    ```bash
-   docker volume create media
+   echo -n "yourStrongPass!" | podman secret create admin_password -
+   echo -n "your-mistral-key" | podman secret create mistral_api_key -
    ```
 
-2. Create secret files:
-   ```bash
-   mkdir -p .secrets && chmod 700 .secrets
-   echo "your-mistral-key"  > .secrets/mistral_api_key
-   echo "your-bazarr-key"   > .secrets/bazarr_api_key
-   openssl rand -hex 32     > .secrets/session_secret
-   echo "yourStrongPass!"   > .secrets/admin_password
-   chmod 600 .secrets/*
-   ```
+2. (Optional) Copy `.env.example` to `.env` to override defaults such as `ADMIN_USERNAME` — compose loads it automatically, no `export` needed.
 
-3. Set environment variables:
-   ```bash
-   export BAZARR_URL="http://bazarr.lan:6767"
-   export PATH_MAPPINGS_JSON='[{"/data/media","/mnt/media"}]'
-   export ADMIN_USERNAME="admin"
-   export FRONTEND_PORT=8080
-   ```
-
-4. Bring up the stack:
+3. Bring up the stack:
    ```bash
    podman compose up -d
    ```
 
-5. Visit http://localhost:8080 and log in as admin.
+4. Visit http://localhost:8080, log in as admin, then set the Bazarr URL and API key under Settings.
+
+**Docker** is also supported, via `docker-compose.docker.yml`, a standalone variant that reads `ADMIN_PASSWORD`/`MISTRAL_API_KEY` from a plaintext `.env` file instead of Podman secrets:
+
+```bash
+cp .env.example .env   # set ADMIN_PASSWORD and MISTRAL_API_KEY
+docker compose -f docker-compose.docker.yml up -d --build
+```
+
+Do not merge it with `docker-compose.yml` — run one or the other.
 
 ## Usage
 
-### Single Video (CLI)
+Parolesub is primarily used through its web application. The CLI commands below are optional, for one-off or advanced transcriptions.
+
+### Web Application Workflow
+
+1. **Setup**: Deploy using the container method above
+2. **Configuration**: Configure Bazarr URL and API key in Settings
+3. **Detection**: Bazarr integration automatically detects media missing subtitles
+4. **Queue**: Items appear in the Wanted list in the web UI
+5. **Process**: Click "Transcribe" to queue jobs for automatic processing
+6. **Monitor**: Watch progress in the Queue page with live updates
+7. **Complete**: Finished jobs appear in History with cost tracking
+
+The Bazarr poller runs automatically and updates the Wanted list. When the "Track Items with No Subtitles" setting is enabled, it will also show items with no subtitles in any language.
+
+### Single Video (CLI, optional)
 
 ```bash
 # Basic (SRT)
@@ -102,7 +110,7 @@ podman run --rm --userns=keep-id \
 ... -o /output/video.srt --language en
 ```
 
-### Batch Processing (CLI)
+### Batch Processing (CLI, optional)
 
 Create `parolesub.yaml`:
 ```yaml
@@ -121,18 +129,6 @@ podman run --rm --userns=keep-id \
   -v $(pwd):/work:Z,rslave \
   parolesub:latest --config /work/parolesub.yaml
 ```
-
-### Web Application Workflow
-
-1. **Setup**: Deploy using the container method above
-2. **Configuration**: Configure Bazarr URL and API key in Settings
-3. **Detection**: Bazarr integration automatically detects media missing subtitles
-4. **Queue**: Items appear in the Wanted list in the web UI
-5. **Process**: Click "Transcribe" to queue jobs for automatic processing
-6. **Monitor**: Watch progress in the Queue page with live updates
-7. **Complete**: Finished jobs appear in History with cost tracking
-
-The Bazarr poller runs automatically and updates the Wanted list. When the "Track Items with No Subtitles" setting is enabled, it will also show items with no subtitles in any language.
 
 ### Output Formats
 
