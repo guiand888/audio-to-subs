@@ -3,15 +3,15 @@
 Tests audio file duration detection, splitting for large files,
 and progress callback handling.
 """
+
 import subprocess
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from src.audio_splitter import (
-    AudioSplitterError,
+from audio_to_subs.core.audio_splitter import (
     MAX_AUDIO_LENGTH,
-    OVERLAP,
+    AudioSplitterError,
     get_audio_duration,
     needs_splitting,
     split_audio,
@@ -64,7 +64,6 @@ class TestGetAudioDuration:
     def test_get_duration_ffprobe_error(self, mock_run):
         """Test error handling when ffprobe fails."""
         # Arrange
-        import subprocess
 
         mock_run.side_effect = subprocess.CalledProcessError(1, "ffprobe")
 
@@ -86,7 +85,7 @@ class TestGetAudioDuration:
 class TestNeedsSplitting:
     """Test splitting necessity detection."""
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_needs_splitting_false_short_file(self, mock_duration):
         """Test short file does not need splitting."""
         # Arrange
@@ -98,7 +97,7 @@ class TestNeedsSplitting:
         # Assert
         assert result is False
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_needs_splitting_false_exact_limit(self, mock_duration):
         """Test file exactly at limit does not need splitting."""
         # Arrange
@@ -110,7 +109,7 @@ class TestNeedsSplitting:
         # Assert
         assert result is False
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_needs_splitting_true_long_file(self, mock_duration):
         """Test long file needs splitting."""
         # Arrange
@@ -122,7 +121,7 @@ class TestNeedsSplitting:
         # Assert
         assert result is True
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_needs_splitting_custom_max_length(self, mock_duration):
         """Test custom max_length parameter."""
         # Arrange
@@ -134,7 +133,7 @@ class TestNeedsSplitting:
         # Assert
         assert result is True
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_needs_splitting_error_propagates(self, mock_duration):
         """Test that duration errors propagate."""
         # Arrange
@@ -148,7 +147,7 @@ class TestNeedsSplitting:
 class TestSplitAudio:
     """Test audio splitting functionality."""
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_audio_no_splitting_needed(self, mock_popen, mock_duration):
         """Test no splitting when file is short enough."""
@@ -163,7 +162,7 @@ class TestSplitAudio:
         assert result == ["short.wav"]
         mock_popen.assert_not_called()
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_audio_single_split(self, mock_popen, mock_duration, tmp_path):
         """Test splitting into two segments."""
@@ -186,7 +185,7 @@ class TestSplitAudio:
         assert "segment_001" in result[0]
         assert "segment_002" in result[1]
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_audio_multiple_segments(self, mock_popen, mock_duration, tmp_path):
         """Test splitting into multiple segments."""
@@ -209,7 +208,7 @@ class TestSplitAudio:
         for i, segment_path in enumerate(result, 1):
             assert f"segment_{i:03d}" in segment_path
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_audio_ffmpeg_error(self, mock_popen, mock_duration, tmp_path):
         """Test error handling when FFmpeg fails."""
@@ -226,7 +225,7 @@ class TestSplitAudio:
         with pytest.raises(AudioSplitterError, match="FFmpeg error"):
             split_audio("long.wav", str(output_dir))
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_audio_general_error(self, mock_popen, mock_duration, tmp_path):
         """Test error handling for general exceptions."""
@@ -240,9 +239,11 @@ class TestSplitAudio:
         with pytest.raises(AudioSplitterError, match="Audio splitting failed"):
             split_audio("long.wav", str(output_dir))
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
-    def test_split_audio_with_progress_callback(self, mock_popen, mock_duration, tmp_path):
+    def test_split_audio_with_progress_callback(
+        self, mock_popen, mock_duration, tmp_path
+    ):
         """Test progress callback is called during splitting."""
         # Arrange
         mock_duration.return_value = 1000.0
@@ -253,10 +254,9 @@ class TestSplitAudio:
         mock_process.communicate.return_value = ("", "")
         mock_process.returncode = 0
         # Provide stdout iterator that yields progress lines
-        mock_process.stdout = iter([
-            "out_time=00:08:20.0\n",  # 500 seconds
-            "progress=end\n"
-        ])
+        mock_process.stdout = iter(
+            ["out_time=00:08:20.0\n", "progress=end\n"]  # 500 seconds
+        )
         mock_popen.return_value = mock_process
 
         # Act
@@ -271,33 +271,35 @@ class TestSplitAudio:
     def test_parse_ffmpeg_progress(self, tmp_path):
         """Test _parse_ffmpeg_progress function directly."""
         # Arrange
-        from src.audio_splitter import _parse_ffmpeg_progress
-        
+        from audio_to_subs.core.audio_splitter import _parse_ffmpeg_progress
+
         progress_messages = []
+
         def mock_callback(msg):
             progress_messages.append(msg)
-        
+
         # Create a mock stdout iterator
         stdout_lines = [
             "out_time=00:01:30.0\n",  # 90 seconds
             "out_time=00:03:00.0\n",  # 180 seconds (50%)
-            "progress=end\n"
+            "progress=end\n",
         ]
-        
-        # Act
+
+        # Act — process= is required since the cancel-token refactor
         _parse_ffmpeg_progress(
             iter(stdout_lines),
             mock_callback,
             360.0,  # 6 minutes total
-            "Splitting audio"
+            "Splitting audio",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 2
         assert any("50.0%" in msg for msg in progress_messages)
         assert any("100.0%" in msg for msg in progress_messages)
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_audio_creates_output_dir(self, mock_popen, mock_duration, tmp_path):
         """Test output directory is created if missing."""
@@ -317,7 +319,7 @@ class TestSplitAudio:
         # Assert
         assert output_dir.exists()
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_split_audio_with_custom_max_length(self, mock_duration, tmp_path):
         """Test splitting with custom max_length parameter."""
         # Arrange
@@ -341,7 +343,7 @@ class TestSplitAudio:
 class TestAudioSplitterIntegration:
     """Integration tests for audio splitting workflow."""
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     @patch("subprocess.Popen")
     def test_split_preserves_order(self, mock_popen, mock_duration, tmp_path):
         """Test that split segments are returned in correct order."""
@@ -361,7 +363,7 @@ class TestAudioSplitterIntegration:
         for i, path in enumerate(result, 1):
             assert f"segment_{i:03d}" in path
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_overlap_boundary_logic(self, mock_duration):
         """Test that overlap is correctly applied at segment boundaries."""
         # With 900s limit and 2s overlap:
@@ -397,68 +399,73 @@ class TestAudioSplitterIntegration:
             start_time = float(second_cmd[ss_idx + 1])
             assert 898 <= start_time <= 900  # Account for boundary
 
-    @patch("src.audio_splitter.get_audio_duration")
+    @patch("audio_to_subs.core.audio_splitter.get_audio_duration")
     def test_split_audio_get_duration_error(self, mock_duration, tmp_path):
         """Test error handling when get_audio_duration raises CalledProcessError."""
-        import subprocess
-        
+
         # Arrange
-        mock_duration.side_effect = subprocess.CalledProcessError(1, "ffprobe", stderr=b"ffprobe error")
+        mock_duration.side_effect = subprocess.CalledProcessError(
+            1, "ffprobe", stderr=b"ffprobe error"
+        )
         output_dir = tmp_path / "split"
-        
+
         # Act & Assert
         with pytest.raises(AudioSplitterError, match="FFmpeg error during splitting"):
             split_audio("file.wav", str(output_dir))
 
     def test_parse_ffmpeg_progress_with_microseconds(self):
         """Test _parse_ffmpeg_progress handles microseconds pattern."""
-        from src.audio_splitter import _parse_ffmpeg_progress
-        
+        from audio_to_subs.core.audio_splitter import _parse_ffmpeg_progress
+
         progress_messages = []
+
         def mock_callback(msg):
             progress_messages.append(msg)
-        
+
         # Simulate FFmpeg progress output with microseconds
         stdout_lines = [
             "out_time_us=50000000\n",  # 50 seconds in microseconds
-            "progress=end\n"
+            "progress=end\n",
         ]
-        
+
         # Act
         _parse_ffmpeg_progress(
             iter(stdout_lines),
             mock_callback,
             100.0,  # 100 second total duration
-            "Splitting segment"
+            "Splitting segment",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 1
         assert any("50.0" in msg for msg in progress_messages)
 
     def test_parse_ffmpeg_progress_with_microseconds_only(self):
         """Test _parse_ffmpeg_progress with only microseconds pattern (no timecode)."""
-        from src.audio_splitter import _parse_ffmpeg_progress
-        
+        from audio_to_subs.core.audio_splitter import _parse_ffmpeg_progress
+
         progress_messages = []
+
         def mock_callback(msg):
             progress_messages.append(msg)
-        
+
         # Simulate FFmpeg progress output with only microseconds
         stdout_lines = [
             "out_time_us=25000000\n",  # 25 seconds in microseconds
             "out_time_us=75000000\n",  # 75 seconds in microseconds
-            "progress=end\n"
+            "progress=end\n",
         ]
-        
+
         # Act
         _parse_ffmpeg_progress(
             iter(stdout_lines),
             mock_callback,
             100.0,  # 100 second total duration
-            "Splitting"
+            "Splitting",
+            process=MagicMock(),
         )
-        
+
         # Assert
         assert len(progress_messages) >= 2
         assert any("25.0" in msg for msg in progress_messages)

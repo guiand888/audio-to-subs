@@ -1,60 +1,173 @@
-version: '3.8'
-
 services:
-  audio-to-subs:
+  backend:
     build:
-      context: .
+      # PAROLESUB_TAG only pins WHICH Git ref to build — it is NOT the reported
+      # version. The application version is baked at build time from the
+      # repo-root VERSION file (see setup.py / pyproject.toml) and reported by
+      # the backend's GET /api/version, independent of how it's deployed.
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.0.0}
       dockerfile: Dockerfile
-    image: audio-to-subs:latest
-    container_name: audio-to-subs
-    
-    # Use Podman secrets for API key
-    secrets:
-      - mistral_api_key
-    
-    # Environment variables
+    image: parolesub:backend
+    container_name: parolesub-backend
     environment:
-      - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
       - PYTHONUNBUFFERED=1
-    
-    # Volume mounts
+      - DATABASE_URL=sqlite+aiosqlite:////data/parolesub.db
+      - SESSION_SECRET_FILE=/data/session_secret
+      - REDIS_URL=redis://redis:6379/0
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
+      - BEHIND_TLS=${BEHIND_TLS:-false}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+
+    # Secrets for sensitive data
+    secrets:
+      - admin_password
     volumes:
-      # Input videos (read-only)
-      - ./videos:/input:ro
-      # Output subtitles
-      - ./subtitles:/output:rw
-      # Temporary processing (tmpfs for performance)
-      - type: tmpfs
-        target: /tmp/audio-to-subs
-        tmpfs:
-          size: 1G
-    
-    # Resource limits
+      # Database and session data (shared with worker)
+      - parolesub-data:/data:z
+      # Movie files (aligned with Radarr/Bazarr)
+      - parolesub-movies:/movies:z
+      # TV series files (aligned with Sonarr/Bazarr)
+      - parolesub-tv:/tv:z
+      # Temporary processing
+      - parolesub-tmp:/tmp/parolesub:z
+    # No ports published: only the frontend is reachable from the host, and
+    # it already reverse-proxies /api/ to this service over the compose
+    # network (frontend/nginx.conf). Put a TLS-terminating proxy (e.g. Caddy,
+    # see ./Caddyfile) in front of the frontend's published port for HTTPS.
+    # Health check (defined here, not in the Dockerfile: Podman builds OCI
+    # images and silently drops Dockerfile HEALTHCHECK instructions)
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
     deploy:
       resources:
         limits:
-          cpus: '2.0'
+          cpus: "2.0"
           memory: 2G
         reservations:
-          cpus: '0.5'
+          cpus: "0.5"
           memory: 512M
-    
-    # Command (override with docker-compose run)
-    command: ["--help"]
-    
-    # Restart policy
     restart: unless-stopped
-    
-    # Security options
     security_opt:
       - no-new-privileges:true
-    
-    # Read-only root filesystem (except writable mounts)
-    read_only: false  # Set to true after testing
-    
-    # User
     user: "1000:1000"
 
+  redis:
+    image: docker.io/library/redis:8-alpine
+    container_name: parolesub-redis
+    # No ports published: only backend/worker talk to redis, over the
+    # compose network (redis://redis:6379/0).
+    # Persistence (optional, Redis can be stateless for our use case)
+    volumes:
+      - parolesub-redis-data:/data:z
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+
+  worker:
+    build:
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.0.0}
+      dockerfile: Dockerfile
+    image: parolesub:worker
+    container_name: parolesub-worker
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite+aiosqlite:////data/parolesub.db
+      - REDIS_URL=redis://redis:6379/0
+      - MISTRAL_API_KEY_FILE=/run/secrets/mistral_api_key
+      - SESSION_SECRET_FILE=/data/session_secret
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - ADMIN_PASSWORD_FILE=/run/secrets/admin_password
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    secrets:
+      - mistral_api_key
+    volumes:
+      - parolesub-data:/data:z
+      - parolesub-movies:/movies:z
+      - parolesub-tv:/tv:z
+      - parolesub-tmp:/tmp/parolesub:z
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+
+    # Entrypoint override: the image's ENTRYPOINT runs uvicorn (the API).
+    # The worker must replace it entirely, so override entrypoint (not command,
+    # which would just be appended to the uvicorn entrypoint as arguments).
+    entrypoint: ["python", "-m", "audio_to_subs.worker"]
+
+  frontend:
+    build:
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.0.0}:frontend
+      dockerfile: Dockerfile
+    image: parolesub:frontend
+    container_name: parolesub-frontend
+    # Single host-exposed entry point. Put a TLS-terminating reverse proxy
+    # (e.g. Caddy, see ./Caddyfile) in front of this port for HTTPS.
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "101:101" # nginx user in nginx-unprivileged image
+
+volumes:
+  parolesub-data:
+    driver: local
+  parolesub-redis-data:
+    driver: local
+  parolesub-movies:
+    driver: local
+  parolesub-tv:
+    driver: local
+  parolesub-tmp:
+    driver: local
+
+# Native Podman secrets (prioritized provisioning path). The secret NAMES are
+# fixed defaults and must match these exactly — podman-compose cannot honor a
+# custom `name` on external secrets (it errors unless name == compose key).
+# Create them once on the host before `podman compose up`:
+#   echo -n "yourStrongPass!" | podman secret create admin_password -
+#   echo -n "your-mistral-key" | podman secret create mistral_api_key -
+# The env-file fallback (docker-compose.docker.yml) can replace these.
 secrets:
+  admin_password:
+    external: true
   mistral_api_key:
     external: true

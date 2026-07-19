@@ -1,10 +1,15 @@
-.PHONY: help build build-dev test test-watch lint format typecheck quality clean run shell
+.PHONY: help build test test-watch lint format typecheck quality clean run shell frontend-test frontend-install frontend-build frontend-dev frontend-shell version-check release
 
 # Variables
-IMAGE_NAME := audio-to-subs
+IMAGE_NAME := parolesub
 IMAGE_TAG := latest
-DEV_IMAGE := $(IMAGE_NAME):dev
 PROD_IMAGE := $(IMAGE_NAME):$(IMAGE_TAG)
+
+# Single source of truth for the app version (repo-root VERSION file).
+APP_VERSION := $(shell cat VERSION 2>/dev/null)
+
+# Backend dev tooling runs via `nix develop`; see flake.nix.
+NIX_RUN := nix develop --command
 
 help:  ## Show this help message
 	@echo "Usage: make [target]"
@@ -15,38 +20,55 @@ help:  ## Show this help message
 build:  ## Build production container
 	podman build -t $(PROD_IMAGE) .
 
-build-dev:  ## Build development container
-	podman build -t $(DEV_IMAGE) -f Dockerfile.dev .
+version-check:  ## Verify VERSION is non-empty and (on a tagged commit) equals the git tag
+	@test -n "$(APP_VERSION)" || { echo "VERSION file is empty or missing"; exit 1; }
+	@tag=$$(git describe --tags --exact-match 2>/dev/null); \
+	if [ -n "$$tag" ] && [ "$$tag" != "$(APP_VERSION)" ]; then \
+		echo "MISMATCH: git tag $$tag != VERSION=$(APP_VERSION)"; exit 1; \
+	fi
+	@echo "Version coherence OK ($(APP_VERSION))"
 
-test:  ## Run tests in container
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pytest
+release:  ## Bump version and create an annotated tag: make release VERSION=v2.0.0-beta.11
+	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=vX.Y.Z"; exit 1; }
+	@printf '%s\n' "$(VERSION)" > VERSION
+	@git tag -a "$(VERSION)" -m "$(VERSION)"
+	@echo ""
+	@echo "VERSION is now $(VERSION) (the single source of truth; baked into the"
+	@echo "package at build time from this file)."
+	@echo "Annotated tag $(VERSION) created (so 'git push --follow-tags' pushes it)."
+	@echo "Next (run manually):"
+	@echo "  git commit -am 'release: $(VERSION)'"
+	@echo "  git push --follow-tags"
 
-test-watch:  ## Run tests in watch mode
-	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) pytest -f
+test:  ## Run tests (nix develop)
+	$(NIX_RUN) pytest
 
-test-cov:  ## Run tests with coverage report
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pytest --cov-report=html
+test-watch:  ## Run tests in watch mode (nix develop)
+	$(NIX_RUN) pytest -f
+
+test-cov:  ## Run tests with coverage report (nix develop)
+	$(NIX_RUN) pytest --cov-report=html
 	@echo "Coverage report: htmlcov/index.html"
 
-lint:  ## Run linter
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) ruff check src/ tests/
+lint:  ## Run linter (nix develop)
+	$(NIX_RUN) ruff check audio_to_subs/ tests/
 
-format:  ## Format code with black
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black src/ tests/
+format:  ## Format code with black (nix develop)
+	$(NIX_RUN) black audio_to_subs/ tests/
 
-format-check:  ## Check code formatting
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) black --check src/ tests/
+format-check:  ## Check code formatting (nix develop)
+	$(NIX_RUN) black --check audio_to_subs/ tests/
 
-typecheck:  ## Run type checker
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) mypy src/
+typecheck:  ## Run type checker (nix develop)
+	$(NIX_RUN) mypy audio_to_subs/
 
 quality: format-check lint typecheck test  ## Run all quality checks
 
-pre-commit-install:  ## Install pre-commit hooks in container
-	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) pre-commit install
+pre-commit-install:  ## Install pre-commit hooks (nix develop)
+	$(NIX_RUN) pre-commit install
 
-pre-commit-run:  ## Run pre-commit hooks on all files
-	podman run --rm -v ./:/app:Z $(DEV_IMAGE) pre-commit run --all-files
+pre-commit-run:  ## Run pre-commit hooks on all files (nix develop)
+	$(NIX_RUN) pre-commit run --all-files
 
 clean:  ## Clean up containers and images
 	podman container prune -f
@@ -60,17 +82,26 @@ run:  ## Run production container (requires videos/ directory and Podman secret)
 		-v ./subtitles:/output:Z \
 		$(PROD_IMAGE) -i /input/sample.mp4 -o /output
 
-shell:  ## Open shell in development container
-	podman run --rm -it -v ./:/app:Z $(DEV_IMAGE) /bin/sh
+shell:  ## Open a nix develop shell (backend + frontend toolchain)
+	nix develop
 
-compose-up:  ## Start services with Podman Compose
-	podman-compose up
+compose-up:  ## Start services with Podman Compose (builds from the pinned GitHub tag, not this checkout)
+	podman-compose up -d --build
 
 compose-down:  ## Stop services with Podman Compose
 	podman-compose down
 
 compose-logs:  ## View logs from services
 	podman-compose logs -f
+
+compose-dev-up:  ## Start services with Podman Compose, building from this checkout
+	podman-compose -f docker-compose.yml -f docker-compose.dev.yml up -d --build
+
+compose-dev-down:  ## Stop services started with compose-dev-up
+	podman-compose -f docker-compose.yml -f docker-compose.dev.yml down
+
+compose-dev-logs:  ## View logs from services started with compose-dev-up
+	podman-compose -f docker-compose.yml -f docker-compose.dev.yml logs -f
 
 secret-create:  ## Create Podman secret for API key (interactive)
 	@read -p "Enter Mistral API Key: " api_key; \
@@ -81,3 +112,31 @@ secret-list:  ## List Podman secrets
 
 secret-rm:  ## Remove Mistral API key secret
 	podman secret rm mistral_api_key
+
+# Frontend targets — Node comes from the `frontend` nix devShell (flake.nix),
+# never a host-installed toolchain.
+FRONTEND_RUN := nix develop .\#frontend --command bash -c
+
+frontend-test:  ## Run frontend tests (vitest)
+	$(FRONTEND_RUN) "cd frontend && npm install && npm run test"
+
+frontend-install:  ## Install frontend dependencies (generates package-lock.json)
+	$(FRONTEND_RUN) "cd frontend && npm install"
+
+frontend-build:  ## Build frontend for production (tsc + vite build)
+	$(FRONTEND_RUN) "cd frontend && npm run build"
+
+frontend-dev:  ## Start Vite dev server (proxies /api to localhost:8000)
+	$(FRONTEND_RUN) "cd frontend && npm run dev -- --host"
+
+frontend-shell:  ## Open a shell in the frontend nix devShell (for debugging npm issues)
+	nix develop .#frontend
+
+# WARNING: frontend-preview stubs auth and serves fake data.
+# It is confined to dev by frontend/.dockerignore and must never
+# be used as a production nginx config.
+frontend-preview:  ## Serve the built frontend with stubbed auth (DEV ONLY — no backend needed)
+	podman run --rm -p 8080:80 \
+		-v ./frontend/dist:/usr/share/nginx/html:ro,Z \
+		-v ./frontend/nginx.preview.conf:/etc/nginx/conf.d/default.conf:ro,Z \
+		docker.io/library/nginx:1.30-alpine

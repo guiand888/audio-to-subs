@@ -1,0 +1,7 @@
+node_modules
+dist
+.env
+.env.*
+Dockerfile
+# nginx.preview.conf is DEV-ONLY (stubs auth); keep it out of the production image
+nginx.preview.conf

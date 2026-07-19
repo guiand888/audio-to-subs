@@ -1,0 +1,97 @@
+# Database
+
+## Engine & file location
+
+- **SQLite**, single file at `/data/parolesub.db` inside the container, on a named volume shared between backend and worker.
+- **WAL mode** mandatory with pragmas: journal_mode=WAL, synchronous=NORMAL, busy_timeout=5000, foreign_keys=ON.
+- DSN: `sqlite+aiosqlite:////data/parolesub.db` for the API; `sqlite:////data/parolesub.db` for the worker.
+- SQLAlchemy 2.x ORM. Postgres upgrade path: only `DATABASE_URL` changes + `alembic upgrade head`.
+
+## Schema
+
+### users
+
+Single row expected at runtime; schema is multi-user-ready.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PK AUTOINCREMENT` | |
+| `username` | `TEXT NOT NULL UNIQUE` | |
+| `password_hash` | `TEXT NOT NULL` | argon2id |
+| `created_at` | `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
+| `last_login_at` | `TIMESTAMP NULL` | |
+
+### jobs
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `TEXT PK` | UUIDv4 string |
+| `status` | `TEXT NOT NULL` | queued, running, done, failed, cancelled |
+| `source` | `TEXT NOT NULL` | bazarr_movie, bazarr_episode, manual |
+| `source_ref` | `TEXT NULL` | radarrId, sonarrEpisodeId, or NULL |
+| `media_path` | `TEXT NOT NULL` | Resolved local path |
+| `output_path` | `TEXT NULL` | Final subtitle path |
+| `language_code` | `TEXT NULL` | ISO 639-1 |
+| `output_format` | `TEXT NOT NULL DEFAULT 'srt'` | |
+| `priority` | `INTEGER NOT NULL DEFAULT 0` | Higher = sooner |
+| `progress_percent` | `INTEGER NOT NULL DEFAULT 0` | 0-100, debounced |
+| `progress_message` | `TEXT NULL` | |
+| `cancel_requested` | `INTEGER NOT NULL DEFAULT 0` | |
+| `worker_id` | `TEXT NULL` | Set on claim |
+| `audio_duration_seconds` | `REAL NULL` | |
+| `mistral_usage_json` | `TEXT NULL` | Raw usage from Mistral |
+| `estimated_cost_usd` | `REAL NULL` | Computed in core/cost.py |
+| `error_message` | `TEXT NULL` | On failed |
+| `created_at` | `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
+| `started_at` | `TIMESTAMP NULL` | |
+| `finished_at` | `TIMESTAMP NULL` | |
+| `updated_at` | `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` | Bumped on progress writes |
+
+### job_logs
+
+Append-only milestone log; backs the Logs page.
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `INTEGER PK AUTOINCREMENT` | |
+| `job_id` | `TEXT NULL FK → jobs(id) ON DELETE CASCADE` | Nullable for server-wide |
+| `ts` | `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
+| `level` | `TEXT NOT NULL` | debug, info, warning, error |
+| `message` | `TEXT NOT NULL` | |
+
+### settings
+
+| Column | Type | Notes |
+|---|---|---|
+| `key` | `TEXT PK` | |
+| `value_json` | `TEXT NOT NULL` | Always JSON |
+| `updated_at` | `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
+
+### bazarr_cache
+
+| Column | Type | Notes |
+|---|---|---|
+| `id` | `TEXT PK` | "movie:{radarrId}" or "episode:{sonarrEpisodeId}" |
+| `kind` | `TEXT NOT NULL` | movie, episode |
+| `ext_id` | `INTEGER NOT NULL` | radarrId or sonarrEpisodeId |
+| `title` | `TEXT NOT NULL` | |
+| `subtitle_display` | `TEXT NULL` | "1x01 - Pilot" for episodes |
+| `media_path_bazarr` | `TEXT NULL` | Raw path from Bazarr |
+| `missing_subtitles_json` | `TEXT NOT NULL` | JSON array of subtitle info |
+| `has_any_subs` | `INTEGER NOT NULL` | 0/1 |
+| `raw_json` | `TEXT NOT NULL` | Full Bazarr payload |
+| `fetched_at` | `TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP` | |
+
+## Indexes
+
+```sql
+CREATE INDEX ix_jobs_claim ON jobs(status, priority DESC, created_at);
+CREATE INDEX ix_jobs_history ON jobs(status, finished_at DESC);
+CREATE INDEX ix_jobs_dedupe ON jobs(source, source_ref);
+CREATE INDEX ix_job_logs_job_ts ON job_logs(job_id, ts);
+CREATE INDEX ix_bazarr_cache_kind_hasany ON bazarr_cache(kind, has_any_subs);
+```
+
+## Alembic
+
+Alembic from day 1. Migration commands run inside the backend container. FastAPI lifespan and worker boot both run `alembic upgrade head`.

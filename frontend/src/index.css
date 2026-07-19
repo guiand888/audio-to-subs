@@ -1,0 +1,118 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+
+@custom-variant dark (&:is(.dark *));
+
+@theme inline {
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+  --color-popover: hsl(var(--popover));
+  --color-popover-foreground: hsl(var(--popover-foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-secondary: hsl(var(--secondary));
+  --color-secondary-foreground: hsl(var(--secondary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-accent: hsl(var(--accent));
+  --color-accent-foreground: hsl(var(--accent-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-log-debug: hsl(var(--log-debug));
+  --color-log-info: hsl(var(--log-info));
+  --color-log-warning: hsl(var(--log-warning));
+  --color-log-warning-foreground: hsl(var(--log-warning-foreground));
+  --color-log-error: hsl(var(--log-error));
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+
+  --animate-accordion-down: accordion-down 0.2s ease-out;
+  --animate-accordion-up: accordion-up 0.2s ease-out;
+
+  @keyframes accordion-down {
+    from { height: 0; }
+    to { height: var(--radix-accordion-content-height); }
+  }
+  @keyframes accordion-up {
+    from { height: var(--radix-accordion-content-height); }
+    to { height: 0; }
+  }
+}
+
+@layer base {
+  :root {
+    /* Ayu Tint — navy brand (#4b6195) over a cool-tinted neutral scale.
+       Never 0% saturation: everything carries a slight navy cast, in
+       both light and dark, to avoid stark black/white extremes. */
+    --background: 218 28% 94%;
+    --foreground: 222 22% 20%;
+    --card: 210 35% 99%;
+    --card-foreground: 222 22% 20%;
+    --popover: 210 35% 99%;
+    --popover-foreground: 222 22% 20%;
+    --primary: 222 35% 44%;
+    --primary-foreground: 210 40% 98%;
+    --secondary: 220 22% 89%;
+    --secondary-foreground: 222 20% 24%;
+    --muted: 220 20% 90%;
+    --muted-foreground: 220 12% 42%;
+    --accent: 222 45% 93%;
+    --accent-foreground: 222 40% 26%;
+    --destructive: 4 62% 51%;
+    --destructive-foreground: 210 40% 98%;
+    --border: 220 18% 82%;
+    --input: 220 18% 82%;
+    --ring: 222 35% 44%;
+    --radius: 0.5rem;
+
+    --log-debug: 220 10% 48%;
+    --log-info: 222 40% 55%;
+    --log-warning: 36 82% 46%;
+    --log-warning-foreground: 36 45% 14%;
+    --log-error: 4 62% 51%;
+  }
+
+  .dark {
+    --background: 222 26% 11%;
+    --foreground: 220 22% 89%;
+    --card: 222 24% 15%;
+    --card-foreground: 220 22% 89%;
+    --popover: 222 24% 15%;
+    --popover-foreground: 220 22% 89%;
+    --primary: 222 48% 65%;
+    --primary-foreground: 222 35% 11%;
+    --secondary: 222 20% 19%;
+    --secondary-foreground: 220 20% 88%;
+    --muted: 222 18% 18%;
+    --muted-foreground: 220 12% 62%;
+    --accent: 222 40% 24%;
+    --accent-foreground: 220 30% 92%;
+    --destructive: 4 58% 54%;
+    --destructive-foreground: 220 20% 95%;
+    --border: 222 18% 21%;
+    --input: 222 18% 21%;
+    --ring: 222 48% 65%;
+
+    --log-debug: 220 10% 58%;
+    --log-info: 222 48% 65%;
+    --log-warning: 36 78% 56%;
+    --log-warning-foreground: 36 40% 12%;
+    --log-error: 4 62% 58%;
+  }
+}
+
+@layer base {
+  * {
+    @apply border-border;
+  }
+  body {
+    @apply bg-background text-foreground;
+  }
+}

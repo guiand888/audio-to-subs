@@ -1,0 +1,331 @@
+// Logs page: global log viewer with filters and auto-refresh.
+// Fetches from GET /api/logs.
+
+import { useState } from "react"
+import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react"
+import { Link } from "@tanstack/react-router"
+
+import { useLogs } from "@/hooks/useLogs"
+import { useTimezoneSetting, formatDateTime } from "@/lib/datetime"
+import type { LogsFilters, LogLevel } from "@/lib/types"
+
+// Import from shadcn/ui
+import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import { Badge } from "@/components/ui/badge"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
+import {
+  Table,
+  TableBody,
+  TableCell,
+  TableHead,
+  TableHeader,
+  TableRow,
+} from "@/components/ui/table"
+
+const LEVEL_OPTIONS: { value: LogLevel; label: string }[] = [
+  { value: "debug", label: "Debug" },
+  { value: "info", label: "Info" },
+  { value: "warning", label: "Warning" },
+  { value: "error", label: "Error" },
+]
+
+// Solid, theme-aware badge classes per log level. Each pairs its background
+// with a foreground chosen for contrast — warning uses a dark foreground
+// since white-on-amber fails WCAG contrast; the rest use the near-white
+// primary-foreground token (tokens shift per theme in index.css).
+function getLevelBadgeClass(level: LogLevel): string {
+  switch (level) {
+    case "debug":
+      return "bg-log-debug text-primary-foreground border-transparent"
+    case "info":
+      return "bg-log-info text-primary-foreground border-transparent"
+    case "warning":
+      return "bg-log-warning text-log-warning-foreground border-transparent"
+    case "error":
+      return "bg-log-error text-primary-foreground border-transparent"
+    default:
+      return "bg-muted text-foreground border-transparent"
+  }
+}
+
+// Filter form component
+interface LogsFiltersProps {
+  filters: LogsFilters
+  onChange: (filters: LogsFilters) => void
+}
+
+function LogsFiltersForm({ filters, onChange }: LogsFiltersProps) {
+  const [level, setLevel] = useState<LogLevel | "_all">(filters.level_filter ?? "_all")
+  const [jobId, setJobId] = useState<string | undefined>(filters.job_id)
+
+  const handleApply = () => {
+    onChange({
+      ...filters,
+      level_filter: level !== "_all" ? (level as LogLevel) : undefined,
+      job_id: jobId || undefined,
+      offset: 0,
+    })
+  }
+
+  const handleReset = () => {
+    setLevel("_all")
+    setJobId(undefined)
+    onChange({ offset: 0 })
+  }
+
+  return (
+    <Card>
+      <CardHeader>
+        <CardTitle className="text-sm font-medium">Filters</CardTitle>
+      </CardHeader>
+      <CardContent className="space-y-4">
+        <div className="space-y-2">
+          <Label htmlFor="level-filter">Level</Label>
+          <Select
+            value={level}
+            onValueChange={(v) => setLevel(v as LogLevel | "_all")}
+          >
+            <SelectTrigger className="w-full">
+              <SelectValue placeholder="All levels" />
+            </SelectTrigger>
+            <SelectContent>
+              <SelectItem value="_all">All levels</SelectItem>
+              {LEVEL_OPTIONS.map((opt) => (
+                <SelectItem key={opt.value} value={opt.value}>
+                  {opt.label}
+                </SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+
+        <div className="space-y-2">
+          <Label htmlFor="job-id-filter">Job ID</Label>
+          <Input
+            id="job-id-filter"
+            type="text"
+            placeholder="Filter by job ID"
+            value={jobId || ""}
+            onChange={(e) => setJobId(e.target.value)}
+            className="w-full"
+          />
+        </div>
+
+        <div className="flex gap-2">
+          <Button size="sm" variant="outline" onClick={handleReset}>
+            Reset
+          </Button>
+          <Button size="sm" onClick={handleApply}>
+            Apply
+          </Button>
+        </div>
+      </CardContent>
+    </Card>
+  )
+}
+
+// Main LogsPage component
+export function LogsPage() {
+  const [filters, setFilters] = useState<LogsFilters>({ offset: 0, limit: 50 })
+  const [autoRefresh, setAutoRefresh] = useState(true)
+  const [refreshInterval] = useState(10000) // 10 seconds
+
+  const { data, isLoading, isError, refetch } = useLogs({
+    filters,
+    autoRefresh,
+    refreshInterval,
+  })
+
+  const timezone = useTimezoneSetting()
+
+  const handleFiltersChange = (newFilters: LogsFilters) => {
+    setFilters(newFilters)
+  }
+
+  const handleManualRefresh = () => {
+    void refetch()
+  }
+
+  const toggleAutoRefresh = () => {
+    setAutoRefresh(!autoRefresh)
+  }
+
+  if (isLoading && !data) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p>Loading logs...</p>
+      </div>
+    )
+  }
+
+  if (isError) {
+    return (
+      <div className="flex items-center justify-center h-full">
+        <p className="text-destructive">Failed to load logs</p>
+      </div>
+    )
+  }
+
+  const response = data
+  const logs = response?.logs || []
+  const total = response?.total || 0
+
+  return (
+    <div className="flex flex-col h-full p-4 space-y-4">
+      {/* Header */}
+      <div className="flex items-center justify-between">
+        <div>
+          <h1 className="text-2xl font-bold">Logs</h1>
+          <p className="text-sm text-muted-foreground">
+            System and job event logs
+          </p>
+        </div>
+        <div className="flex items-center gap-2">
+          <Button
+            size="sm"
+            variant="outline"
+            onClick={handleManualRefresh}
+            disabled={isLoading}
+          >
+            <RefreshCw className="h-4 w-4" />
+          </Button>
+          <Button
+            size="sm"
+            variant={autoRefresh ? "default" : "outline"}
+            onClick={toggleAutoRefresh}
+          >
+            Auto-refresh: {autoRefresh ? "On" : "Off"}
+          </Button>
+        </div>
+      </div>
+
+      <div className="flex gap-4">
+        {/* Filters sidebar */}
+        <div className="w-full md:w-[250px] flex-none">
+          <LogsFiltersForm filters={filters} onChange={handleFiltersChange} />
+        </div>
+
+        {/* Logs table */}
+        <div className="flex-1 overflow-auto">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-lg">Log Entries</CardTitle>
+              <CardDescription>
+                {total} total entries
+              </CardDescription>
+            </CardHeader>
+            <CardContent>
+              {logs.length === 0 ? (
+                <p className="text-muted-foreground text-center py-8">
+                  No logs found matching your filters
+                </p>
+              ) : (
+                <Table>
+                  <TableHeader className="bg-muted/50">
+                    <TableRow>
+                      <TableHead className="p-3">Timestamp</TableHead>
+                      <TableHead className="p-3">Level</TableHead>
+                      <TableHead className="p-3">Job ID</TableHead>
+                      <TableHead className="p-3 flex-1">Message</TableHead>
+                    </TableRow>
+                  </TableHeader>
+                  <TableBody>
+                    {logs.map((log) => (
+                      <TableRow
+                        key={log.id}
+                        className="border-t hover:bg-muted/50"
+                      >
+                        <TableCell className="p-3 whitespace-nowrap">
+                          {formatDateTime(log.ts, timezone ?? undefined)}
+                        </TableCell>
+                        <TableCell className="p-3">
+                          <Badge
+                            variant="outline"
+                            className={getLevelBadgeClass(log.level)}
+                          >
+                            {log.level.toUpperCase()}
+                          </Badge>
+                        </TableCell>
+                        <TableCell className="p-3 whitespace-nowrap">
+                          {log.job_id ? (
+                            <Link
+                              to="/jobs/$jobId"
+                              params={{ jobId: log.job_id }}
+                              className="text-primary underline"
+                              title={log.job_id}
+                            >
+                              {log.job_id}
+                            </Link>
+                          ) : (
+                            "—"
+                          )}
+                        </TableCell>
+                        <TableCell className="p-3 max-w-[400px] truncate">
+                          <span className="block truncate" title={log.message}>
+                            {log.message}
+                          </span>
+                        </TableCell>
+                      </TableRow>
+                    ))}
+                  </TableBody>
+                </Table>
+              )}
+
+              {/* Pagination */}
+              {total > (filters.limit || 50) && (
+                <div className="flex items-center justify-between pt-4">
+                  <p className="text-sm text-muted-foreground">
+                    Showing {(filters.offset || 0) + 1}-{Math.min(
+                      (filters.offset || 0) + (filters.limit || 50),
+                      total
+                    )} of {total}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={filters.offset === 0}
+                      onClick={() =>
+                        setFilters({
+                          ...filters,
+                          offset: Math.max(0, (filters.offset || 0) - (filters.limit || 50)),
+                        })
+                      }
+                    >
+                      <ChevronLeft className="h-4 w-4" />
+                    </Button>
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      disabled={
+                        filters.offset !== undefined &&
+                        filters.offset + (filters.limit || 50) >= total
+                      }
+                      onClick={() =>
+                        setFilters({
+                          ...filters,
+                          offset: (filters.offset || 0) + (filters.limit || 50),
+                        })
+                      }
+                    >
+                      <ChevronRight className="h-4 w-4" />
+                    </Button>
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </div>
+      </div>
+    </div>
+  )
+}

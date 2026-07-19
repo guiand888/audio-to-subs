@@ -1,12 +1,35 @@
 """Tests for transcription_client module."""
 
+from unittest.mock import MagicMock, mock_open, patch
+
+import httpx
 import pytest
-from unittest.mock import patch, MagicMock, mock_open
-from src.transcription_client import (
+import respx
+
+from audio_to_subs.core.transcription_client import (
+    AudioFileError,
     TranscriptionClient,
     TranscriptionError,
-    AudioFileError,
 )
+
+MISTRAL_TRANSCRIPTIONS_URL = "https://api.mistral.ai/v1/audio/transcriptions"
+
+
+def _mock_transcription_response() -> httpx.Response:
+    """A minimal but schema-valid Mistral transcription response."""
+    return httpx.Response(
+        200,
+        json={
+            "model": "voxtral-mini-2602",
+            "text": "hello world",
+            "usage": {
+                "prompt_tokens": 1,
+                "completion_tokens": 1,
+                "total_tokens": 2,
+            },
+            "language": None,
+        },
+    )
 
 
 class TestTranscriptionClient:
@@ -26,11 +49,13 @@ class TestTranscriptionClient:
         with pytest.raises(ValueError, match="API key is required"):
             TranscriptionClient(api_key=None)
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
-    def test_transcribe_audio_success(self, mock_mistral_class, mock_file, mock_exists, mock_getsize):
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_success(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
         """Test successful audio transcription."""
         # Arrange
         mock_exists.return_value = True
@@ -51,7 +76,7 @@ class TestTranscriptionClient:
         assert result == "This is a test transcription."
         mock_client.audio.transcriptions.complete.assert_called_once()
 
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_file_not_found(self, mock_mistral_class):
         """Test transcription fails when audio file doesn't exist."""
         # Arrange
@@ -61,9 +86,9 @@ class TestTranscriptionClient:
         with pytest.raises(AudioFileError, match="Audio file not found"):
             client.transcribe_audio("nonexistent.wav")
 
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_api_error(
         self, mock_mistral_class, mock_file, mock_exists
     ):
@@ -80,10 +105,10 @@ class TestTranscriptionClient:
         with pytest.raises(TranscriptionError, match="Transcription failed"):
             client.transcribe_audio("test_audio.wav")
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_with_timestamps(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -116,11 +141,13 @@ class TestTranscriptionClient:
         assert result[1]["end"] == 5.0
         assert result[1]["text"] == "transcription"
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
-    def test_transcribe_audio_with_language(self, mock_mistral_class, mock_file, mock_exists, mock_getsize):
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_language(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
         """Test transcription with language parameter."""
         # Arrange
         mock_exists.return_value = True
@@ -143,10 +170,10 @@ class TestTranscriptionClient:
         call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
         assert call_kwargs.get("language") == "en"
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_timestamps_and_progress(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -170,15 +197,12 @@ class TestTranscriptionClient:
         mock_client.audio.transcriptions.complete.return_value = mock_response
 
         client = TranscriptionClient(
-            api_key="test_key",
-            progress_callback=mock_progress_callback
+            api_key="test_key", progress_callback=mock_progress_callback
         )
 
         # Act
         result = client.transcribe_audio_with_timestamps(
-            "test_audio.wav",
-            segment_number=1,
-            total_segments=2
+            "test_audio.wav", segment_number=1, total_segments=2
         )
 
         # Assert
@@ -194,7 +218,7 @@ class TestTranscriptionClient:
         assert 0 in percentages
         assert 100 in percentages
 
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     def test_transcribe_audio_with_timestamps_file_not_found(self, mock_exists):
         """Test transcription with timestamps fails when file not found."""
         # Arrange
@@ -205,10 +229,10 @@ class TestTranscriptionClient:
         with pytest.raises(AudioFileError, match="Audio file not found"):
             client.transcribe_audio_with_timestamps("nonexistent.wav")
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_timestamps_api_error(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -226,10 +250,10 @@ class TestTranscriptionClient:
         with pytest.raises(TranscriptionError, match="Transcription failed"):
             client.transcribe_audio_with_timestamps("test_audio.wav")
 
-    @patch("src.transcription_client.os.path.getsize")
-    @patch("src.transcription_client.Path.exists")
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
     @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
-    @patch("src.transcription_client.Mistral")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
     def test_transcribe_audio_with_timestamps_no_segments(
         self, mock_mistral_class, mock_file, mock_exists, mock_getsize
     ):
@@ -244,7 +268,7 @@ class TestTranscriptionClient:
         class MockResponse:
             def __init__(self):
                 self.text = "Test without segments"
-        
+
         mock_response = MockResponse()
         mock_client.audio.transcriptions.complete.return_value = mock_response
 
@@ -255,3 +279,238 @@ class TestTranscriptionClient:
 
         # Assert - should return empty list
         assert result == []
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_timeout(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that timeout parameter is passed to API call."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.text = "Test transcription"
+        mock_client.audio.transcriptions.complete.return_value = mock_response
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio("test_audio.wav", timeout=120.0)
+
+        # Assert
+        assert result == "Test transcription"
+        # Verify timeout was passed to the API call (SDK expects timeout_ms)
+        call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
+        assert call_kwargs.get("timeout_ms") == 120_000
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_retries_on_transient_failure(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that transcription retries on transient API failures."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.text = "Successful transcription"
+
+        # First two calls fail with a timeout error, third succeeds
+        mock_client.audio.transcriptions.complete.side_effect = [
+            TimeoutError("Request timeout"),
+            TimeoutError("Request timeout"),
+            mock_response,
+        ]
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio("test_audio.wav")
+
+        # Assert
+        assert result == "Successful transcription"
+        # Verify that complete() was called 3 times (2 failures + 1 success)
+        assert mock_client.audio.transcriptions.complete.call_count == 3
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_exhausts_retries_on_persistent_failure(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that transcription fails after exhausting retries."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        # All calls fail
+        mock_client.audio.transcriptions.complete.side_effect = TimeoutError(
+            "Persistent timeout"
+        )
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act & Assert
+        with pytest.raises(TranscriptionError, match="Transcription failed"):
+            client.transcribe_audio("test_audio.wav")
+
+        # Verify that retries were attempted (max 3 attempts)
+        assert mock_client.audio.transcriptions.complete.call_count == 3
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_timestamps_retries_on_transient_failure(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that transcription with timestamps retries on transient API failures."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.segments = [
+            MagicMock(start=0.0, end=2.5, text="Test"),
+        ]
+
+        # First call fails with a connection error, second succeeds
+        mock_client.audio.transcriptions.complete.side_effect = [
+            ConnectionError("Connection failed"),
+            mock_response,
+        ]
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio_with_timestamps("test_audio.wav")
+
+        # Assert
+        assert len(result) == 1
+        assert result[0]["text"] == "Test"
+        # Verify that complete() was called 2 times (1 failure + 1 success)
+        assert mock_client.audio.transcriptions.complete.call_count == 2
+
+    @patch("audio_to_subs.core.transcription_client.os.path.getsize")
+    @patch("audio_to_subs.core.transcription_client.Path.exists")
+    @patch("builtins.open", new_callable=mock_open, read_data=b"fake_audio_data")
+    @patch("audio_to_subs.core.transcription_client.Mistral")
+    def test_transcribe_audio_with_timestamps_timeout(
+        self, mock_mistral_class, mock_file, mock_exists, mock_getsize
+    ):
+        """Test that timeout parameter is passed to timestamps API call."""
+        # Arrange
+        mock_exists.return_value = True
+        mock_getsize.return_value = 1024
+        mock_client = MagicMock()
+        mock_mistral_class.return_value = mock_client
+
+        mock_response = MagicMock()
+        mock_response.segments = []
+        mock_client.audio.transcriptions.complete.return_value = mock_response
+
+        client = TranscriptionClient(api_key="test_key")
+
+        # Act
+        result = client.transcribe_audio_with_timestamps("test_audio.wav", timeout=90.0)
+
+        # Assert
+        assert result == []
+        # Verify timeout was passed to the API call (SDK expects timeout_ms)
+        call_kwargs = mock_client.audio.transcriptions.complete.call_args[1]
+        assert call_kwargs.get("timeout_ms") == 90_000
+
+
+class TestTranscriptionClientRealSDK:
+    """Recorded (respx-intercepted) tests that exercise the real Mistral SDK.
+
+    These drive the actual ``mistralai`` ``complete()`` call path (no MagicMock
+    of the SDK) so we verify the kwargs serialize into a well-formed multipart
+    request. They stand in for the "recorded/VCR Mistral call" acceptance step
+    for M5.7. The remaining open question from the probe note — whether a
+    ``language``-omitted request is wire-equivalent to an explicit
+    ``language=None`` — was confirmed live on 2026-07-10: both return equivalent
+    transcripts/usage, so passing ``UNSET`` (omit) when no language is set is
+    safe.
+    """
+
+    def _write_tmp_wav(self, tmp_path) -> str:
+        path = tmp_path / "clip.wav"
+        path.write_bytes(b"RIFF....WAVEfakeaudio")
+        return str(path)
+
+    @respx.mock
+    def test_language_is_sent_when_provided(self, tmp_path):
+        """With language set, the multipart request carries a language field."""
+        route = respx.post(MISTRAL_TRANSCRIPTIONS_URL).mock(
+            return_value=_mock_transcription_response()
+        )
+
+        client = TranscriptionClient(api_key="dummy", language="fr")
+        result = client.transcribe_audio(self._write_tmp_wav(tmp_path), language="en")
+
+        assert result == "hello world"
+        assert route.called
+        request = route.calls.last.request
+        assert b"language" in request.content
+
+    @respx.mock
+    def test_language_omitted_when_absent(self, tmp_path):
+        """With no language, UNSET keeps the field out of the wire request."""
+        route = respx.post(MISTRAL_TRANSCRIPTIONS_URL).mock(
+            return_value=_mock_transcription_response()
+        )
+
+        client = TranscriptionClient(api_key="dummy")
+        result = client.transcribe_audio(self._write_tmp_wav(tmp_path))
+
+        assert result == "hello world"
+        assert route.called
+        # The field must be absent (not serialized as null/empty) on the wire.
+        assert b"\r\nlanguage\r\n" not in route.calls.last.request.content
+
+    @respx.mock
+    def test_timestamps_request_carries_granularity(self, tmp_path):
+        """The timestamps path sends timestamp_granularities=["segment"]."""
+        route = respx.post(MISTRAL_TRANSCRIPTIONS_URL).mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "model": "voxtral-mini-2602",
+                    "text": "hello",
+                    "usage": {
+                        "prompt_tokens": 1,
+                        "completion_tokens": 1,
+                        "total_tokens": 2,
+                    },
+                    "language": None,
+                    "segments": [{"start": 0.0, "end": 1.0, "text": "hello"}],
+                },
+            )
+        )
+
+        client = TranscriptionClient(api_key="dummy")
+        segments = client.transcribe_audio_with_timestamps(
+            self._write_tmp_wav(tmp_path)
+        )
+
+        assert len(segments) == 1
+        assert segments[0]["text"] == "hello"
+        assert route.called
+        assert b"timestamp_granularities" in route.calls.last.request.content

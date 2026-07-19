@@ -1,0 +1,160 @@
+# Standalone env-file alternative to docker-compose.yml.
+#
+# Use this INSTEAD of docker-compose.yml for deployments that supply
+# credentials via a plaintext `.env` file (e.g. Docker, where native secrets
+# are not managed the way Podman does). Do NOT merge this with
+# docker-compose.yml — run it on its own; docker-compose.override.yml
+# (the optional Sonarr/Radarr/Bazarr stack) is auto-included by both engines.
+#
+#   cp .env.example .env          # then set ADMIN_PASSWORD and MISTRAL_API_KEY
+#   docker compose -f docker-compose.docker.yml up -d --build
+#   # or, to validate the same mechanism under Podman:
+#   podman compose -f docker-compose.docker.yml up -d --build
+#
+# The application prefers the direct ADMIN_PASSWORD / MISTRAL_API_KEY env vars
+# over the *_FILE variants (see audio_to_subs/api/settings.py), so no secret
+# files are required here.
+
+services:
+  backend:
+    build:
+      # PAROLESUB_TAG only pins WHICH Git ref to build — it is NOT the reported
+      # version. The application version is baked at build time from the
+      # repo-root VERSION file (see setup.py / pyproject.toml) and reported by
+      # the backend's GET /api/version, independent of deployment.
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.0.0}
+      dockerfile: Dockerfile
+    image: parolesub:backend
+    container_name: parolesub-backend
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite+aiosqlite:////data/parolesub.db
+      - SESSION_SECRET_FILE=/data/session_secret
+      - REDIS_URL=redis://redis:6379/0
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - BEHIND_TLS=${BEHIND_TLS:-false}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file: ${ENV_FILE:-.env}
+    volumes:
+      - parolesub-data:/data:z
+      - parolesub-movies:/movies:z
+      - parolesub-tv:/tv:z
+      - parolesub-tmp:/tmp/parolesub:z
+    # No ports published: only the frontend is reachable from the host, and
+    # it already reverse-proxies /api/ to this service over the compose
+    # network (frontend/nginx.conf). Put a TLS-terminating proxy (e.g. Caddy,
+    # see ./Caddyfile) in front of the frontend's published port for HTTPS.
+    healthcheck:
+      test:
+        - CMD
+        - python
+        - -c
+        - import urllib.request; urllib.request.urlopen('http://localhost:8000/api/healthz', timeout=3)
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    depends_on:
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 2G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+
+  redis:
+    image: docker.io/library/redis:8-alpine
+    container_name: parolesub-redis
+    # No ports published: only backend/worker talk to redis, over the
+    # compose network (redis://redis:6379/0).
+    volumes:
+      - parolesub-redis-data:/data:z
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 5s
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+
+  worker:
+    build:
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.0.0}
+      dockerfile: Dockerfile
+    image: parolesub:worker
+    container_name: parolesub-worker
+    environment:
+      - PYTHONUNBUFFERED=1
+      - DATABASE_URL=sqlite+aiosqlite:////data/parolesub.db
+      - REDIS_URL=redis://redis:6379/0
+      - SESSION_SECRET_FILE=/data/session_secret
+      - ADMIN_USERNAME=${ADMIN_USERNAME:-admin}
+      - BEHIND_TLS=${BEHIND_TLS:-false}
+      - DEBUG=${DEBUG:-false}
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+    env_file: ${ENV_FILE:-.env}
+    volumes:
+      - parolesub-data:/data:z
+      - parolesub-movies:/movies:z
+      - parolesub-tv:/tv:z
+      - parolesub-tmp:/tmp/parolesub:z
+    depends_on:
+      backend:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+        reservations:
+          cpus: "0.5"
+          memory: 512M
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "1000:1000"
+    entrypoint: ["python", "-m", "audio_to_subs.worker"]
+
+  frontend:
+    build:
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.0.0}:frontend
+      dockerfile: Dockerfile
+    image: parolesub:frontend
+    container_name: parolesub-frontend
+    # Single host-exposed entry point. Put a TLS-terminating reverse proxy
+    # (e.g. Caddy, see ./Caddyfile) in front of this port for HTTPS.
+    ports:
+      - "8080:8080"
+    depends_on:
+      backend:
+        condition: service_healthy
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
+    user: "101:101" # nginx user in nginx-unprivileged image
+
+volumes:
+  parolesub-data:
+    driver: local
+  parolesub-redis-data:
+    driver: local
+  parolesub-movies:
+    driver: local
+  parolesub-tv:
+    driver: local
+  parolesub-tmp:
+    driver: local

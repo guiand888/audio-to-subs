@@ -3,13 +3,20 @@
 Tests logging configuration with different verbosity levels
 and logger suppression.
 """
+
 import logging
 import sys
 from io import StringIO
 
 import pytest
 
-from src.logging_config import configure_logging
+from audio_to_subs.core.logging_config import (
+    clear_registered_secrets,
+    configure_logging,
+    configure_logging_from_env,
+    redact_message,
+    register_secret,
+)
 
 
 @pytest.fixture(autouse=True)
@@ -18,12 +25,15 @@ def reset_logging():
     # Store original handlers and config
     original_handlers = logging.root.handlers[:]
     original_level = logging.root.level
+    original_filters = logging.root.filters[:]
 
     yield
 
     # Restore original state
     logging.root.handlers = original_handlers
     logging.root.level = original_level
+    logging.root.filters = original_filters
+    clear_registered_secrets()
 
 
 class TestConfigureLogging:
@@ -107,9 +117,9 @@ class TestConfigureLogging:
         configure_logging(verbose=True)
 
         # Assert - loggers should not have WARNING level set
-        mistral_logger = logging.getLogger("mistralai")
-        httpx_logger = logging.getLogger("httpx")
-        urllib3_logger = logging.getLogger("urllib3")
+        logging.getLogger("mistralai")
+        logging.getLogger("httpx")
+        logging.getLogger("urllib3")
 
         # In verbose mode, these should not be explicitly set to WARNING
         # (they inherit from root logger)
@@ -120,7 +130,7 @@ class TestConfigureLogging:
         """Test that configure_logging with force=True reconfigures."""
         # Arrange - set up initial logging
         configure_logging(verbose=False)
-        initial_handler_count = len(logging.root.handlers)
+        len(logging.root.handlers)
 
         # Act - reconfigure with different setting
         configure_logging(verbose=True)
@@ -180,7 +190,7 @@ class TestConfigureLogging:
         test_logger.debug("Debug message")
 
         # Assert - root logger level is INFO, so DEBUG won't be propagated
-        output = captured_output.getvalue()
+        captured_output.getvalue()
         # Since root logger is INFO level, debug won't appear at root
         # (but would appear if we logged through root directly)
 
@@ -225,3 +235,93 @@ class TestLoggingDefaults:
         configure_logging(verbose=False)
         configure_logging(verbose=bool(1))
         configure_logging(verbose=bool(0))
+
+
+class TestConfigureLoggingFromEnv:
+    """Test LOG_LEVEL-driven configuration for non-interactive entry points."""
+
+    def test_unset_defaults_to_info(self, monkeypatch):
+        monkeypatch.delenv("LOG_LEVEL", raising=False)
+        configure_logging_from_env()
+        assert logging.root.level == logging.INFO
+
+    def test_log_level_debug_enables_verbose(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "DEBUG")
+        configure_logging_from_env()
+        assert logging.root.level == logging.DEBUG
+
+    def test_log_level_debug_is_case_insensitive(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "debug")
+        configure_logging_from_env()
+        assert logging.root.level == logging.DEBUG
+
+    def test_log_level_info_stays_non_verbose(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "INFO")
+        configure_logging_from_env()
+        assert logging.root.level == logging.INFO
+
+    def test_unrecognized_log_level_falls_back_to_info(self, monkeypatch):
+        monkeypatch.setenv("LOG_LEVEL", "bogus")
+        configure_logging_from_env()
+        assert logging.root.level == logging.INFO
+
+
+class TestSecretsRedaction:
+    """Secret values must never appear in log output (M6.a, security pass)."""
+
+    def test_redact_message_replaces_registered_secret(self):
+        register_secret("super-secret-mistral-key-12345")
+        out = redact_message("using key=super-secret-mistral-key-12345 for call")
+        assert "super-secret-mistral-key-12345" not in out
+        assert "***REDACTED***" in out
+
+    def test_redact_message_leaves_benign_text_unchanged(self):
+        register_secret("super-secret-mistral-key-12345")
+        out = redact_message("job created for /movies/foo.mp4")
+        assert out == "job created for /movies/foo.mp4"
+
+    def test_short_secrets_are_not_registered(self):
+        register_secret("pw")
+        out = redact_message("password is pw, fine")
+        assert out == "password is pw, fine"
+
+    def test_filter_redacts_secret_logged_via_args(self):
+        from audio_to_subs.core.logging_config import SecretsRedactingFilter
+
+        register_secret("long-admin-password-98765")
+        logger = logging.getLogger("secrets_test")
+        captured = StringIO()
+        handler = logging.StreamHandler(captured)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.addFilter(SecretsRedactingFilter())
+        logger.addHandler(handler)
+        logger.info("login with password=%s", "long-admin-password-98765")
+
+        output = captured.getvalue()
+        assert "long-admin-password-98765" not in output
+        assert "***REDACTED***" in output
+
+    def test_filter_redacts_secret_logged_via_fstring(self):
+        from audio_to_subs.core.logging_config import SecretsRedactingFilter
+
+        register_secret("long-session-token-aaaa-1111")
+        logger = logging.getLogger("secrets_test")
+        captured = StringIO()
+        handler = logging.StreamHandler(captured)
+        handler.setFormatter(logging.Formatter("%(message)s"))
+        handler.addFilter(SecretsRedactingFilter())
+        logger.addHandler(handler)
+        secret = "long-session-token-aaaa-1111"
+        logger.warning(f"token={secret}")
+
+        output = captured.getvalue()
+        assert "long-session-token-aaaa-1111" not in output
+        assert "***REDACTED***" in output
+
+    def test_multiple_secrets_redacted(self):
+        register_secret("first-secret-value-abc")
+        register_secret("second-secret-value-xyz")
+        out = redact_message("a=first-secret-value-abc b=second-secret-value-xyz")
+        assert "first-secret-value-abc" not in out
+        assert "second-secret-value-xyz" not in out
+        assert out.count("***REDACTED***") == 2
