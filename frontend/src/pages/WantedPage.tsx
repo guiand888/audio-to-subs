@@ -38,6 +38,7 @@ import { useCreateJob } from "@/hooks/useJobs"
 import { useWantedRefresh } from "@/hooks/useWantedRefresh"
 import { useJobsStore } from "@/lib/jobsStore"
 import { ApiError } from "@/lib/api"
+import { naturalCompare } from "@/lib/utils"
 import { Progress } from "@/components/ui/progress"
 import type {
   JobConflictDetail,
@@ -312,9 +313,7 @@ export function WantedPage() {
     // the useWanted call above), so the client only sorts what comes back.
     // Default sort: alphabetical by title (case-insensitive). No sorting
     // options or extra categories are exposed yet, so this is the baseline.
-    return [...data.items].sort((a, b) =>
-      a.title.localeCompare(b.title, undefined, { sensitivity: "base" }),
-    )
+    return [...data.items].sort((a, b) => naturalCompare(a.title, b.title))
   }, [data?.items])
 
   // Options for the language filter dropdown come from a dedicated query that
@@ -340,7 +339,7 @@ export function WantedPage() {
       }
     }
     return [...byCode.values()].sort((a, b) =>
-      (a.name ?? a.code2).localeCompare(b.name ?? b.code2),
+      naturalCompare(a.name ?? a.code2, b.name ?? b.code2),
     )
   }, [langOptionsData?.items])
 
