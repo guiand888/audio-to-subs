@@ -45,12 +45,20 @@ interface JobsState {
 
   apply: (data: SseEventData) => void
   seed: (jobs: JobResponse[]) => void
-  // Re-sync from the REST endpoint without wiping in-flight SSE progress.
-  // Server-authoritative fields (cost, duration, media_path, …) are adopted;
-  // live fields already present in the store (percent/stage/message/step_*)
-  // are preserved so a re-seed triggered by a "new" event doesn't reset the
-  // progress bar of a job that is actively running.
+  // Re-sync from REST without discarding live SSE progress. Adopt
+  // server-authoritative fields, but keep any live percent/stage/message/
+  // step_* already present in the store so an in-flight progress bar isn't
+  // reset by a re-seed triggered on a "new" event.
   merge: (jobs: JobResponse[]) => void
+  // User-initiated refresh (manual "Refresh now" button or auto-refresh
+  // polling): adopt server values wholesale, including progress. This is
+  // the recovery path when SSE has gone quiet — merge() would preserve
+  // the store's possibly-stale SSE-driven progress fields, defeating the
+  // whole point of polling. The "don't resurrect dismissed terminal jobs"
+  // carve-out from merge() is preserved: a job the store doesn't know
+  // about is only added if still active, so hitting Refresh right after a
+  // job fades out won't make it reappear.
+  replace: (jobs: JobResponse[]) => void
   remove: (jobId: string) => void
 }
 
@@ -199,6 +207,21 @@ export const useJobsStore = create<JobsState>()((set) => ({
           // the store here means the user already watched it fade out and
           // remove() dropped it - re-adding it on the next merge (e.g. a
           // "new"-triggered re-seed) would make a dismissed card reappear.
+          jobs[j.id] = liveJobFromApi(j)
+        }
+      }
+      return { jobs }
+    }),
+
+  replace: (apiJobs) =>
+    set((state) => {
+      const jobs: Record<string, LiveJob> = { ...state.jobs }
+      for (const j of apiJobs) {
+        const existing = state.jobs[j.id]
+        if (existing || j.status === "queued" || j.status === "running") {
+          // Wholesale adopt server values, including progress. See the
+          // comment on the type declaration for why this differs from
+          // merge() and when each should be called.
           jobs[j.id] = liveJobFromApi(j)
         }
       }

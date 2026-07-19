@@ -288,6 +288,78 @@ describe("jobsStore", () => {
     })
   })
 
+  describe("replace()", () => {
+    it("overwrites live SSE progress with the server's persisted values", () => {
+      // A job has live SSE progress ahead of the DB (worker publishes to
+      // Redis before persisting, debounced at ~1Hz). merge() would preserve
+      // the SSE-fresh 42%; replace() must adopt the server's 40% wholesale.
+      useJobsStore.getState().apply({
+        event: "progress",
+        job_id: "job-1",
+        percent: 42,
+        stage: "transcribe",
+        message: "SSE-fresh",
+        step_index: 2,
+        step_total: 3,
+      })
+
+      useJobsStore.getState().replace([
+        { ...MOCK_JOB, status: "running", progress_percent: 40 },
+      ])
+
+      const job = useJobsStore.getState().jobs["job-1"]
+      expect(job.percent).toBe(40)
+      expect(job.stage).toBe("") // server's progress_stage was null → ""
+      expect(job.message).toBe("") // server's progress_message was null → ""
+      expect(job.step_index).toBeNull()
+      expect(job.step_total).toBeNull()
+    })
+
+    it("adopts server-authoritative fields wholesale", () => {
+      useJobsStore.getState().seed([MOCK_JOB])
+      useJobsStore.getState().replace([
+        {
+          ...MOCK_JOB,
+          status: "running",
+          estimated_cost_usd: 0.07,
+          progress_percent: 80,
+          progress_stage: "transcribe",
+          progress_step_index: 4,
+          progress_step_total: 5,
+        },
+      ])
+
+      const job = useJobsStore.getState().jobs["job-1"]
+      expect(job.status).toBe("running")
+      expect(job.estimated_cost_usd).toBe(0.07)
+      expect(job.percent).toBe(80)
+      expect(job.stage).toBe("transcribe")
+      expect(job.step_index).toBe(4)
+      expect(job.step_total).toBe(5)
+    })
+
+    it("does not resurrect a terminal job the user already dismissed", () => {
+      useJobsStore.getState().seed([MOCK_JOB])
+      useJobsStore.getState().remove("job-1")
+      expect(useJobsStore.getState().jobs["job-1"]).toBeUndefined()
+
+      useJobsStore.getState().replace([
+        { ...MOCK_JOB, status: "done", progress_percent: 100 },
+      ])
+
+      expect(useJobsStore.getState().jobs["job-1"]).toBeUndefined()
+    })
+
+    it("adds queued and running jobs the store has never seen", () => {
+      useJobsStore.getState().replace([MOCK_JOB, MOCK_JOB_2])
+      const jobs = useJobsStore.getState().jobs
+      expect(jobs["job-1"]).toBeDefined()
+      expect(jobs["job-2"]).toBeDefined()
+      expect(jobs["job-1"].source_ref).toBe("123")
+      expect(jobs["job-2"].source_ref).toBe("456")
+    })
+  })
+
   describe("remove()", () => {
     beforeEach(() => {
       useJobsStore.getState().seed([MOCK_JOB, MOCK_JOB_2])

@@ -232,6 +232,12 @@ export type MediaType = "movie" | "series" | "unknown"
 // on the `event` field. Do NOT use named EventSource listeners.
 
 export type SseEventData =
+  // Emitted once immediately after the backend's Redis pubsub.subscribe
+  // completes, so the client knows events published after this point will
+  // be delivered. Critical for the refresh flow: the client waits for this
+  // before POSTing /api/wanted/refresh, eliminating the race where a fast
+  // refresh publishes refresh_done before the subscription exists.
+  | { event: "stream_ready" }
   | { event: "new"; job_id: string }
   | {
       event: "progress"
@@ -286,6 +292,10 @@ export interface BazarrConnectionTestResponse {
 
 export interface WantedRefreshRequest {
   item_type: "all" | "movie" | "episode"
+  // Optional client-supplied id. When the client opens its SSE subscription
+  // before POSTing (so it doesn't miss refresh_done on a fast refresh), it
+  // generates the id and sends it here. Server generates one when omitted.
+  refresh_id?: string
 }
 
 export interface WantedRefreshResponse {
@@ -294,6 +304,22 @@ export interface WantedRefreshResponse {
   movies_processed: number
   episodes_processed: number
   error: string | null
+}
+
+// GET /api/wanted/refresh/{refresh_id} - persisted snapshot a client reads
+// when it missed the terminal SSE event (late subscription, dropped
+// connection, sleep). See useWantedRefresh's watchdog.
+export interface WantedRefreshStatusResponse {
+  refresh_id: string
+  status: "started" | "completed" | "failed"
+  processed: number
+  total: number | null
+  percent: number
+  stage: string
+  movies_processed: number
+  episodes_processed: number
+  error: string | null
+  updated_at: string
 }
 
 // --------------- History ---------------

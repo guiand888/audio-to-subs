@@ -176,19 +176,21 @@ function JobCard({ job, onCancel, isCancelling, onCreate, isCreating }: JobCardP
 export function QueuePage() {
   const queryClient = useQueryClient()
   // Opt-in fallback polling (default off). SSE is the primary live mechanism;
-  // this only re-syncs from GET /api/jobs when the user enables it.
+  // this only re-syncs from GET /api/jobs when the user enables it. Unlike
+  // the "new"-event-triggered re-sync, the user explicitly wants fresh
+  // server state here, so the data-update effect uses replace() (which
+  // overwrites in-store progress) rather than merge() (which preserves it).
   const [autoRefresh, setAutoRefresh] = useState(false)
   const [refreshInterval] = useState(10000)
   // Initial seed on mount, then Zustand store is the source of truth
   const { data, refetch, isFetching } = useJobs({
     limit: 200,
-    autoRefresh,
-    refreshInterval,
   })
   const cancelJob = useCancelJob()
   const createJob = useCreateJob()
   const seed = useJobsStore((s) => s.seed)
   const merge = useJobsStore((s) => s.merge)
+  const replace = useJobsStore((s) => s.replace)
   const remove = useJobsStore((s) => s.remove)
   const lastTerminalJobId = useJobsStore((s) => s.lastTerminalJobId)
   const pendingNewCount = useJobsStore((s) => s.pendingNewCount)
@@ -198,17 +200,36 @@ export function QueuePage() {
   const [fadingOut, setFadingOut] = useState<Set<string>>(new Set())
 
   // Seed the store once on mount; afterwards re-sync via merge so live SSE
-  // progress is preserved.
+  // progress is preserved — unless hardRefresh is set, in which case replace
+  // wholesale adopts server values (user-initiated refresh).
   const seededOnce = useRef(false)
+  const hardRefresh = useRef(false)
   useEffect(() => {
     if (!data?.jobs) return
     if (!seededOnce.current) {
       seed(data.jobs)
       seededOnce.current = true
+    } else if (hardRefresh.current) {
+      replace(data.jobs)
+      hardRefresh.current = false
     } else {
       merge(data.jobs)
     }
-  }, [data?.jobs, seed, merge])
+  }, [data?.jobs, seed, merge, replace])
+
+  // Auto-refresh polling: explicit setInterval rather than React Query's
+  // refetchInterval so we can flag the resulting fetch as a hard refresh
+  // (replace() instead of merge()). Without this flag, polling would go
+  // through merge() which preserves stale store progress — the exact bug
+  // we're fixing.
+  useEffect(() => {
+    if (!autoRefresh) return
+    const id = setInterval(() => {
+      hardRefresh.current = true
+      void refetch()
+    }, refreshInterval)
+    return () => clearInterval(id)
+  }, [autoRefresh, refreshInterval, refetch])
 
   // When a job reaches terminal state: animate out, then remove after delay,
   // and invalidate the history + wanted caches
@@ -264,6 +285,7 @@ export function QueuePage() {
   }
 
   const handleManualRefresh = () => {
+    hardRefresh.current = true
     void refetch()
   }
 

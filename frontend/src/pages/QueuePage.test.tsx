@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest"
-import { render, screen, waitFor, act } from "@testing-library/react"
+import { render, screen, waitFor, act, fireEvent } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { QueuePage } from "./QueuePage"
@@ -27,12 +27,23 @@ vi.mock("@/lib/api", () => ({
 const mockCreateMutate = vi.fn()
 const mockCancelMutate = vi.fn()
 
+// Stable return value for useJobs so tests can mutate `data` between renders
+// (needed to simulate "refetch resolved with new server data"). The mock
+// factory returns this same object reference each render so React's effect
+// deps see the change when `data` is reassigned.
+const mockUseJobsReturn: {
+  data: { jobs: JobResponse[] } | undefined
+  refetch: ReturnType<typeof vi.fn>
+  isFetching: boolean
+} = {
+  data: undefined,
+  refetch: vi.fn(),
+  isFetching: false,
+}
+
 // Mock the hooks
 vi.mock("@/hooks/useJobs", () => ({
-  useJobs: () => ({
-    data: undefined,
-    refetch: vi.fn(),
-  }),
+  useJobs: () => mockUseJobsReturn,
   useCreateJob: () => ({
     mutate: mockCreateMutate,
     isPending: false,
@@ -172,6 +183,11 @@ describe("QueuePage", () => {
       pendingNewCount: 0,
       lastTerminalJobId: null,
     })
+    // Reset useJobs mock state (clearAllMocks alone won't reset the
+    // implementation or data, so reset explicitly).
+    mockUseJobsReturn.data = undefined
+    mockUseJobsReturn.isFetching = false
+    mockUseJobsReturn.refetch = vi.fn()
     vi.clearAllMocks()
   })
 
@@ -436,6 +452,133 @@ describe("QueuePage", () => {
         expect(screen.getByText(/manual #789/i)).toBeInTheDocument()
       })
       expect(screen.queryByText(/Overwrite & retry/i)).not.toBeInTheDocument()
+    })
+  })
+
+  describe("Refresh behavior (hard-refresh path replaces live progress)", () => {
+    // Regression tests for the bug where the manual "Refresh now" button and
+    // the auto-refresh polling toggle showed no visible change: merge()
+    // preserved the store's possibly-stale SSE-driven progress and discarded
+    // the server's fresh values. The fix routes user-initiated refreshes
+    // through replace() instead, which adopts server values wholesale.
+
+    it("manual 'Refresh now' adopts server percent over stale SSE state", async () => {
+      // Initial render: server has job-1 at percent=0.
+      mockUseJobsReturn.data = { jobs: [MOCK_JOB_QUEUED] }
+      const { rerender } = render(<QueuePage />, { wrapper })
+      await waitFor(() => {
+        expect(useJobsStore.getState().jobs["job-1"]).toBeDefined()
+      })
+
+      // SSE pushes percent=42 (ahead of the DB's 0).
+      useJobsStore.getState().apply({
+        event: "progress",
+        job_id: "job-1",
+        percent: 42,
+        stage: "transcribe",
+        message: "SSE-fresh",
+        step_index: null,
+        step_total: null,
+      })
+      expect(useJobsStore.getState().jobs["job-1"].percent).toBe(42)
+
+      // Click "Refresh now" — sets hardRefresh flag and calls refetch.
+      // Crucially, set the fresh server data AFTER the click so the effect
+      // doesn't run prematurely via merge() before hardRefresh is set.
+      fireEvent.click(screen.getByTitle("Refresh now"))
+      expect(mockUseJobsReturn.refetch).toHaveBeenCalledTimes(1)
+      // Same job id as the initial seed; only the progress fields change.
+      mockUseJobsReturn.data = {
+        jobs: [{ ...MOCK_JOB_QUEUED, status: "running", progress_percent: 50 }],
+      }
+      await act(async () => {
+        rerender(<QueuePage />)
+      })
+
+      // replace() must have run, adopting the server's 50 over the store's 42.
+      expect(useJobsStore.getState().jobs["job-1"].percent).toBe(50)
+    })
+
+    it("auto-refresh tick adopts server percent over stale SSE state", async () => {
+      vi.useFakeTimers()
+      try {
+        mockUseJobsReturn.data = { jobs: [MOCK_JOB_QUEUED] }
+        const { rerender } = render(<QueuePage />, { wrapper })
+        // Flush the initial seed effect.
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(0)
+        })
+        expect(useJobsStore.getState().jobs["job-1"]).toBeDefined()
+
+        // SSE pushes percent=42.
+        useJobsStore.getState().apply({
+          event: "progress",
+          job_id: "job-1",
+          percent: 42,
+          stage: "transcribe",
+          message: "SSE-fresh",
+          step_index: null,
+          step_total: null,
+        })
+        expect(useJobsStore.getState().jobs["job-1"].percent).toBe(42)
+
+        // Toggle auto-refresh ON, then set the fresh server data that the
+        // interval's refetch will "return".
+        fireEvent.click(
+          screen.getByTitle("Fallback polling when the live stream is unavailable"),
+        )
+        // Same job id as the initial seed; only the progress fields change.
+        mockUseJobsReturn.data = {
+          jobs: [{ ...MOCK_JOB_QUEUED, status: "running", progress_percent: 50 }],
+        }
+
+        // Advance past the 10s interval. The callback sets hardRefresh=true
+        // and calls refetch() (a vi.fn no-op in the mock, so we must force a
+        // re-render to let the data-update effect see the new data).
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(10_000)
+        })
+        expect(mockUseJobsReturn.refetch).toHaveBeenCalledTimes(1)
+        await act(async () => {
+          rerender(<QueuePage />)
+        })
+        expect(useJobsStore.getState().jobs["job-1"].percent).toBe(50)
+      } finally {
+        vi.useRealTimers()
+      }
+    })
+
+    it("'new' event still preserves live progress of an in-flight job (merge path)", async () => {
+      // This guards against regressing the original 4f75319 fix: a "new"-event
+      // invalidation triggers a refetch, and merge() must preserve the live
+      // SSE progress of an unrelated running job rather than resetting it to
+      // the (slightly stale) DB value.
+      mockUseJobsReturn.data = { jobs: [MOCK_JOB_QUEUED] }
+      render(<QueuePage />, { wrapper })
+      await waitFor(() => {
+        expect(useJobsStore.getState().jobs["job-1"]).toBeDefined()
+      })
+
+      // SSE pushes percent=42 (ahead of the DB's 0).
+      useJobsStore.getState().apply({
+        event: "progress",
+        job_id: "job-1",
+        percent: 42,
+        stage: "transcribe",
+        message: "SSE-fresh",
+        step_index: null,
+        step_total: null,
+      })
+
+      // A "new" event triggers invalidateQueries(["jobs"]); the refetch returns
+      // job-1 still at the DB's stale percent=0 (no hardRefresh flag set).
+      mockUseJobsReturn.data = { jobs: [MOCK_JOB_QUEUED] }
+      await act(async () => {
+        useJobsStore.getState().apply({ event: "new", job_id: "job-new-1" })
+      })
+
+      // merge() must have preserved the SSE-fresh 42, not reset to 0.
+      expect(useJobsStore.getState().jobs["job-1"].percent).toBe(42)
     })
   })
 })

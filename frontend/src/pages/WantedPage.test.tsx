@@ -1,5 +1,5 @@
-import { describe, it, expect, vi, beforeEach } from "vitest"
-import { act, render, screen, waitFor, within } from "@testing-library/react"
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest"
+import { act, fireEvent, render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
@@ -44,12 +44,14 @@ const MOCK_WANTED_EMPTY = {
 }
 
 // POST /api/wanted/refresh only kicks the refresh off; the outcome streams
-// back over SSE (see MockEventSource below), matching the async contract
-// introduced by the progress-bar refresh (data.status "started"/"failed",
-// never "completed" synchronously).
+// back over SSE (see MockEventSource below). The refresh_id in this mock is
+// ignored by the new useWantedRefresh hook: the client generates the id
+// itself, sends it in the POST body, and uses it to filter SSE events.
+// Tests that need to emit refresh_done read the actual id back via
+// lastRefreshIdFromPost() below.
 const MOCK_REFRESH_STARTED = {
   status: "started",
-  refresh_id: "refresh-1",
+  refresh_id: "server-echoed-id",
   movies_processed: 0,
   episodes_processed: 0,
   error: null,
@@ -64,9 +66,10 @@ const MOCK_REFRESH_FAILURE = {
 }
 
 // Minimal EventSource stand-in: jsdom has no native EventSource, and
-// useRefreshProgress opens one against /api/jobs/stream as soon as a refresh
-// starts. Tests that need to observe the post-refresh toast grab the latest
-// instance and call `.emit(...)` to simulate a server-sent frame.
+// useWantedRefresh opens one against /api/jobs/stream as soon as a refresh
+// starts. Tests grab the latest instance and call `.emit(...)` to simulate
+// server-sent frames (including the stream_ready handshake that triggers
+// the POST).
 class MockEventSource {
   static instances: MockEventSource[] = []
   onmessage: ((ev: { data: string }) => void) | null = null
@@ -87,10 +90,10 @@ class MockEventSource {
   }
 
   emit(data: unknown) {
-    // The onmessage handler triggers a React state update (setProgress in
-    // useRefreshProgress); wrap it so React batches/flushes it the same way
-    // it would a real browser event, avoiding an "update not wrapped in
-    // act(...)" warning from these synthetic SSE frames.
+    // The onmessage handler triggers React state updates (setProgress in
+    // useWantedRefresh); wrap it so React batches/flushes it the same way
+    // it would a real browser event, avoiding "update not wrapped in
+    // act(...)" warnings from these synthetic SSE frames.
     act(() => {
       this.onmessage?.({ data: JSON.stringify(data) })
     })
@@ -99,6 +102,21 @@ class MockEventSource {
 
 // @ts-expect-error test-only polyfill for an API jsdom doesn't implement
 global.EventSource = MockEventSource
+
+// Extract the client-generated refresh_id from the most recent
+// POST /api/wanted/refresh call. The hook generates a UUID client-side and
+// sends it in the body; tests need it to address SSE frames to the right
+// subscription filter inside useWantedRefresh.
+function lastRefreshIdFromPost(): string {
+  const calls = vi.mocked(api.post).mock.calls
+  for (let i = calls.length - 1; i >= 0; i--) {
+    const [path, body] = calls[i]
+    if (path === "/api/wanted/refresh") {
+      return (body as { refresh_id?: string }).refresh_id!
+    }
+  }
+  throw new Error("No /api/wanted/refresh POST found")
+}
 
 function wrapper({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({
@@ -145,9 +163,9 @@ describe("WantedPage - Refresh Wanted List", () => {
     // Click the button
     await user.click(screen.getByText("Refresh"))
 
-    // Should show loading state and disable button once the POST resolves
-    // and useRefreshProgress picks up the returned refresh_id.
-    resolveRefresh!(MOCK_REFRESH_STARTED)
+    // Should show loading state and disable button once the user clicks -
+    // the hook sets progress.active=true synchronously in start(), before
+    // the POST is even issued.
     await waitFor(() => {
       const button = screen.getByText("Refreshing...")
       expect(button).toBeInTheDocument()
@@ -165,7 +183,7 @@ describe("WantedPage - Refresh Wanted List", () => {
     })
     await user.click(screen.getByText("Refresh"))
 
-    // Should show loading state as soon as the started response is picked up
+    // Should show loading state as soon as the user clicks.
     await waitFor(() => {
       expect(screen.getByText("Refreshing...")).toBeInTheDocument()
     })
@@ -185,10 +203,21 @@ describe("WantedPage - Refresh Wanted List", () => {
       expect(screen.getByText("Refreshing...")).toBeInTheDocument()
     })
 
-    // The backend streams the outcome over SSE; simulate the final frame.
+    // The hook waits for stream_ready before POSTing so it can't miss
+    // refresh_done on a fast refresh (race fix). Emit the handshake, then
+    // the terminal frame addressed to whatever id the client generated.
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
+    await waitFor(() => {
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/wanted/refresh",
+        expect.objectContaining({ item_type: "all" }),
+      )
+    })
+
     MockEventSource.latest()!.emit({
       event: "refresh_done",
-      refresh_id: "refresh-1",
+      refresh_id: lastRefreshIdFromPost(),
       status: "completed",
       movies_processed: 5,
       episodes_processed: 3,
@@ -210,7 +239,14 @@ describe("WantedPage - Refresh Wanted List", () => {
     })
     await user.click(screen.getByText("Refresh"))
 
-    // Wait for the refresh to fail and error to be processed
+    // The POST only fires after stream_ready arrives - emit it so the
+    // mocked failure response is processed without waiting for the
+    // 5s ready-timeout fallback.
+    await waitFor(() => {
+      expect(MockEventSource.latest()).toBeDefined()
+    })
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled()
     })
@@ -457,6 +493,215 @@ describe("WantedPage - Transcribe Dialog language selection", () => {
   })
 })
 
+describe("WantedPage - Refresh race & watchdog regressions", () => {
+  // These tests cover the failure mode that motivated the rewrite:
+  // the old useRefreshProgress hook opened its EventSource AFTER POSTing,
+  // so a fast refresh could publish refresh_done before pubsub.subscribe
+  // completed and the UI would hang on "Refreshing..." forever. The new
+  // useWantedRefresh hook waits for stream_ready before POSTing and falls
+  // back to GET /api/wanted/refresh/{id} if SSE goes silent for 30s.
+
+  beforeEach(() => {
+    vi.clearAllMocks()
+    MockEventSource.reset()
+    vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
+  })
+
+  afterEach(() => {
+    // Defensive: ensure fake timers never leak into the next test even if
+    // an assertion throws before the cleanup runs.
+    vi.useRealTimers()
+  })
+
+  it("stream_ready is emitted before POST /api/wanted/refresh (subscribe-first)", async () => {
+    // Regression: the POST must not fire until stream_ready arrives. If it
+    // fires earlier, the original race (events published before subscribe)
+    // is reintroduced.
+    const user = userEvent.setup()
+    let resolvePost: (v: typeof MOCK_REFRESH_STARTED) => void
+    const pending = new Promise<typeof MOCK_REFRESH_STARTED>((r) => {
+      resolvePost = r
+    })
+    vi.mocked(api.post).mockReturnValue(pending)
+
+    render(<WantedPage />, { wrapper })
+    await waitFor(() => screen.getByText("Refresh"))
+    await user.click(screen.getByText("Refresh"))
+
+    // No POST before stream_ready.
+    expect(vi.mocked(api.post)).not.toHaveBeenCalled()
+
+    await waitFor(() => MockEventSource.latest() !== undefined)
+
+    // stream_ready arrives -> POST fires immediately.
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+    await waitFor(() => {
+      expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+        "/api/wanted/refresh",
+        expect.objectContaining({ item_type: "all" }),
+      )
+    })
+
+    // Finalize so the test ends cleanly.
+    resolvePost!(MOCK_REFRESH_STARTED)
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: lastRefreshIdFromPost(),
+      status: "completed",
+      movies_processed: 1,
+      episodes_processed: 0,
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalled()
+    })
+  })
+
+  it("happy path: refresh_progress frames advance the bar before refresh_done", async () => {
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+    await waitFor(() => screen.getByText("Refresh"))
+    await user.click(screen.getByText("Refresh"))
+
+    await waitFor(() => MockEventSource.latest() !== undefined)
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
+    const id = await waitFor(() => lastRefreshIdFromPost())
+
+    // Two intermediate progress frames should each advance processed/total.
+    MockEventSource.latest()!.emit({
+      event: "refresh_progress",
+      refresh_id: id,
+      processed: 1,
+      total: 3,
+      percent: 33,
+      stage: "refreshing wanted",
+    })
+    await waitFor(() => {
+      expect(screen.getByText("1 / 3")).toBeInTheDocument()
+    })
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_progress",
+      refresh_id: id,
+      processed: 2,
+      total: 3,
+      percent: 67,
+      stage: "refreshing wanted",
+    })
+    await waitFor(() => {
+      expect(screen.getByText("2 / 3")).toBeInTheDocument()
+    })
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: id,
+      status: "completed",
+      movies_processed: 2,
+      episodes_processed: 1,
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 3 items")
+    })
+  })
+
+  it("watchdog recovers from a missed refresh_done via GET status endpoint", async () => {
+    // Simulates the original race: stream_ready is emitted, the POST
+    // succeeds, but no refresh_done ever arrives (e.g. EventSource dropped
+    // mid-stream). After 30s the watchdog must GET the persisted-state
+    // endpoint and finalize from the snapshot.
+    //
+    // Uses fireEvent (not userEvent) because userEvent's internal delays
+    // don't play well with fake timers; fireEvent.click is synchronous.
+    vi.useFakeTimers()
+
+    // GET /api/wanted/refresh/{id} - mock returns the terminal snapshot.
+    // The request URL contains the client's refresh_id; echo it back so
+    // the hook's filter logic is happy.
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/wanted/refresh/")) {
+        return {
+          refresh_id: path.split("/").pop()!,
+          status: "completed" as const,
+          processed: 7,
+          total: null,
+          percent: 100,
+          stage: "done",
+          movies_processed: 4,
+          episodes_processed: 3,
+          error: null,
+          updated_at: "2026-01-01T00:00:00Z",
+        }
+      }
+      return MOCK_WANTED_EMPTY
+    })
+
+    render(<WantedPage />, { wrapper })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"))
+    })
+
+    // Drain initial render + EventSource construction.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(MockEventSource.latest()).toBeDefined()
+
+    // stream_ready triggers doPost() synchronously inside emit's act().
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+    // Flush the POST resolution + watchdog arming.
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(api.post)).toHaveBeenCalledWith(
+      "/api/wanted/refresh",
+      expect.objectContaining({ item_type: "all" }),
+    )
+
+    // Advance past the watchdog threshold without delivering any SSE events.
+    // advanceTimersByTimeAsync also flushes the microtask chain that the
+    // watchdog's `await api.get(...)` runs on.
+    await vi.advanceTimersByTimeAsync(31_000)
+
+    expect(vi.mocked(api.get)).toHaveBeenCalledWith(
+      expect.stringMatching(/\/api\/wanted\/refresh\/[0-9a-f-]+/),
+    )
+    expect(toast.success).toHaveBeenCalledWith("Refreshed 7 items")
+
+    vi.useRealTimers()
+  })
+
+  it("watchdog surfaces an error when status endpoint returns 404", async () => {
+    // Same race scenario but the persisted state has expired (TTL elapsed)
+    // or never existed. The hook must surface a clear error and reset so
+    // the user can retry, rather than hang.
+    vi.useFakeTimers()
+
+    vi.mocked(api.get).mockRejectedValue(new ApiError(404, "expired"))
+
+    render(<WantedPage />, { wrapper })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"))
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(MockEventSource.latest()).toBeDefined()
+
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(api.post)).toHaveBeenCalled()
+
+    await vi.advanceTimersByTimeAsync(31_000)
+
+    expect(toast.error).toHaveBeenCalledWith("Refresh status unknown, please retry")
+
+    // Flush the resetToIdle() state update that runs after the toast.
+    await vi.advanceTimersByTimeAsync(0)
+
+    // UI must reset to idle so the user can retry.
+    expect(screen.getByText("Refresh")).toBeInTheDocument()
+
+    vi.useRealTimers()
+  })
+})
+
+
 describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()
@@ -477,15 +722,21 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
     await user.click(screen.getByText("Refresh"))
 
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "movie" })
+      expect(MockEventSource.latest()).toBeDefined()
     })
+    // stream_ready triggers the POST (subscribe-first protocol).
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
     await waitFor(() => {
-      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/wanted/refresh",
+        expect.objectContaining({ item_type: "movie" }),
+      )
     })
 
     MockEventSource.latest()!.emit({
       event: "refresh_done",
-      refresh_id: "refresh-1",
+      refresh_id: lastRefreshIdFromPost(),
       status: "completed",
       movies_processed: 5,
       episodes_processed: 0,
@@ -508,15 +759,20 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
     await user.click(screen.getByText("Refresh"))
 
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "episode" })
+      expect(MockEventSource.latest()).toBeDefined()
     })
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
     await waitFor(() => {
-      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/wanted/refresh",
+        expect.objectContaining({ item_type: "episode" }),
+      )
     })
 
     MockEventSource.latest()!.emit({
       event: "refresh_done",
-      refresh_id: "refresh-1",
+      refresh_id: lastRefreshIdFromPost(),
       status: "completed",
       movies_processed: 0,
       episodes_processed: 3,
@@ -538,15 +794,20 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
     await user.click(screen.getByText("Refresh"))
 
     await waitFor(() => {
-      expect(api.post).toHaveBeenCalledWith("/api/wanted/refresh", { item_type: "all" })
+      expect(MockEventSource.latest()).toBeDefined()
     })
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
     await waitFor(() => {
-      expect(screen.getByText("Refreshing...")).toBeInTheDocument()
+      expect(api.post).toHaveBeenCalledWith(
+        "/api/wanted/refresh",
+        expect.objectContaining({ item_type: "all" }),
+      )
     })
 
     MockEventSource.latest()!.emit({
       event: "refresh_done",
-      refresh_id: "refresh-1",
+      refresh_id: lastRefreshIdFromPost(),
       status: "completed",
       movies_processed: 5,
       episodes_processed: 3,
