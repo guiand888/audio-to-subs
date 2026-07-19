@@ -179,12 +179,19 @@ export function AppLayout() {
                   <PanelLeftClose className="h-4 w-4" />
                 )}
               </Button>
-              <span className="text-sm text-muted-foreground">
-                {user.username}
-              </span>
             </div>
-            <div className="flex items-center gap-1">
+            <div className="flex items-center gap-2">
               <ThemeToggle />
+              <div className="flex items-center gap-2">
+                <span
+                  className="flex h-7 w-7 flex-none items-center justify-center rounded-full bg-primary text-xs font-medium text-primary-foreground"
+                  title={user.username}
+                  aria-label={user.username}
+                >
+                  {user.username.charAt(0).toUpperCase()}
+                </span>
+                <span className="text-sm">{user.username}</span>
+              </div>
               <Button
                 variant="ghost"
                 size="sm"

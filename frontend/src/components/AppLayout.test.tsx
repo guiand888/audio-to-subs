@@ -158,4 +158,14 @@ describe("AppLayout - collapsible sidebar", () => {
       screen.getByRole("button", { name: "Expand sidebar" }),
     ).toBeInTheDocument()
   })
+
+  it("renders the username as an avatar + name on the topbar right, not beside the toggle", () => {
+    render(<AppLayout />)
+    // Avatar shows the uppercased initial
+    expect(screen.getByText("T")).toBeInTheDocument()
+    // Username still present as text
+    expect(screen.getByText("tester")).toBeInTheDocument()
+    // Avatar carries the username for a11y/tooltip
+    expect(screen.getByLabelText("tester")).toBeInTheDocument()
+  })
 })
