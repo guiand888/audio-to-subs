@@ -146,10 +146,7 @@ describe("WantedPage - Refresh Wanted List", () => {
 
   it("Refresh button is disabled during refresh", async () => {
     const user = userEvent.setup()
-    let resolveRefresh: (value: typeof MOCK_REFRESH_STARTED) => void
-    const refreshPromise = new Promise<typeof MOCK_REFRESH_STARTED>((resolve) => {
-      resolveRefresh = resolve
-    })
+    const refreshPromise = new Promise<typeof MOCK_REFRESH_STARTED>(() => {})
     vi.mocked(api.post).mockReturnValue(refreshPromise)
 
     render(<WantedPage />, { wrapper })
