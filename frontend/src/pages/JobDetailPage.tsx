@@ -54,7 +54,7 @@ function Field({ label, value }: { label: string; value: ReactNode }) {
 }
 
 export function JobDetailPage() {
-  const { jobId } = useParams({ from: "/jobs/$jobId" })
+  const { jobId } = useParams({ from: "/layout/jobs/$jobId" })
   const timezone = useTimezoneSetting()
   const jobQuery = useJob(jobId)
   const logsQuery = useJobLogs(jobId)
