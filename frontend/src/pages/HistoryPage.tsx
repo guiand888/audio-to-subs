@@ -72,6 +72,12 @@ function isOutputExists(job: JobResponse): boolean {
   )
 }
 
+// Language detection failed (auto mode resolved to "und"), so the job needs a
+// manual language rename from the History page.
+function needsLanguageRename(job: JobResponse): boolean {
+  return job.needs_language_review
+}
+
 // Build a JobCreate that re-runs an existing job (used for the overwrite retry).
 function buildRetry(job: JobResponse): JobCreate {
   return {
@@ -481,28 +487,40 @@ export function HistoryPage() {
                           {formatDateTime(job.created_at, timezone ?? undefined)}
                         </TableCell>
                         <TableCell className="p-3 whitespace-nowrap">
-                          {/* M6.g: "Overwrite and retry" for jobs the worker
-                              refused to overwrite. */}
-                          {isOutputExists(job) && (
-                            <Button
-                              size="sm"
-                              variant="outline"
-                              disabled={createJob.isPending}
-                              onClick={() =>
-                                createJob.mutate(buildRetry(job), {
-                                  onSuccess: () => toast.success("Job queued"),
-                                  onError: (err) =>
-                                    toast.error(
-                                      err instanceof ApiError
-                                        ? err.message
-                                        : "Failed to queue job",
-                                    ),
-                                })
-                              }
-                            >
-                              {createJob.isPending ? "Queuing…" : "Overwrite & retry"}
-                            </Button>
-                          )}
+                          <div className="flex flex-wrap gap-2">
+                            {/* M6.g: "Overwrite and retry" for jobs the worker
+                                refused to overwrite. */}
+                            {isOutputExists(job) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                disabled={createJob.isPending}
+                                onClick={() =>
+                                  createJob.mutate(buildRetry(job), {
+                                    onSuccess: () => toast.success("Job queued"),
+                                    onError: (err) =>
+                                      toast.error(
+                                        err instanceof ApiError
+                                          ? err.message
+                                          : "Failed to queue job",
+                                      ),
+                                  })
+                                }
+                              >
+                                {createJob.isPending ? "Queuing…" : "Overwrite & retry"}
+                              </Button>
+                            )}
+                            {/* Rename the language when detection failed. */}
+                            {needsLanguageRename(job) && (
+                              <Button
+                                size="sm"
+                                variant="outline"
+                                onClick={() => setReviewJob(job)}
+                              >
+                                Rename
+                              </Button>
+                            )}
+                          </div>
                         </TableCell>
                       </TableRow>
                     ))}
