@@ -42,7 +42,7 @@
           source "$VENV_DIR/bin/activate"
 
           REQ_HASH_FILE="$VENV_DIR/.deps.sha256"
-          CURRENT_HASH="$(cat "$REPO_ROOT/requirements.txt" "$REPO_ROOT/requirements-dev.txt" "$REPO_ROOT/pyproject.toml" 2>/dev/null | sha256sum | cut -d' ' -f1)"
+          CURRENT_HASH="$(cat "$REPO_ROOT/requirements.txt" "$REPO_ROOT/requirements-dev.txt" "$REPO_ROOT/pyproject.toml" "$REPO_ROOT/VERSION" 2>/dev/null | sha256sum | cut -d' ' -f1)"
           if [ ! -f "$REQ_HASH_FILE" ] || [ "$(cat "$REQ_HASH_FILE")" != "$CURRENT_HASH" ]; then
             echo "[nix develop] installing/updating Python dependencies (requirements-dev.txt + editable package)"
             pip install --quiet --upgrade pip

@@ -1,10 +1,9 @@
 # Build stage
 FROM docker.io/library/node:24-alpine AS build
 WORKDIR /app
-# App version baked into the bundle (Vite define reads process.env at build).
-# Sourced from the compose build arg (APP_VERSION → VITE_APP_VERSION).
-ARG VITE_APP_VERSION=dev
-ENV VITE_APP_VERSION=${VITE_APP_VERSION}
+# The app version is NOT baked into the bundle. The UI resolves it at runtime
+# from the backend's GET /api/version (which is itself derived from the
+# repo-root VERSION file), so no build arg is needed here.
 COPY package.json package-lock.json ./
 RUN npm ci
 COPY . .

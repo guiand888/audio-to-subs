@@ -4,10 +4,8 @@
 ARG USER_UID=1000
 ARG USER_GID=1000
 
-# Application version (single source of truth: repo-root VERSION / .env
-# APP_VERSION, passed as a compose build arg). Baked into the image below so
-# audio_to_subs.__version__ and GET /api/version report the running release.
-ARG APP_VERSION=unknown
+# Application version is baked at build time from the repo-root VERSION file
+# (via setup.py -> package metadata). No build arg / env var is required.
 
 # Stage 1: Builder
 FROM docker.io/library/python:3.11.9-alpine3.19 AS builder
@@ -24,13 +22,14 @@ WORKDIR /build
 
 # Copy dependency files
 COPY requirements.txt ./
+COPY VERSION ./
 
 # Install dependencies to temporary location
 RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
 
 # Copy application source
 COPY audio_to_subs/ ./audio_to_subs/
-COPY pyproject.toml ./
+COPY pyproject.toml setup.py ./
 
 # Install application
 RUN pip install --no-cache-dir --prefix=/install .
@@ -41,11 +40,6 @@ FROM docker.io/library/python:3.11.9-alpine3.19
 # Build arguments for user configuration
 ARG USER_UID=1000
 ARG USER_GID=1000
-
-# Re-declare in this stage (ARGs before the first FROM aren't inherited) and
-# persist as an env var so the app reads it at runtime.
-ARG APP_VERSION=unknown
-ENV APP_VERSION=${APP_VERSION}
 
 # Install only runtime dependencies
 RUN apk add --no-cache \
@@ -60,7 +54,7 @@ COPY --from=builder /install /usr/local
 
 # Copy application source
 COPY audio_to_subs/ /app/audio_to_subs/
-COPY pyproject.toml alembic.ini /app/
+COPY pyproject.toml setup.py VERSION alembic.ini /app/
 
 # Set working directory
 WORKDIR /app

@@ -11,13 +11,13 @@ from pathlib import Path
 
 import click
 
+from audio_to_subs import __version__
 from audio_to_subs.core.config_parser import ConfigError, ConfigParser
 from audio_to_subs.core.logging_config import configure_logging
 from audio_to_subs.core.pipeline import Pipeline, PipelineError
 
 logger = logging.getLogger(__name__)
 
-__version__ = "0.1.0"
 
 #: Supported subtitle output formats
 SUPPORTED_FORMATS = ["srt", "vtt", "webvtt", "sbv"]
