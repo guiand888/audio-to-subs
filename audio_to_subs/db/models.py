@@ -9,6 +9,8 @@ from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
 from uuid import uuid4
 
+from audio_to_subs.core.ids import generate_job_id
+
 from sqlalchemy import (
     Boolean,
     CheckConstraint,
@@ -99,7 +101,7 @@ class Job(Base):
     __tablename__ = "jobs"
 
     id: Mapped[str] = mapped_column(
-        String(36), primary_key=True, default=lambda: str(uuid4()), unique=True
+        String(36), primary_key=True, default=generate_job_id, unique=True
     )
     status: Mapped[JobStatus] = mapped_column(
         String(20), nullable=False, default=JobStatus.QUEUED

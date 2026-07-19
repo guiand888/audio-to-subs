@@ -9,8 +9,6 @@ import logging
 from collections.abc import Awaitable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
-from uuid import UUID
-
 from fastapi import HTTPException, status
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
@@ -49,11 +47,11 @@ class UTCAwareModel(BaseModel):
         return self
 
 
-async def get_job_or_404(db: "AsyncSession", job_id: UUID) -> Job:
+async def get_job_or_404(db: "AsyncSession", job_id: str) -> Job:
     """Fetch a Job by id, or raise 404 if it doesn't exist.
 
     Job.id is a String(36) column; job_id is always converted to str for
-    the comparison regardless of the caller's UUID/str type.
+    the comparison regardless of the caller's str type.
     """
     result = await db.execute(select(Job).where(Job.id == str(job_id)))
     job = result.scalar_one_or_none()

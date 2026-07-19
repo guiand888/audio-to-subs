@@ -13,7 +13,6 @@ the per-test file DB.  Tests that only need a raw SQLAlchemy session can use
 
 from collections.abc import Generator
 from unittest.mock import MagicMock, patch
-from uuid import uuid4
 
 import pytest
 from sqlalchemy import create_engine
@@ -175,10 +174,11 @@ def make_job(**kwargs):
       - audio_duration_seconds: float
       - estimated_cost_usd: float
     """
+    from audio_to_subs.core.ids import generate_job_id
     from audio_to_subs.db.models import Job, JobSource, JobStatus
 
     defaults = {
-        "id": str(uuid4()),
+        "id": generate_job_id(),
         "status": JobStatus.DONE,
         "source": JobSource.MANUAL,
         "media_path": "/test/video.mp4",

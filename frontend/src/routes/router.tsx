@@ -13,6 +13,7 @@ import { QueuePage } from "@/pages/QueuePage"
 import { HistoryPage } from "@/pages/HistoryPage"
 import { LogsPage } from "@/pages/LogsPage"
 import { SettingsPage } from "@/pages/SettingsPage"
+import { JobDetailPage } from "@/pages/JobDetailPage"
 
 // ── Root ─────────────────────────────────────────────────────────────────────
 
@@ -99,6 +100,12 @@ const settingsRoute = createRoute({
   component: SettingsPage,
 })
 
+const jobDetailRoute = createRoute({
+  getParentRoute: () => layoutRoute,
+  path: "/jobs/$jobId",
+  component: JobDetailPage,
+})
+
 // ── Tree ─────────────────────────────────────────────────────────────────────
 
 const routeTree = rootRoute.addChildren([
@@ -110,6 +117,7 @@ const routeTree = rootRoute.addChildren([
     historyRoute,
     logsRoute,
     settingsRoute,
+    jobDetailRoute,
   ]),
 ])
 

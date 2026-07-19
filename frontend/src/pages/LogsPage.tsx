@@ -3,6 +3,7 @@
 
 import { useState } from "react"
 import { RefreshCw, ChevronLeft, ChevronRight } from "lucide-react"
+import { Link } from "@tanstack/react-router"
 
 import { useLogs } from "@/hooks/useLogs"
 import { useTimezoneSetting, formatDateTime } from "@/lib/datetime"
@@ -256,16 +257,14 @@ export function LogsPage() {
                         </TableCell>
                         <TableCell className="p-3 whitespace-nowrap">
                           {log.job_id ? (
-                            <a
-                              href={`#/queue?job_id=${log.job_id}`}
+                            <Link
+                              to="/jobs/$jobId"
+                              params={{ jobId: log.job_id }}
                               className="text-primary underline"
-                              onClick={(e) => {
-                                e.preventDefault()
-                                // Could navigate to queue with filter
-                              }}
+                              title={log.job_id}
                             >
-                              {log.job_id.slice(0, 8)}...
-                            </a>
+                              {log.job_id}
+                            </Link>
                           ) : (
                             "—"
                           )}

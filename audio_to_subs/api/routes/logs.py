@@ -2,7 +2,6 @@
 
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Annotated
-from uuid import UUID
 
 from fastapi import APIRouter, Depends, Query, Request, status
 from pydantic import BaseModel, Field
@@ -28,7 +27,7 @@ class JobLogResponse(UTCAwareModel):
     model_config = {"from_attributes": True}
 
     id: int
-    job_id: UUID | None  # nullable — global logs have no associated job
+    job_id: str | None  # nullable — global logs have no associated job
     ts: datetime
     level: LogLevel
     message: str
@@ -43,7 +42,7 @@ class JobLogsResponse(BaseModel):
 
 @jobs_logs_router.get("/{job_id}/logs", response_model=JobLogsResponse)
 async def get_job_logs(
-    job_id: UUID,
+    job_id: str,
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
     limit: int = 100,
@@ -88,7 +87,7 @@ async def get_job_logs(
     status_code=status.HTTP_201_CREATED,
 )
 async def create_job_log(
-    job_id: UUID,
+    job_id: str,
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
     # Required query param. Written as ``Annotated[str, Query()]`` (no ``= ...``
@@ -135,7 +134,7 @@ class GlobalLogsResponse(BaseModel):
 async def get_global_logs(
     request: Request,
     db: Annotated["AsyncSession", Depends(get_db)],
-    job_id: UUID | None = None,
+    job_id: str | None = None,
     level_filter: LogLevel | None = None,
     since: datetime | None = None,
     until: datetime | None = None,
