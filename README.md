@@ -40,7 +40,11 @@ The original CLI functionality is preserved - you can still run one-off transcri
 
 ## Install
 
-### Container (Recommended)
+### Container
+
+#### Inline
+
+One-off conversion of a single file, no persistent web app:
 
 1. **Set API key:**
    ```bash
@@ -55,18 +59,11 @@ The original CLI functionality is preserved - you can still run one-off transcri
      parolesub:latest -i /input/video.mp4 -o /output/video.srt
    ```
 
-### Local development (`nix develop`)
-```bash
-git clone https://github.com/guiand888/parolesub.git
-cd parolesub
-nix develop   # bootstraps a .venv (gitignored) and installs deps automatically
-export MISTRAL_API_KEY=your_api_key
-parolesub -i video.mp4 -o subtitles.srt
-```
+#### Compose (Docker or Podman) - Recommended
 
-### Web Application Deployment
+For the full web application with Bazarr integration.
 
-For the full web application with Bazarr integration, using native Podman secrets:
+**Podman**, using native Podman secrets:
 
 1. Set required secrets:
    ```bash
@@ -92,6 +89,15 @@ docker compose -f docker-compose.docker.yml up -d --build
 
 Do not merge it with `docker-compose.yml` — run one or the other.
 
+### Local development (`nix develop`)
+```bash
+git clone https://github.com/guiand888/parolesub.git
+cd parolesub
+nix develop   # bootstraps a .venv (gitignored) and installs deps automatically
+export MISTRAL_API_KEY=your_api_key
+parolesub -i video.mp4 -o subtitles.srt
+```
+
 ## Security
 
 ParoleSub does not terminate TLS itself; it expects to sit behind a reverse
@@ -106,7 +112,7 @@ ParoleSub is primarily used through its web application. The CLI commands below 
 
 ### Web Application Workflow
 
-1. **Setup**: Deploy using the container method above
+1. **Setup**: Deploy using the Compose method above
 2. **Configuration**: Configure Bazarr URL and API key in Settings
 3. **Detection**: Bazarr integration automatically detects media missing subtitles
 4. **Queue**: Items appear in the Wanted list in the web UI
