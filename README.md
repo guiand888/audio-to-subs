@@ -1,18 +1,26 @@
 # ParoleSub
 
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/parolesub-lockup-dark.png">
+    <img src="assets/logo/parolesub-lockup-light.png" alt="ParoleSub" width="360">
+  </picture>
+</p>
+
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![standard-readme compliant](https://img.shields.io/badge/readme-standard-brightgreen.svg)](https://github.com/RichardLitt/standard-readme)
 [![Python 3.9+](https://img.shields.io/badge/python-3.9+-blue.svg)](https://www.python.org/downloads/)
 ![Coverage](https://raw.githubusercontent.com/guiand888/parolesub/badges/coverage.svg)
 [![Tests](https://github.com/guiand888/parolesub/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/parolesub/actions/workflows/tests.yml)
 
-<img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" /> Convert video audio to subtitles using Mistral Voxtral Mini transcription.
+Convert video audio to subtitles using AI transcription models.
 
 ![ParoleSub frontend screenshot](docs/assets/screenshot-frontpage.png)
 
 ## Table of Contents
 
 - [Background](#background)
+- [Supported Models](#supported-models)
 - [Install](#install)
 - [Security](#security)
 - [Usage](#usage)
@@ -24,6 +32,11 @@
 ParoleSub is a self-hosted web application that automates video transcription for media libraries. It integrates with Bazarr to detect missing subtitles, queues transcription jobs, and processes them using Mistral's Voxtral Mini model. The system includes a web UI for monitoring progress, viewing history, and managing settings.
 
 The original CLI functionality is preserved - you can still run one-off transcriptions from the command line while the web application handles automated workflows.
+
+## Supported Models
+
+- <img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" /> Mistral — Voxtral Mini (current)
+- More to come
 
 ## Install
 
