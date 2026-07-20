@@ -11,7 +11,6 @@ from audio_to_subs.api.settings import Settings, get_settings
 from audio_to_subs.auth.deps import get_current_user, get_db, get_optional_user
 from audio_to_subs.db.models import User
 
-
 __all__ = [
     "get_settings_dep",
     "get_redis",
