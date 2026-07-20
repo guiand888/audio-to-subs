@@ -1,4 +1,9 @@
-# parolesub
+<p align="center">
+  <picture>
+    <source media="(prefers-color-scheme: dark)" srcset="assets/logo/parolesub-lockup-dark.png">
+    <img src="assets/logo/parolesub-lockup-light.png" alt="ParoleSub" width="360">
+  </picture>
+</p>
 
 [![License: AGPL v3](https://img.shields.io/badge/License-AGPL_v3-blue.svg)](https://www.gnu.org/licenses/agpl-3.0)
 [![standard-readme compliant](https://img.shields.io/badge/readme-standard-brightgreen.svg)](https://github.com/RichardLitt/standard-readme)
@@ -6,27 +11,38 @@
 ![Coverage](https://raw.githubusercontent.com/guiand888/parolesub/badges/coverage.svg)
 [![Tests](https://github.com/guiand888/parolesub/actions/workflows/tests.yml/badge.svg)](https://github.com/guiand888/parolesub/actions/workflows/tests.yml)
 
-Convert video audio to subtitles using Mistral Voxtral Mini transcription.
+Convert video audio to subtitles using AI transcription models.
 
-![parolesub frontend screenshot](docs/assets/screenshot-frontpage.png)
+![ParoleSub frontend screenshot](docs/assets/screenshot-frontpage.png)
 
 ## Table of Contents
 
 - [Background](#background)
+- [Supported Models](#supported-models)
 - [Install](#install)
+- [Security](#security)
 - [Usage](#usage)
 - [Contributing](#contributing)
 - [License](#license)
 
 ## Background
 
-parolesub is a self-hosted web application that automates video transcription for media libraries. It integrates with Bazarr to detect missing subtitles, queues transcription jobs, and processes them using Mistral's Voxtral Mini model. The system includes a web UI for monitoring progress, viewing history, and managing settings.
+ParoleSub is a self-hosted web application that automates video transcription for media libraries. It integrates with Bazarr to detect missing subtitles, queues transcription jobs, and processes them using Mistral's Voxtral Mini model. The system includes a web UI for monitoring progress, viewing history, and managing settings.
 
 The original CLI functionality is preserved - you can still run one-off transcriptions from the command line while the web application handles automated workflows.
 
+## Supported Models
+
+- <img src="https://upload.wikimedia.org/wikipedia/commons/e/e6/Mistral_AI_logo_%282025%E2%80%93%29.svg" alt="Mistral" width="20" height="20" /> Mistral — Voxtral Mini (current)
+- More to come
+
 ## Install
 
-### Container (Recommended)
+### Container
+
+#### Inline
+
+One-off conversion of a single file, no persistent web app:
 
 1. **Set API key:**
    ```bash
@@ -41,52 +57,70 @@ The original CLI functionality is preserved - you can still run one-off transcri
      parolesub:latest -i /input/video.mp4 -o /output/video.srt
    ```
 
-### Local development (`nix develop`)
-```bash
-git clone https://github.com/guiand888/parolesub.git
-cd parolesub
-nix develop   # bootstraps a .venv and installs deps automatically
-export MISTRAL_API_KEY=your_api_key
-parolesub -i video.mp4 -o subtitles.srt
-```
+#### Compose (Docker or Podman) - Recommended
 
-### Web Application Deployment
+For the full web application with Bazarr integration.
 
-For the full web application with Bazarr integration:
+**Podman**, using native Podman secrets:
 
-1. Create an external media volume:
+1. Set required secrets:
    ```bash
-   docker volume create media
+   echo -n "yourStrongPass!" | podman secret create admin_password -
+   echo -n "your-mistral-key" | podman secret create mistral_api_key -
    ```
 
-2. Create secret files:
-   ```bash
-   mkdir -p .secrets && chmod 700 .secrets
-   echo "your-mistral-key"  > .secrets/mistral_api_key
-   echo "your-bazarr-key"   > .secrets/bazarr_api_key
-   openssl rand -hex 32     > .secrets/session_secret
-   echo "yourStrongPass!"   > .secrets/admin_password
-   chmod 600 .secrets/*
-   ```
+2. (Optional) Copy `.env.example` to `.env` to override defaults such as `ADMIN_USERNAME` — compose loads it automatically, no `export` needed.
 
-3. Set environment variables:
-   ```bash
-   export BAZARR_URL="http://bazarr.lan:6767"
-   export PATH_MAPPINGS_JSON='[{"/data/media","/mnt/media"}]'
-   export ADMIN_USERNAME="admin"
-   export FRONTEND_PORT=8080
-   ```
-
-4. Bring up the stack:
+3. Bring up the stack:
    ```bash
    podman compose up -d
    ```
 
-5. Visit http://localhost:8080 and log in as admin.
+4. Visit http://localhost:8080, log in as admin, then set the Bazarr URL and API key under Settings.
+
+**Docker** is also supported, via `docker-compose.docker.yml`, a standalone variant that reads `ADMIN_PASSWORD`/`MISTRAL_API_KEY` from a plaintext `.env` file instead of Podman secrets:
+
+```bash
+cp .env.example .env   # set ADMIN_PASSWORD and MISTRAL_API_KEY
+docker compose -f docker-compose.docker.yml up -d --build
+```
+
+Do not merge it with `docker-compose.yml` — run one or the other.
+
+### Local development (`nix develop`)
+```bash
+git clone https://github.com/guiand888/parolesub.git
+cd parolesub
+nix develop   # bootstraps a .venv (gitignored) and installs deps automatically
+export MISTRAL_API_KEY=your_api_key
+parolesub -i video.mp4 -o subtitles.srt
+```
+
+## Security
+
+ParoleSub does not terminate TLS itself; it expects to sit behind a reverse
+proxy for any exposure beyond localhost. A ready-to-use [`Caddyfile`](Caddyfile)
+is included for this — point Caddy at it for automatic Let's Encrypt HTTPS in
+front of the frontend's port 8080. Set `BEHIND_TLS=true` in `.env` once a proxy
+is in front, so the session cookie gets the `Secure` flag.
 
 ## Usage
 
-### Single Video (CLI)
+ParoleSub is primarily used through its web application. The CLI commands below are optional, for one-off or advanced transcriptions.
+
+### Web Application Workflow
+
+1. **Setup**: Deploy using the Compose method above
+2. **Configuration**: Configure Bazarr URL and API key in Settings
+3. **Detection**: Bazarr integration automatically detects media missing subtitles
+4. **Queue**: Items appear in the Wanted list in the web UI
+5. **Process**: Click "Transcribe" to queue jobs for automatic processing
+6. **Monitor**: Watch progress in the Queue page with live updates
+7. **Complete**: Finished jobs appear in History with cost tracking
+
+The Bazarr poller runs automatically and updates the Wanted list. When the "Track Items with No Subtitles" setting is enabled, it will also show items with no subtitles in any language.
+
+### Single Video (CLI, optional)
 
 ```bash
 # Basic (SRT)
@@ -102,7 +136,7 @@ podman run --rm --userns=keep-id \
 ... -o /output/video.srt --language en
 ```
 
-### Batch Processing (CLI)
+### Batch Processing (CLI, optional)
 
 Create `parolesub.yaml`:
 ```yaml
@@ -121,18 +155,6 @@ podman run --rm --userns=keep-id \
   -v $(pwd):/work:Z,rslave \
   parolesub:latest --config /work/parolesub.yaml
 ```
-
-### Web Application Workflow
-
-1. **Setup**: Deploy using the container method above
-2. **Configuration**: Configure Bazarr URL and API key in Settings
-3. **Detection**: Bazarr integration automatically detects media missing subtitles
-4. **Queue**: Items appear in the Wanted list in the web UI
-5. **Process**: Click "Transcribe" to queue jobs for automatic processing
-6. **Monitor**: Watch progress in the Queue page with live updates
-7. **Complete**: Finished jobs appear in History with cost tracking
-
-The Bazarr poller runs automatically and updates the Wanted list. When the "Track Items with No Subtitles" setting is enabled, it will also show items with no subtitles in any language.
 
 ### Output Formats
 

@@ -41,7 +41,7 @@ async def healthz(
     try:
         import redis.asyncio as redis
 
-        redis_client = redis.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call]  # redis ships no stubs; from_url is untyped
+        redis_client = redis.from_url(settings.REDIS_URL)
         await redis_client.ping()
         await redis_client.close()
         redis_status = "ok"

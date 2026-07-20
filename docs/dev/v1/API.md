@@ -1,6 +1,6 @@
 # API Reference
 
-For programmatic usage of parolesub as a library.
+For programmatic usage of ParoleSub as a library.
 
 ## Basic Usage
 

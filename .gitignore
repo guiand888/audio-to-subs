@@ -27,7 +27,9 @@ coverage.svg
 .mypy_cache/
 
 # Virtual environments
-.venv/
+# No trailing slash on .venv: a directory-only pattern won't match a .venv
+# symlink, which is exactly how one got committed and broke CI (see flake.nix).
+.venv
 venv/
 ENV/
 env/
@@ -76,7 +78,7 @@ test_resources.local.md
 
 # Project metadata (agent standards)
 AGENTS.md
-.agent/
+.agents/
 CLAUDE.md
 
 # Frontend build artefacts (each also covered by frontend/.gitignore)

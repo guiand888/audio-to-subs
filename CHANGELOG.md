@@ -2,6 +2,25 @@
 
 All notable changes to this project are documented in this file. Versions follow [Semantic Versioning](https://semver.org/) with `v2.0.0-beta.*` pre-releases leading to the stable v2.0.0 release.
 
+## v2.0.0 - 2026-07-20
+
+Stable release. No functional changes since v2.0.0-beta.13 — this release finalizes the version bump and documentation.
+
+### Changed
+
+- Bumped `VERSION` to `v2.0.0` and updated compose `PAROLESUB_TAG` build-context pins to match, so a default deploy builds the released ref
+- Reorganized all markdown documentation under `docs/` (`docs/dev/v1/`, `docs/dev/v2/`, `docs/dev/reference/`, `docs/dev/archive/`, `docs/v3/`) and rewrote the v2 dev docs (architecture, API, database, queue, frontend, Bazarr integration, auth, deployment, testing) to describe the actual shipped system
+- Rewrote `CHANGELOG.md` to be version-based instead of milestone-based
+- Rewrote `README.md` to be [standard-readme](https://github.com/RichardLitt/standard-readme) compliant
+- Renamed `CONTAINER_GUIDE.md` to `CONTRIBUTING.md` at the repo root
+- `make release` now creates annotated tags so `git push --follow-tags` pushes them
+
+### Removed
+
+- Deleted `README_v2.md` and `DEPLOY_QUICKSTART.md` (superseded by the reorganized docs)
+
+---
+
 ## v2.0.0-beta.13 - 2026-07-19
 
 ### Fixed
@@ -119,7 +138,7 @@ All notable changes to this project are documented in this file. Versions follow
 ### Changed
 
 - Deployment: build production images from GitHub repo, keep local build for development
-- Parolesub rebranding: session cookie and sidebar brand updated
+- ParoleSub rebranding: session cookie and sidebar brand updated
 
 ---
 
@@ -127,7 +146,7 @@ All notable changes to this project are documented in this file. Versions follow
 
 ### Added
 
-- Parolesub rebranding complete (product renamed to "parolesub")
+- ParoleSub rebranding complete (product renamed to "ParoleSub")
 - Post-M6 hardening batch: deployment hardening, volume mount alignment
 
 ---
@@ -214,7 +233,7 @@ This is the first v2 beta release, representing the culmination of milestones M0
 
 - **M5.6.1**: Session release before sleep regression fix, UUID binding, path resolution fixes
 - **M5.8**: Structured progress reporting with stage/step tracking, SSE architecture improvements
-- **M6.i**: Parolesub rebranding, deployment hardening, volume mount alignment
+- **M6.i**: ParoleSub rebranding, deployment hardening, volume mount alignment
 
 ---
 

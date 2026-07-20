@@ -5,10 +5,10 @@ with a `-<domain>` suffix per variant. This repo is the subtitles variant.
 
 | App | Purpose | Binary |
 |---|---|---|
-| `parolesub` | Video → subtitles (this repo) | `parolesub` |
-| `parolecast` | Podcast transcription | `parolecast` |
-| `parolenote` | Voice memos / notes | `parolenote` |
-| `parolelive` | Live / meeting captions | `parolelive` |
+| ParoleSub (`parolesub`) | Video → subtitles (this repo) | `parolesub` |
+| ParoleCast (`parolecast`) | Podcast transcription | `parolecast` |
+| ParoleNote (`parolenote`) | Voice memos / notes | `parolenote` |
+| ParoleLive (`parolelive`) | Live / meeting captions | `parolelive` |
 
 All variants share the Parole umbrella (repo group, backup, branding) and are
 differentiated only by the suffix. New variants reuse the same backup/infra.

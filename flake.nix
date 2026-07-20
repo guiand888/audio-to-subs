@@ -33,8 +33,20 @@
           export SSL_CERT_FILE="${pkgs.cacert}/etc/ssl/certs/ca-bundle.crt"
           export REPO_ROOT="$(git rev-parse --show-toplevel 2>/dev/null || pwd)"
 
+          # The venv lives in the repo checkout at .venv (conventional, and not
+          # dependent on $HOME being writable by the test runner). It is
+          # gitignored. Guard against anything already sitting at that path
+          # that isn't a real venv (e.g. a leftover/corrupted directory, or a
+          # symlink -- `.venv` was once accidentally committed as one, which
+          # broke CI with `python -m venv` raising [Errno 17] File exists).
+          # `-e` alone is not enough here: it follows symlinks and reports
+          # false for a *dangling* one, so it must be paired with `-L`.
           VENV_DIR="$REPO_ROOT/.venv"
-          if [ ! -d "$VENV_DIR" ]; then
+          if [ ! -f "$VENV_DIR/bin/activate" ]; then
+            if [ -e "$VENV_DIR" ] || [ -L "$VENV_DIR" ]; then
+              echo "[nix develop] removing stale venv placeholder at $VENV_DIR"
+              rm -rf "$VENV_DIR"
+            fi
             echo "[nix develop] creating Python venv at .venv"
             ${python}/bin/python -m venv "$VENV_DIR"
           fi
