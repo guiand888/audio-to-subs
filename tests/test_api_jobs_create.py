@@ -14,7 +14,6 @@ fixed root directory, so arbitrary absolute paths are accepted.
 import json
 from datetime import datetime, timezone
 
-import pytest
 from sqlalchemy import select
 
 from audio_to_subs.db.models import BazarrCache, Job, JobLog, LogLevel, Setting

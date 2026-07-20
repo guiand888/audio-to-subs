@@ -7,9 +7,6 @@ import json
 from datetime import datetime
 from enum import Enum
 from typing import TYPE_CHECKING, Any, Literal
-from uuid import uuid4
-
-from audio_to_subs.core.ids import generate_job_id
 
 from sqlalchemy import (
     Boolean,
@@ -27,6 +24,7 @@ from sqlalchemy import (
 from sqlalchemy.dialects.sqlite import JSON as SQLiteJSON
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
+from audio_to_subs.core.ids import generate_job_id
 from audio_to_subs.db.base import Base
 
 if TYPE_CHECKING:

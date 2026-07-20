@@ -6,13 +6,12 @@ from datetime import datetime, timezone
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-from audio_to_subs.core.ids import generate_job_id
-
 from fastapi import HTTPException, status
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 
 from audio_to_subs.bazarr.pathmap import PathMap
+from audio_to_subs.core.ids import generate_job_id
 from audio_to_subs.core.path_utils import generate_output_path, validate_media_path
 from audio_to_subs.db.job_logs import write_job_log
 from audio_to_subs.db.models import (

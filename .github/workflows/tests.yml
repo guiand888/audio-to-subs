@@ -29,6 +29,10 @@ jobs:
       - name: Cache Python venv
         uses: actions/cache@v4
         with:
+          # .venv is gitignored and lives in the repo checkout. The shellHook
+          # in flake.nix removes anything stale already at this path (e.g. a
+          # leftover directory or dangling symlink) before creating the venv,
+          # so a bad cache entry can't reproduce the old [Errno 17] failure.
           path: .venv
           key: venv-${{ runner.os }}-${{ hashFiles('requirements.txt', 'requirements-dev.txt', 'pyproject.toml') }}
 

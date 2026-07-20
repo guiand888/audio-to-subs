@@ -9,6 +9,7 @@ import logging
 from collections.abc import Awaitable
 from datetime import datetime, timezone
 from typing import TYPE_CHECKING, Callable
+
 from fastapi import HTTPException, status
 from pydantic import BaseModel, model_validator
 from sqlalchemy import select
