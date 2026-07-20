@@ -85,7 +85,7 @@ async def publish_job_event(
             return
         import redis.asyncio as redis_lib
 
-        redis = redis_lib.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call]  # redis ships no stubs; from_url is untyped
+        redis = redis_lib.from_url(settings.REDIS_URL)
         try:
             await publish_fn(redis, job_id)
         finally:

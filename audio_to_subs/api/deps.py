@@ -36,7 +36,7 @@ async def get_redis() -> AsyncGenerator[Redis, None]:
     import redis.asyncio as redis_lib
 
     settings = get_settings()
-    redis = redis_lib.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call]  # redis ships no stubs; from_url is untyped
+    redis = redis_lib.from_url(settings.REDIS_URL)
     try:
         yield redis
     finally:
@@ -51,7 +51,7 @@ def get_redis_client() -> Redis:
     import redis.asyncio as redis_lib
 
     settings = get_settings()
-    return redis_lib.from_url(settings.REDIS_URL)  # type: ignore[no-untyped-call,no-any-return]  # redis ships no stubs; from_url is untyped
+    return redis_lib.from_url(settings.REDIS_URL)
 
 
 # Re-export from auth.deps for convenience
