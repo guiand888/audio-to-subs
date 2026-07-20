@@ -51,7 +51,7 @@ def get_redis_client() -> Redis:
     import redis.asyncio as redis_lib
 
     settings = get_settings()
-    return redis_lib.from_url(settings.REDIS_URL)
+    return redis_lib.from_url(settings.REDIS_URL)  # type: ignore[no-any-return]
 
 
 # Re-export from auth.deps for convenience
