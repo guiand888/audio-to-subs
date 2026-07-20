@@ -67,7 +67,7 @@ make quality
 - **Defined in**: `flake.nix`
 - **`default` shell**: Python 3.11 + build toolchain, `ffmpeg`, `redis`, Node 24 — full backend + frontend dev tools (pytest, black, ruff, mypy, npm)
 - **`frontend` shell** (`nix develop .#frontend`): lean, Node-only shell for frontend-only work
-- **State**: bootstraps `.venv` in the repo root on first entry, gated on a hash of `requirements.txt`/`requirements-dev.txt`/`pyproject.toml` so it only reinstalls when they change
+- **State**: bootstraps a gitignored `.venv` in the repo root on first entry, gated on a hash of `requirements.txt`/`requirements-dev.txt`/`pyproject.toml` so it only reinstalls when they change
 
 **Usage**: Development, testing, code quality checks (also what CI runs, via `nix develop`)
 

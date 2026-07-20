@@ -46,7 +46,7 @@ The original CLI functionality is preserved - you can still run one-off transcri
 ```bash
 git clone https://github.com/guiand888/parolesub.git
 cd parolesub
-nix develop   # bootstraps a .venv and installs deps automatically
+nix develop   # bootstraps a .venv (gitignored) and installs deps automatically
 export MISTRAL_API_KEY=your_api_key
 parolesub -i video.mp4 -o subtitles.srt
 ```
