@@ -78,7 +78,7 @@ test_resources.local.md
 
 # Project metadata (agent standards)
 AGENTS.md
-.agent/
+.agents/
 CLAUDE.md
 
 # Frontend build artefacts (each also covered by frontend/.gitignore)

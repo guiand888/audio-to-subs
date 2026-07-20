@@ -1048,7 +1048,7 @@ Tasks:
 - **Rewrite the shipped-system docs** so they describe what v2 *is*, not what it was planned to be: `ARCHITECTURE.md`, `API.md`, `DATABASE.md`, `QUEUE.md`, `FRONTEND.md`, `BAZARR_INTEGRATION.md`, `AUTH.md`, `DEPLOYMENT.md`, `TESTING.md`. Reconcile against the actual structural refactor outcome (`REFACTOR.md` in the sibling `audio_to_subs_plans/` repo — verify whether that plan doc should be linked from here or considered out of scope), the M5.8 progress/SSE architecture change (Redis-only delivery, `progress_stage`/`step_index`/`step_total`), and the M5.6.1 fixes (path resolution, logging, subtitle-naming idempotency) that changed behavior without a corresponding spec update.
 - **Archive planning-only artifacts** that are no longer live specs but are worth keeping for history: `M5_PLAN.md`, `TODO_M53.md`, `MISTRAL_USAGE_PROBE.md`, `QUEUE_PROGRESS_REVIEW.md` — move to a clearly-labeled historical/archive subfolder rather than delete or leave mixed in with current docs.
 - **`MIGRATION.md` and `PIPELINE_CHANGES.md`**: fold into `ARCHITECTURE.md` or mark explicitly as historical (M0/M2-era one-off migration records), since the migration they describe is long complete.
-- Update `.agent/` rule files if any reference the old `dev/v2/` paths directly.
+- Update `.agents/` rule files if any reference the old `dev/v2/` paths directly.
 
 Acceptance:
 - A root `docs/` directory exists with dev-related markdown organized into a clear subcategory (e.g. `docs/dev/`); no stray planning/spec `.md` files left loose at repo root or scattered outside `docs/` (README.md and CLAUDE.md excepted).
