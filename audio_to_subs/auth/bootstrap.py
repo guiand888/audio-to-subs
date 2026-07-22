@@ -1,6 +1,8 @@
 """Admin user bootstrap.
 
-Creates initial admin user on first boot.
+Creates the initial admin user on first boot, and on every subsequent boot
+reconciles its password against the resolved secret (startup reconcile
+trigger model — see M10).
 """
 
 import logging
@@ -8,7 +10,7 @@ from typing import TYPE_CHECKING
 
 from sqlalchemy import select
 
-from audio_to_subs.auth.passwords import hash_password
+from audio_to_subs.auth.passwords import hash_password, verify_password
 
 if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -35,7 +37,20 @@ async def bootstrap_admin(
     username: str | None = None,
     password: str | None = None,
 ) -> bool:
-    """Bootstrap admin user if database is empty.
+    """Bootstrap admin user, or reconcile its password with the resolved secret.
+
+    Called on every startup (not just first boot). If no user exists yet, the
+    admin user is created from ``username``/``password``. If a user already
+    exists, this reconciles its stored password hash against the currently
+    resolved secret (ADMIN_PASSWORD / ADMIN_PASSWORD_FILE): when they differ,
+    the hash is rotated to match, so a Podman secret or .env rotation takes
+    effect automatically on the next redeploy — no explicit operator action
+    (e.g. ``parolesub admin set-password``) required.
+
+    A ``password`` of ``None`` (secret unset / file absent) is always treated
+    as a no-op on the reconcile path: an operator rotating an unrelated
+    secret (e.g. SESSION_SECRET) while ADMIN_PASSWORD_FILE happens to be
+    absent must never be locked out as a side effect.
 
     Args:
         db: Async database session
@@ -43,10 +58,14 @@ async def bootstrap_admin(
         password: Admin password (from env)
 
     Returns:
-        True if admin was created, False if already exists
+        True if the admin user was created or its password was reconciled to
+        a new value, False if nothing changed (already up to date, or
+        password is None).
 
     Raises:
-        ValueError: If database is empty and no credentials provided
+        ValueError: If database is empty and no credentials provided, or if
+            the resolved password (first-boot or reconcile) is a known
+            default/placeholder value.
     """
     from audio_to_subs.db.models import User
 
@@ -55,8 +74,34 @@ async def bootstrap_admin(
     existing_user = result.scalar_one_or_none()
 
     if existing_user is not None:
-        logger.info("Admin user already exists, skipping bootstrap")
-        return False
+        if password is None:
+            # Secret unset/file absent: never treat this as "rotate to
+            # nothing" — an unrelated secret rotation must not lock out the
+            # operator.
+            logger.info("Admin user already exists, password unchanged")
+            return False
+
+        if verify_password(password, existing_user.password_hash):
+            logger.info("Admin user already exists, password unchanged")
+            return False
+
+        if password in PLACEHOLDER_ADMIN_PASSWORDS:
+            raise ValueError(
+                "Refusing to rotate admin password to a default or placeholder "
+                "value. Set ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE) to a "
+                "strong secret."
+            )
+
+        # Resolved secret changed since last boot: reconcile the stored hash.
+        # No commit here for the same reason as the create path below — the
+        # caller owns the transaction/commit.
+        existing_user.password_hash = hash_password(password)
+        await db.flush()
+        logger.info(
+            "Reconciled admin password for '%s' from updated secret",
+            existing_user.username,
+        )
+        return True
 
     # No users exist - need credentials
     if username is None or password is None:
