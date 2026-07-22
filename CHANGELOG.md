@@ -2,6 +2,22 @@
 
 All notable changes to this project are documented in this file. Versions follow [Semantic Versioning](https://semver.org/) with `v2.0.0-beta.*` pre-releases leading to the stable v2.0.0 release.
 
+## [Unreleased]
+
+### Changed
+
+- Admin password is now reconciled from `ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE` on every boot (startup reconcile trigger model). Rotating the Podman secret or `.env` value and redeploying is the sole mechanism for changing the admin password — the stored hash is updated automatically on the next boot.
+
+### Removed
+
+- `parolesub admin set-password` / `python -m audio_to_subs.admin set-password` subcommand removed. The environment secret is now the single source of truth for the admin password; the CLI command conflicted with the reconcile path (a CLI-set password would be silently reverted to the env value on the next boot).
+
+### Upgrade Notes
+
+- Deployments that previously used `set-password` to set a real password while leaving `ADMIN_PASSWORD` set to a placeholder (`admin`, `changeme`, etc.) in the environment must update the env to a strong secret before upgrading. Otherwise the reconcile path will refuse to start with a `ValueError`, since it will detect the stored hash no longer matches the placeholder env and refuse to rotate to a default/placeholder value.
+
+---
+
 ## v2.0.0 - 2026-07-20
 
 Stable release. No functional changes since v2.0.0-beta.13 — this release finalizes the version bump and documentation.

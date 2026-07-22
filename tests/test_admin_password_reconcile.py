@@ -3,8 +3,8 @@ resolved secret (ADMIN_PASSWORD / ADMIN_PASSWORD_FILE) changes between boots.
 
 Trigger model is "startup reconcile" (decided upfront, not re-litigated
 here): on every boot, if the resolved secret differs from the stored admin
-hash, the app updates it automatically — no explicit operator action such as
-`parolesub admin set-password` is required.
+hash, the app updates it automatically — no explicit operator action
+required.
 
 Mirrors the boot-lifecycle style of test_session_secret_bootstrap.py: real
 TestClient lifespans, an env-var secret change between boots, and the cached

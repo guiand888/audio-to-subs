@@ -45,7 +45,7 @@ async def bootstrap_admin(
     resolved secret (ADMIN_PASSWORD / ADMIN_PASSWORD_FILE): when they differ,
     the hash is rotated to match, so a Podman secret or .env rotation takes
     effect automatically on the next redeploy — no explicit operator action
-    (e.g. ``parolesub admin set-password``) required.
+    required.
 
     A ``password`` of ``None`` (secret unset / file absent) is always treated
     as a no-op on the reconcile path: an operator rotating an unrelated
@@ -107,7 +107,8 @@ async def bootstrap_admin(
     if username is None or password is None:
         raise ValueError(
             "No users exist and ADMIN_USERNAME/ADMIN_PASSWORD not set. "
-            "Run 'python -m audio_to_subs.admin set-password' to create admin."
+            "Set ADMIN_USERNAME and ADMIN_PASSWORD (or ADMIN_PASSWORD_FILE) "
+            "in the environment or Podman secret to create the admin user."
         )
 
     # Refuse to bootstrap with a default/placeholder admin password (M6

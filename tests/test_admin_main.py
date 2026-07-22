@@ -1,14 +1,11 @@
-"""Tests for the admin CLI (set-password, whoami, argument parsing)."""
+"""Tests for the admin CLI (db-init, whoami, argument parsing)."""
 
 import argparse
 from unittest.mock import AsyncMock, patch
 
 import pytest
-from sqlalchemy import select
 
-from audio_to_subs.admin.__main__ import cmd_set_password, cmd_whoami, main
-from audio_to_subs.auth.passwords import verify_password
-from audio_to_subs.db.models import User
+from audio_to_subs.admin.__main__ import cmd_whoami, main
 
 
 @pytest.fixture(autouse=True)
@@ -21,64 +18,6 @@ def _point_admin_cli_at_test_db(monkeypatch, tmp_path):
     from audio_to_subs.api.settings import get_settings
 
     monkeypatch.setattr(db_session, "DEFAULT_ASYNC_DSN", get_settings().DATABASE_URL)
-
-
-class TestCmdSetPassword:
-    """Test the set-password admin subcommand."""
-
-    @pytest.mark.asyncio
-    async def test_creates_new_user_when_username_not_found(self, sync_session):
-        args = argparse.Namespace(username="newuser")
-
-        with patch("getpass.getpass", side_effect=["newpassword123", "newpassword123"]):
-            exit_code = await cmd_set_password(args)
-
-        assert exit_code == 0
-
-        user = sync_session.execute(
-            select(User).where(User.username == "newuser")
-        ).scalar_one()
-        assert verify_password("newpassword123", user.password_hash)
-
-    @pytest.mark.asyncio
-    async def test_updates_existing_user_password(self, sync_session):
-        # conftest's autouse fixture seeds an "admin" user already.
-        args = argparse.Namespace(username="admin")
-
-        with patch(
-            "getpass.getpass", side_effect=["rotatedpassword456", "rotatedpassword456"]
-        ):
-            exit_code = await cmd_set_password(args)
-
-        assert exit_code == 0
-
-        user = sync_session.execute(
-            select(User).where(User.username == "admin")
-        ).scalar_one()
-        assert verify_password("rotatedpassword456", user.password_hash)
-
-    @pytest.mark.asyncio
-    async def test_mismatched_passwords_returns_error(self, capsys):
-        args = argparse.Namespace(username="admin")
-
-        with patch("getpass.getpass", side_effect=["password1", "password2"]):
-            exit_code = await cmd_set_password(args)
-
-        assert exit_code == 1
-        assert "do not match" in capsys.readouterr().err
-
-    @pytest.mark.asyncio
-    async def test_defaults_username_to_admin_when_not_specified(self, sync_session):
-        args = argparse.Namespace(username=None)
-
-        with patch("getpass.getpass", side_effect=["newpass789", "newpass789"]):
-            exit_code = await cmd_set_password(args)
-
-        assert exit_code == 0
-        user = sync_session.execute(
-            select(User).where(User.username == "admin")
-        ).scalar_one()
-        assert verify_password("newpass789", user.password_hash)
 
 
 class TestCmdWhoami:
@@ -115,14 +54,3 @@ class TestMainArgumentParsing:
 
         assert exit_code == 0
         mock_whoami.assert_called_once()
-
-    def test_dispatches_set_password_with_username(self):
-        with patch(
-            "audio_to_subs.admin.__main__.cmd_set_password", new_callable=AsyncMock
-        ) as mock_set_password:
-            mock_set_password.return_value = 0
-            exit_code = main(["set-password", "--username", "someone"])
-
-        assert exit_code == 0
-        called_args = mock_set_password.call_args[0][0]
-        assert called_args.username == "someone"
