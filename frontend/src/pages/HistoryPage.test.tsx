@@ -343,4 +343,55 @@ describe("HistoryPage", () => {
       expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument()
     })
   })
+
+  it("renders Apply before Reset as an equal-width matched pair (M13)", async () => {
+    render(<HistoryPage />, { wrapper })
+
+    const applyButton = await screen.findByRole("button", { name: /apply/i })
+    const resetButton = screen.getByRole("button", { name: /reset/i })
+
+    const allButtons = screen.getAllByRole("button")
+    expect(allButtons.indexOf(applyButton)).toBeLessThan(
+      allButtons.indexOf(resetButton),
+    )
+
+    // Both buttons share the same width-related utility class so they read
+    // as a matched pair.
+    const applyClasses = applyButton.className.split(/\s+/)
+    const resetClasses = resetButton.className.split(/\s+/)
+    const sharedWidthClass = applyClasses.find(
+      (c) => resetClasses.includes(c) && /^(flex-1|w-)/.test(c),
+    )
+    expect(sharedWidthClass).toBeTruthy()
+  })
+
+  it("Apply submits the language filter and Reset clears it", async () => {
+    const user = userEvent.setup()
+    render(<HistoryPage />, { wrapper })
+
+    const languageInput = await screen.findByPlaceholderText("e.g. en, fr")
+    await user.type(languageInput, "fr")
+    await user.click(screen.getByRole("button", { name: /apply/i }))
+
+    await waitFor(() => {
+      const calls = vi.mocked(api.get).mock.calls
+      const lastUrl = calls[calls.length - 1]?.[0] as string
+      expect(lastUrl).toContain("language_filter=fr")
+    })
+
+    await user.click(screen.getByRole("button", { name: /reset/i }))
+
+    await waitFor(() => {
+      const calls = vi.mocked(api.get).mock.calls
+      const lastUrl = calls[calls.length - 1]?.[0] as string
+      expect(lastUrl).not.toContain("language_filter")
+    })
+    // Reset also clears the input back to empty. The filter form remounts
+    // on each refetch (HistoryPage shows a full-page loading state while
+    // fetching), so re-query rather than reuse the earlier `languageInput`
+    // reference, which points at a now-detached node.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("e.g. en, fr")).toHaveValue("")
+    })
+  })
 })

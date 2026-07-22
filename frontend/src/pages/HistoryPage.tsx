@@ -195,12 +195,12 @@ function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
         </div>
 
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={handleReset}>
-            Reset
-          </Button>
-          <Button size="sm" onClick={handleApply}>
+          <Button size="sm" className="flex-1" onClick={handleApply}>
             <Filter className="h-4 w-4 mr-2" />
             Apply
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1" onClick={handleReset}>
+            Reset
           </Button>
         </div>
       </CardContent>
