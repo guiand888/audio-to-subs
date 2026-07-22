@@ -175,12 +175,14 @@ function JobCard({ job, onCancel, isCancelling, onCreate, isCreating }: JobCardP
 
 export function QueuePage() {
   const queryClient = useQueryClient()
-  // Opt-in fallback polling (default off). SSE is the primary live mechanism;
-  // this only re-syncs from GET /api/jobs when the user enables it. Unlike
-  // the "new"-event-triggered re-sync, the user explicitly wants fresh
-  // server state here, so the data-update effect uses replace() (which
-  // overwrites in-store progress) rather than merge() (which preserves it).
-  const [autoRefresh, setAutoRefresh] = useState(false)
+  // Fallback polling, default on (M11) so a freshly opened Queue page
+  // live-updates without the operator having to opt in manually; the
+  // operator can still turn it off. SSE is the primary live mechanism — this
+  // only re-syncs from GET /api/jobs on the interval. Unlike the
+  // "new"-event-triggered re-sync, the user explicitly wants fresh server
+  // state here, so the data-update effect uses replace() (which overwrites
+  // in-store progress) rather than merge() (which preserves it).
+  const [autoRefresh, setAutoRefresh] = useState(true)
   const [refreshInterval] = useState(10000)
   // Initial seed on mount, then Zustand store is the source of truth
   const { data, refetch, isFetching } = useJobs({
