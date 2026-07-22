@@ -154,13 +154,25 @@ describe("AppLayout - collapsible sidebar", () => {
   it("hides nav labels and shows a thin rail when collapsed", () => {
     sidebarState.collapsed = true
     render(<AppLayout />)
-    // Brand collapses to a monogram
-    expect(screen.queryByText("Parolesub")).not.toBeInTheDocument()
-    expect(screen.getByText("P")).toBeInTheDocument()
     // Toggle now offers to expand
     expect(
       screen.getByRole("button", { name: "Expand sidebar" }),
     ).toBeInTheDocument()
+  })
+
+  it("renders the ParoleSub logo lockup with accessible alt text when expanded (M13)", () => {
+    render(<AppLayout />)
+    const logos = screen.getAllByAltText("ParoleSub")
+    expect(logos.length).toBeGreaterThanOrEqual(1)
+    logos.forEach((logo) => expect(logo.tagName).toBe("IMG"))
+  })
+
+  it("renders the ParoleSub mark with accessible alt text when collapsed (M13)", () => {
+    sidebarState.collapsed = true
+    render(<AppLayout />)
+    const logos = screen.getAllByAltText("ParoleSub")
+    expect(logos.length).toBeGreaterThanOrEqual(1)
+    logos.forEach((logo) => expect(logo.tagName).toBe("IMG"))
   })
 
   it("renders the username as an avatar + name on the topbar right, not beside the toggle", () => {
