@@ -235,3 +235,20 @@ export const useJobsStore = create<JobsState>()((set) => ({
       return { jobs }
     }),
 }))
+
+// Pure selector: is there already a queued/running job for this exact
+// media_path + language_code? Used to gate the History page's Retry button
+// off live store state, so it correctly disappears once a retry is in
+// flight and reappears if that retry itself later fails.
+export function selectHasActiveJobForSource(
+  jobs: Record<string, LiveJob>,
+  mediaPath: string,
+  languageCode: string | null,
+): boolean {
+  return Object.values(jobs).some(
+    (j) =>
+      j.media_path === mediaPath &&
+      j.language_code === languageCode &&
+      (j.status === "queued" || j.status === "running"),
+  )
+}
