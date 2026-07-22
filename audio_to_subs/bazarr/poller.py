@@ -1,6 +1,9 @@
-"""Bazarr poller for caching wanted items.
+"""Bazarr poller for caching the full library's subtitle state.
 
-Periodically polls Bazarr API for wanted subtitles and updates the local cache.
+Periodically polls the entire Bazarr library (movies + episodes) and
+updates the local cache with each item's real has_any_subs/missing_subtitles
+state, so the Wanted API can serve any display scope (all/missing/no_subs)
+without re-polling.
 """
 
 import asyncio
@@ -22,12 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from audio_to_subs.api.settings import Settings
-    from audio_to_subs.bazarr.schemas import (
-        Episode,
-        Movie,
-        WantedEpisodesPage,
-        WantedMoviesPage,
-    )
+    from audio_to_subs.bazarr.schemas import Episode, Movie
 
 logger = logging.getLogger(__name__)
 
@@ -35,12 +33,13 @@ logger = logging.getLogger(__name__)
 class ProgressReporter:
     """Tracks refresh progress and emits throttled updates to a callback.
 
-    The poller knows the exact total of "wanted" items up front (Bazarr's
-    wanted endpoints return a ``total``). The opt-in no-subs pass walks the
-    entire library and only knows its item count after per-item filtering, so
-    its total is not known ahead of time. To keep a single coherent progress
-    signal, we start with the known wanted total and, once that is exhausted,
-    fall back to a live "processed" counter with no denominator.
+    The full-library sync fetches movies in a single call, so its total is
+    known up front (Bazarr's ``/api/movies`` response carries a ``total``).
+    Episodes are walked series-by-series (Bazarr has no single "all
+    episodes" endpoint), so their count is only known once fully iterated.
+    To keep a single coherent progress signal, we start with the known
+    movies total and, once that is exhausted, fall back to a live
+    "processed" counter with no denominator for the episodes portion.
 
     Updates are throttled (~1 Hz) so a fast poll loop doesn't flood the
     downstream pub/sub channel.
@@ -62,7 +61,7 @@ class ProgressReporter:
         self._last_emit = 0.0
 
     def set_known_total(self, total: int) -> None:
-        """Set the denominator known up front (wanted items)."""
+        """Set the denominator known up front (e.g. the movies total)."""
         self._known_total = total
 
     def set_stage(self, stage: str) -> None:
@@ -85,9 +84,10 @@ class ProgressReporter:
 
     @property
     def total(self) -> int | None:
-        # Only report a denominator while the known (wanted) portion is being
-        # processed. Once we move into the unknown no-subs tail, report None so
-        # the UI shows a live counter instead of a fake estimate.
+        # Only report a denominator while the known (movies) portion is being
+        # processed. Once we move into the unknown-total episodes tail,
+        # report None so the UI shows a live counter instead of a fake
+        # estimate.
         if self._known_total and self._processed <= self._known_total:
             return self._known_total
         return None
@@ -248,20 +248,15 @@ async def get_settings_value(
     return default
 
 
-async def get_track_no_subs(db: "AsyncSession") -> bool:
-    """Check if bazarr_track_no_subs is enabled."""
-    return bool(await get_settings_value(db, "bazarr_track_no_subs", False))
-
-
 async def poll_once(
     db: "AsyncSession",
     client: BazarrClient,
     path_map: PathMap,
 ) -> int:
-    """Perform a single scheduled poll of all Bazarr wanted items.
+    """Perform a single scheduled full-library poll of all Bazarr items.
 
-    Fetches wanted movies and episodes from Bazarr, translates paths,
-    and updates the bazarr_cache table.
+    Fetches every movie and episode from Bazarr (not just Bazarr's "wanted"
+    subset), translates paths, and updates the bazarr_cache table.
 
     Args:
         db: Async database session
@@ -277,91 +272,6 @@ async def poll_once(
     return movies_processed + episodes_processed
 
 
-async def _seed_wanted_total(
-    client: BazarrClient,
-    reporter: ProgressReporter,
-    poll_movies: bool,
-    poll_episodes: bool,
-) -> tuple["WantedMoviesPage | None", "WantedEpisodesPage | None"]:
-    """Fetch wanted movies/episodes once and seed the reporter's exact total.
-
-    Returns the fetched pages so _process_wanted_movies/_process_wanted_episodes
-    can reuse them instead of re-fetching (a `length=1` probe call followed by
-    a separate `length=200` fetch would hit Bazarr twice per type per poll).
-    """
-    wanted_total = 0
-    movies_page = None
-    episodes_page = None
-    if poll_movies:
-        movies_page = await client.list_wanted_movies(length=200)
-        wanted_total += movies_page.total
-    if poll_episodes:
-        episodes_page = await client.list_wanted_episodes(length=200)
-        wanted_total += episodes_page.total
-    reporter.set_known_total(wanted_total)
-    reporter.set_stage("refreshing wanted")
-    await reporter.report(force=True)
-    return movies_page, episodes_page
-
-
-async def _process_wanted_movies(
-    db: "AsyncSession",
-    client: BazarrClient,
-    path_map: PathMap,
-    started_at: datetime,
-    reporter: ProgressReporter,
-    movies_page: "WantedMoviesPage",
-) -> int:
-    """Cache all wanted movies from an already-fetched page, reporting progress per item."""
-    movie_details = await _fetch_movie_details(
-        client, [m.radarrId for m in movies_page.data]
-    )
-    processed = 0
-    for movie in movies_page.data:
-        movie_detail = movie_details.get(movie.radarrId)
-        await _process_movie(
-            db,
-            movie,
-            path_map,
-            started_at,
-            movie_detail.audio_language if movie_detail else None,
-            movie_detail.path if movie_detail else None,
-            movie_detail.subtitles if movie_detail else None,
-        )
-        processed += 1
-        await reporter.step()
-    return processed
-
-
-async def _process_wanted_episodes(
-    db: "AsyncSession",
-    client: BazarrClient,
-    path_map: PathMap,
-    started_at: datetime,
-    reporter: ProgressReporter,
-    episodes_page: "WantedEpisodesPage",
-) -> int:
-    """Cache all wanted episodes from an already-fetched page, reporting progress per item."""
-    episode_details = await _fetch_episode_details(
-        client, {e.sonarrSeriesId for e in episodes_page.data}
-    )
-    processed = 0
-    for episode in episodes_page.data:
-        episode_detail = episode_details.get(episode.sonarrEpisodeId)
-        await _process_episode(
-            db,
-            episode,
-            path_map,
-            started_at,
-            episode_detail.audio_language if episode_detail else None,
-            episode_detail.path if episode_detail else None,
-            episode_detail.subtitles if episode_detail else None,
-        )
-        processed += 1
-        await reporter.step()
-    return processed
-
-
 async def poll_bazarr_manually(
     db: "AsyncSession",
     client: BazarrClient,
@@ -369,12 +279,15 @@ async def poll_bazarr_manually(
     item_type: str | None = None,
     reporter: ProgressReporter | None = None,
 ) -> tuple[int, int]:
-    """Perform a poll of Bazarr items with optional type filtering.
+    """Perform a full-library poll of Bazarr items, optionally scoped by type.
 
     Used both for the scheduled background poll (via poll_once, item_type="all")
-    and for on-demand manual refreshes triggered from the API. Respects the
-    bazarr_track_no_subs setting and returns separate counts for movies and
-    episodes processed.
+    and for on-demand manual refreshes triggered from the API. Ingests every
+    movie/episode within the active item_type - not just Bazarr's "wanted"
+    (missing-subtitle) subset - persisting each item's real
+    has_any_subs/missing_subtitles so the Wanted API can serve the
+    all/missing/no_subs display scopes without a further poll. Returns
+    separate counts for movies and episodes processed.
 
     Runs strictly sequentially: `db` is a single SQLAlchemy AsyncSession, which
     does not support concurrent use from multiple coroutines (interleaved
@@ -407,48 +320,27 @@ async def poll_bazarr_manually(
     episodes_processed = 0
 
     try:
-        # Check if we should track items with no subs at all
-        track_no_subs = await get_track_no_subs(db)
-
         # Determine which types to poll
         poll_movies = item_type is None or item_type == "all" or item_type == "movie"
         poll_episodes = (
             item_type is None or item_type == "all" or item_type == "episode"
         )
 
-        # The "wanted" portion has an exact total from Bazarr up front; seed the
-        # reporter so the progress bar can show "N of M" for this part. This
-        # also fetches the pages processed below, so movies/episodes are each
-        # fetched from Bazarr exactly once per poll.
-        movies_page, episodes_page = await _seed_wanted_total(
-            client, reporter, poll_movies, poll_episodes
-        )
+        reporter.set_stage("syncing library")
+        await reporter.report(force=True)
 
-        # Process wanted movies
         if poll_movies:
-            assert movies_page is not None
-            movies_processed = await _process_wanted_movies(
-                db, client, path_map, started_at, reporter, movies_page
+            movies_processed = await _poll_all_movies(
+                db, client, path_map, started_at, reporter
             )
 
-        # Process wanted episodes
         if poll_episodes:
-            assert episodes_page is not None
-            episodes_processed = await _process_wanted_episodes(
-                db, client, path_map, started_at, reporter, episodes_page
+            episodes_processed = await _poll_all_episodes(
+                db, client, path_map, started_at, reporter
             )
 
-        # If tracking no-subs items, also check all items. This portion has no
-        # known total, so the reporter drops the denominator and the UI shows a
-        # live processed counter instead.
-        if track_no_subs:
-            no_subs_movies, no_subs_episodes = await _run_no_subs_pass(
-                db, client, path_map, started_at, reporter, poll_movies, poll_episodes
-            )
-            movies_processed += no_subs_movies
-            episodes_processed += no_subs_episodes
-
-        # Delete stale items (no longer wanted) - only for types that were polled
+        # Delete stale items (no longer present in Bazarr) - only for types
+        # that were actually polled
         deleted_count = await _delete_stale(db, started_at, poll_movies, poll_episodes)
         if deleted_count > 0:
             logger.info("Deleted %d stale items from cache", deleted_count)
@@ -477,68 +369,6 @@ async def poll_bazarr_manually(
         raise
 
     return movies_processed, episodes_processed
-
-
-async def _fetch_movie_details(
-    client: BazarrClient, radarr_ids: list[int]
-) -> dict[int, "Movie"]:
-    """Batch-fetch full movie details (audio_language + path) by Radarr ID.
-
-    Bazarr's wanted-movies endpoint carries neither audio_language nor a
-    usable file path (sceneName is null there), so both must be joined in
-    from the full-detail endpoint. One HTTP call per poll cycle for exactly
-    the movies being processed, not one per item.
-
-    Args:
-        client: BazarrClient instance
-        radarr_ids: Radarr IDs to look up
-
-    Returns:
-        Dict mapping radarrId to its full Movie (missing entries mean
-        Bazarr couldn't report details for that movie)
-    """
-    if not radarr_ids:
-        return {}
-    try:
-        full_movies = await client.list_all_movies(radarrid=radarr_ids)
-        return {m.radarrId: m for m in full_movies.data}
-    except Exception as e:
-        logger.warning("Failed to fetch movie details: %s", e)
-        return {}
-
-
-async def _fetch_episode_details(
-    client: BazarrClient, series_ids: set[int]
-) -> dict[int, "Episode"]:
-    """Batch-fetch full episode details (audio_language + path), by series.
-
-    Bazarr's wanted-episodes endpoint carries neither audio_language nor a
-    usable file path (sceneName is null there), and its episodes endpoint
-    only accepts a single series ID (not a list), so this batches by unique
-    series rather than per-episode - bounded by "distinct series with wanted
-    episodes this poll", not one call per episode.
-
-    Args:
-        client: BazarrClient instance
-        series_ids: Unique Sonarr series IDs to look up
-
-    Returns:
-        Dict mapping sonarrEpisodeId to its full Episode (missing entries
-        mean Bazarr couldn't report details for that episode)
-    """
-    details_by_episode: dict[int, "Episode"] = {}
-    for series_id in series_ids:
-        try:
-            eps = await client.list_episodes(seriesid=series_id)
-            for ep in eps.data:
-                details_by_episode[ep.sonarrEpisodeId] = ep
-        except Exception as e:
-            logger.warning(
-                "Failed to fetch episode details for series %s: %s",
-                series_id,
-                e,
-            )
-    return details_by_episode
 
 
 def _build_language_list(languages: list[Any] | None) -> list[dict[str, Any]]:
@@ -627,149 +457,94 @@ async def _upsert_cache_entry(
 
 async def _process_movie(
     db: "AsyncSession",
-    wanted_movie: Any,
+    movie: "Movie",
     path_map: PathMap,
     started_at: datetime,
-    audio_language: list[Any] | None = None,
-    media_path_detail: str | None = None,
-    subtitles: list[Any] | None = None,
 ) -> None:
-    """Process a single wanted movie.
+    """Process a single movie from Bazarr's full `/api/movies` listing.
 
     Args:
         db: Async database session
-        wanted_movie: WantedMovie from Bazarr API
+        movie: Movie from Bazarr's full movies listing - carries its own
+            audio_language, path, subtitles (present files), and
+            missing_subtitles, so no separate detail fetch is needed.
         path_map: PathMap for path translation
         started_at: Poll start time
-        audio_language: Audio languages for this movie, if known (the wanted
-            endpoint doesn't carry it; callers batch-fetch it separately)
-        media_path_detail: Real media file path for this movie, fetched from
-            the full movie details endpoint. The wanted endpoint only
-            carries sceneName (often null), so the authoritative path is
-            joined in separately. Falls back to sceneName if unavailable.
-        subtitles: Present subtitle files for this movie, fetched from the
-            full movie details endpoint. This is the authoritative signal for
-            ``has_any_subs`` (whether the item actually has a subtitle file on
-            disk) - the wanted endpoint only knows what's *missing*, not what
-            exists. None means the detail fetch failed, in which case we
-            conservatively report no subs.
     """
-    # Resolve media_path: prefer the full-detail path (authoritative),
-    # fall back to the wanted endpoint's sceneName.
-    media_path = media_path_detail or wanted_movie.sceneName or ""
+    # Resolve media_path: prefer the authoritative `path` field, fall back to
+    # sceneName (often null).
+    media_path = movie.path or movie.sceneName or ""
     if media_path:
         media_path = path_map.translate(media_path)
 
-    # Whether this movie actually has any subtitle file present. Derived from
-    # the detail endpoint's `subtitles` list (the wanted endpoint only knows
-    # what's missing). A movie can be "wanted" for one language while already
-    # having a subtitle for another - only the present-file list reflects that.
-    has_any_subs = len(subtitles or []) > 0
+    # Whether this movie actually has any subtitle file present, from the
+    # `subtitles` list of files actually on disk (distinct from
+    # `missing_subtitles`, which only reports what's absent). A movie can be
+    # missing one language while already having a subtitle for another.
+    has_any_subs = len(movie.subtitles) > 0
 
-    cache_id = BazarrCache.make_id("movie", wanted_movie.radarrId)
+    cache_id = BazarrCache.make_id("movie", movie.radarrId)
 
     await _upsert_cache_entry(
         db,
         cache_id,
         "movie",
-        wanted_movie.radarrId,
-        wanted_movie.title,
+        movie.radarrId,
+        movie.title,
         media_path,
         has_any_subs,
-        wanted_movie.missing_subtitles,
+        movie.missing_subtitles,
         started_at,
-        audio_language,
+        movie.audio_language,
     )
 
 
 async def _process_episode(
     db: "AsyncSession",
-    wanted_episode: Any,
+    episode: "Episode",
     path_map: PathMap,
     started_at: datetime,
-    audio_language: list[Any] | None = None,
-    media_path_detail: str | None = None,
-    subtitles: list[Any] | None = None,
+    title: str,
 ) -> None:
-    """Process a single wanted episode.
+    """Process a single episode from Bazarr's full `/api/episodes` listing.
 
     Args:
         db: Async database session
-        wanted_episode: WantedEpisode from Bazarr API
+        episode: Episode from Bazarr's full episodes listing - carries its
+            own audio_language, path, subtitles (present files), and
+            missing_subtitles, so no separate detail fetch is needed.
         path_map: PathMap for path translation
         started_at: Poll start time
-        audio_language: Audio languages for this episode, if known (the
-            wanted endpoint doesn't carry it; callers batch-fetch it
-            separately)
-        media_path_detail: Real media file path for this episode, fetched
-            from the full episode details endpoint. The wanted endpoint
-            only carries sceneName (often null), so the authoritative path
-            is joined in separately. Falls back to sceneName if unavailable.
-        subtitles: Present subtitle files for this episode, fetched from the
-            full episode details endpoint. This is the authoritative signal
-            for ``has_any_subs`` (whether the item actually has a subtitle
-            file on disk) - the wanted endpoint only knows what's *missing*,
-            not what exists. None means the detail fetch failed, in which
-            case we conservatively report no subs.
+        title: Display title ("<series title> - <episode title>"), composed
+            by the caller since a per-episode payload doesn't carry its
+            series' title.
     """
-    # Resolve media_path: prefer the full-detail path (authoritative),
-    # fall back to the wanted endpoint's sceneName.
-    media_path = media_path_detail or wanted_episode.sceneName or ""
+    # Resolve media_path: prefer the authoritative `path` field, fall back to
+    # sceneName (often null).
+    media_path = episode.path or episode.sceneName or ""
     if media_path:
         media_path = path_map.translate(media_path)
 
-    # Whether this episode actually has any subtitle file present. Derived
-    # from the detail endpoint's `subtitles` list (the wanted endpoint only
-    # knows what's missing). An episode can be "wanted" for one language while
-    # already having a subtitle for another - only the present-file list
-    # reflects that.
-    has_any_subs = len(subtitles or []) > 0
+    # Whether this episode actually has any subtitle file present, from the
+    # `subtitles` list of files actually on disk (distinct from
+    # `missing_subtitles`, which only reports what's absent). An episode can
+    # be missing one language while already having a subtitle for another.
+    has_any_subs = len(episode.subtitles) > 0
 
-    cache_id = BazarrCache.make_id("episode", wanted_episode.sonarrEpisodeId)
+    cache_id = BazarrCache.make_id("episode", episode.sonarrEpisodeId)
 
     await _upsert_cache_entry(
         db,
         cache_id,
         "episode",
-        wanted_episode.sonarrEpisodeId,
-        f"{wanted_episode.seriesTitle} - {wanted_episode.episodeTitle}",
+        episode.sonarrEpisodeId,
+        title,
         media_path,
         has_any_subs,
-        wanted_episode.missing_subtitles,
+        episode.missing_subtitles,
         started_at,
-        audio_language,
+        episode.audio_language,
     )
-
-
-async def _run_no_subs_pass(
-    db: "AsyncSession",
-    client: BazarrClient,
-    path_map: PathMap,
-    started_at: datetime,
-    reporter: ProgressReporter,
-    poll_movies: bool,
-    poll_episodes: bool,
-) -> tuple[int, int]:
-    """Scan the full library for items with no subtitles (opt-in).
-
-    This portion has no known total up front, so the reporter drops its
-    denominator and the UI shows a live processed counter instead.
-    """
-    reporter.set_stage("scanning library for missing subtitles")
-    reporter.set_known_total(0)
-    await reporter.report()
-
-    movies_added = 0
-    episodes_added = 0
-    if poll_movies:
-        movies_added = await _poll_all_movies(
-            db, client, path_map, started_at, reporter
-        )
-    if poll_episodes:
-        episodes_added = await _poll_all_episodes(
-            db, client, path_map, started_at, reporter
-        )
-    return movies_added, episodes_added
 
 
 async def _poll_all_movies(
@@ -779,61 +554,43 @@ async def _poll_all_movies(
     started_at: datetime,
     reporter: ProgressReporter | None = None,
 ) -> int:
-    """Poll all movies and add those with no subtitles to cache.
+    """Fetch and upsert every movie in the Bazarr library (full sync).
 
-    This is expensive and opt-in via bazarr_track_no_subs setting.
+    Ingests ALL movies regardless of subtitle state - both fully-subtitled
+    and missing/no-subs items - so the cache carries enough state to serve
+    every Wanted display scope (all/missing/no_subs) without re-polling.
+
+    This is now the primary (only) source of movie data for a poll, so a
+    fetch failure here is NOT swallowed - it propagates to the caller
+    (`poll_bazarr_manually`'s outer handler logs it and re-raises), matching
+    the pre-M8 behaviour where a failed wanted-movies fetch also propagated
+    rather than being silently reported as a successful empty poll.
 
     Args:
         db: Async database session
         client: BazarrClient instance
         path_map: PathMap for path translation
         started_at: Poll start time
-        reporter: Optional progress reporter (no known total for this pass).
+        reporter: Optional progress reporter. `/api/movies` reports an exact
+            total up front, seeded here as the known denominator.
 
     Returns:
-        Number of cache entries added during this pass.
+        Number of movies processed during this pass.
     """
-    added = 0
-    try:
-        movies_page = await client.list_all_movies(length=200)
-        for movie in movies_page.data:
-            # Check if movie has no subtitles at all
-            if not movie.subtitles:
-                media_path = movie.path or movie.sceneName or ""
-                if media_path:
-                    media_path = path_map.translate(media_path)
+    processed = 0
+    movies_page = await client.list_all_movies()
+    if reporter is not None:
+        reporter.set_known_total(movies_page.total)
+        reporter.set_stage("syncing movies")
+        await reporter.report(force=True)
 
-                cache_id = BazarrCache.make_id("movie", movie.radarrId)
+    for movie in movies_page.data:
+        await _process_movie(db, movie, path_map, started_at)
+        processed += 1
+        if reporter is not None:
+            await reporter.step()
 
-                # Upsert - only if not already in cache from wanted list
-                result = await db.execute(
-                    select(BazarrCache).where(BazarrCache.id == cache_id)
-                )
-                existing = result.scalar_one_or_none()
-
-                if not existing:
-                    cache_entry = BazarrCache(
-                        id=cache_id,
-                        kind="movie",
-                        ext_id=movie.radarrId,
-                        title=movie.title,
-                        media_path=media_path,
-                        has_any_subs=False,
-                        missing_subtitles=[],  # Empty because we don't know what's missing
-                        audio_language=_build_language_list(movie.audio_language),
-                        last_polled=started_at,
-                        active_job_id=None,
-                    )
-                    db.add(cache_entry)
-                    added += 1
-                    if reporter is not None:
-                        await reporter.step()
-
-        await db.commit()
-    except Exception as e:
-        logger.warning("Failed to poll all movies: %s", e)
-
-    return added
+    return processed
 
 
 async def _poll_all_episodes(
@@ -843,83 +600,60 @@ async def _poll_all_episodes(
     started_at: datetime,
     reporter: ProgressReporter | None = None,
 ) -> int:
-    """Poll all episodes and add those with no subtitles to cache.
+    """Fetch and upsert every episode in the Bazarr library (full sync).
 
-    This is expensive and opt-in via bazarr_track_no_subs setting.
+    Ingests ALL episodes regardless of subtitle state, walking series-by-
+    series since Bazarr has no single "all episodes" endpoint (bounded by
+    the number of series, not one call per episode).
 
-    Separates HTTP calls from DB operations to avoid holding DB transactions
-    during network I/O (follows short-transaction convention).
+    Each episode is upserted immediately as it's fetched rather than
+    collected into a separate DB phase: `_upsert_cache_entry` opens and
+    commits its own short transaction per item (select + commit), so no
+    write transaction is ever held open across the next series' HTTP call
+    (short-transaction convention).
+
+    A failure listing the series themselves propagates (this is now the
+    primary source of episode data - see `_poll_all_movies`'s docstring).
+    A failure fetching one series' episodes is tolerated - logged and
+    skipped - so one bad series doesn't abort the sync for every other
+    series, mirroring the old per-series detail-fetch tolerance.
 
     Args:
         db: Async database session
         client: BazarrClient instance
         path_map: PathMap for path translation
         started_at: Poll start time
-        reporter: Optional progress reporter (no known total for this pass).
+        reporter: Optional progress reporter. Bazarr has no upfront total
+            for episodes (only known after walking every series), so this
+            pass never sets a known total - the reporter falls back to a
+            live "processed" counter for it.
 
     Returns:
-        Number of cache entries added during this pass.
+        Number of episodes processed during this pass.
     """
-    added = 0
-    try:
-        # Phase 1: HTTP calls only - collect cache entries without DB access
-        cache_entries_to_add = []
+    processed = 0
+    series_page = await client.list_all_series()
 
-        series_page = await client.list_all_series(length=200)
-
-        for series in series_page.data:
+    for series in series_page.data:
+        try:
             episodes_page = await client.list_episodes(seriesid=series.sonarrSeriesId)
-
-            for episode in episodes_page.data:
-                # Check if episode has no subtitles at all
-                if not episode.subtitles:
-                    media_path = episode.path or episode.sceneName or ""
-                    if media_path:
-                        media_path = path_map.translate(media_path)
-
-                    cache_id = BazarrCache.make_id("episode", episode.sonarrEpisodeId)
-                    cache_entries_to_add.append(
-                        {
-                            "cache_id": cache_id,
-                            "ext_id": episode.sonarrEpisodeId,
-                            "title": f"{series.title} - {episode.title}",
-                            "media_path": media_path,
-                            "audio_language": _build_language_list(
-                                episode.audio_language
-                            ),
-                        }
-                    )
-
-        # Phase 2: DB operations only - upsert all collected entries
-        for entry in cache_entries_to_add:
-            result = await db.execute(
-                select(BazarrCache).where(BazarrCache.id == entry["cache_id"])
+        except Exception as e:
+            logger.warning(
+                "Failed to fetch episodes for series %s (%s): %s",
+                series.sonarrSeriesId,
+                series.title,
+                e,
             )
-            existing = result.scalar_one_or_none()
+            continue
 
-            if not existing:
-                cache_entry = BazarrCache(
-                    id=entry["cache_id"],
-                    kind="episode",
-                    ext_id=entry["ext_id"],
-                    title=entry["title"],
-                    media_path=entry["media_path"],
-                    has_any_subs=False,
-                    missing_subtitles=[],  # Empty because we don't know what's missing
-                    audio_language=entry["audio_language"],
-                    last_polled=started_at,
-                    active_job_id=None,
-                )
-                db.add(cache_entry)
-                added += 1
-                if reporter is not None:
-                    await reporter.step()
+        for episode in episodes_page.data:
+            title = f"{series.title} - {episode.title}"
+            await _process_episode(db, episode, path_map, started_at, title)
+            processed += 1
+            if reporter is not None:
+                await reporter.step()
 
-        await db.commit()
-    except Exception as e:
-        logger.warning("Failed to poll all episodes: %s", e)
-
-    return added
+    return processed
 
 
 async def _delete_stale(
@@ -928,7 +662,7 @@ async def _delete_stale(
     poll_movies: bool = True,
     poll_episodes: bool = True,
 ) -> int:
-    """Delete items that are no longer wanted.
+    """Delete items no longer present in Bazarr's library.
 
     Removes items from cache where last_polled < started_at
     (meaning they were not seen in the current poll cycle).

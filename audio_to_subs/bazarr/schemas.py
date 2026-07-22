@@ -50,64 +50,29 @@ class SubtitleLanguage(BaseModel):
     hi: bool = Field(default=False, description="Hearing impaired flag")
 
 
-class WantedMovie(BaseModel):
-    """Movie item from Bazarr wanted list."""
-
-    title: str = Field(description="Movie title")
-    missing_subtitles: list[SubtitleLanguage] = Field(
-        default_factory=list, description="List of missing subtitle languages"
-    )
-    radarrId: int = Field(description="Radarr ID for the movie")
-    sceneName: str | None = Field(default=None, description="Scene name for the movie")
-    tags: list[str] = Field(default_factory=list, description="Movie tags")
-
-
-class WantedMoviesPage(BaseModel):
-    """Response wrapper for movies wanted endpoint."""
-
-    data: list[WantedMovie] = Field(description="List of wanted movies")
-    total: int = Field(description="Total count of wanted movies")
-
-
-class WantedEpisode(BaseModel):
-    """Episode item from Bazarr wanted list."""
-
-    seriesTitle: str = Field(description="Series title")
-    episode_number: str = Field(description="Episode number in SxxExx format")
-    episodeTitle: str = Field(description="Episode title")
-    missing_subtitles: list[SubtitleLanguage] = Field(
-        default_factory=list, description="List of missing subtitle languages"
-    )
-    sonarrSeriesId: int = Field(description="Sonarr series ID")
-    sonarrEpisodeId: int = Field(description="Sonarr episode ID")
-    sceneName: str | None = Field(
-        default=None, description="Scene name for the episode"
-    )
-    tags: list[str] = Field(default_factory=list, description="Episode tags")
-    seriesType: str | None = Field(default=None, description="Series type")
-
-
-class WantedEpisodesPage(BaseModel):
-    """Response wrapper for episodes wanted endpoint."""
-
-    data: list[WantedEpisode] = Field(description="List of wanted episodes")
-    total: int = Field(description="Total count of wanted episodes")
-
-
 class Movie(BaseModel):
-    """Movie item from Bazarr all movies endpoint.
+    """Movie item from Bazarr all movies endpoint (`/api/movies`).
 
     `audio_language` shares Bazarr's `*_language_model` family with
     `Episode.audio_language`/`Series.audio_language` - same {name, code2,
     code3} shape, code2/code3 may be null for unresolved tracks, and it
     needs the same null-column normalization (see `Episode`'s docstring
     for why only `audio_language`, not `subtitles`, needs this).
+
+    `missing_subtitles` is confirmed present on this endpoint's marshal
+    model (`bazarr/api/movies/movies.py`'s `movies_data_model`) - the same
+    shape as `Episode.missing_subtitles` - so a full `/api/movies` sync can
+    derive both "has any subs" (from `subtitles`) and "what's missing"
+    (from `missing_subtitles`) without a separate wanted-endpoint call.
     """
 
     title: str = Field(description="Movie title")
     radarrId: int = Field(description="Radarr ID for the movie")
     subtitles: list[SubtitleLanguage] = Field(
         default_factory=list, description="List of existing subtitles"
+    )
+    missing_subtitles: list[SubtitleLanguage] = Field(
+        default_factory=list, description="List of missing subtitle languages"
     )
     audio_language: list[SubtitleLanguage] = Field(
         default_factory=list,

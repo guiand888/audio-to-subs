@@ -240,26 +240,114 @@ class TestListWantedEndpoint:
         titles = {i["title"] for i in response.json()["items"]}
         assert titles == {"Breaking Bad S01E01"}
 
-    def test_list_wanted_has_any_subs_filter(self, sync_session, authenticated_client):
+    def test_list_wanted_scope_no_subs_filter(self, sync_session, authenticated_client):
         self._seed_titles(sync_session)
-        response = authenticated_client.get("/api/wanted?has_any_subs=true")
+        response = authenticated_client.get("/api/wanted?scope=no_subs")
         assert response.status_code == 200
         items = response.json()["items"]
-        assert items == [i for i in items if i["has_any_subs"]]
-        assert {i["title"] for i in items} == {"Matrix Reloaded"}
+        assert items == [i for i in items if not i["has_any_subs"]]
+        assert {i["title"] for i in items} == {"The Matrix", "Breaking Bad S01E01"}
+
+    def test_list_wanted_scope_missing_filter(self, sync_session, authenticated_client):
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?scope=missing")
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        # All three seeded items carry a non-empty missing_subtitles list.
+        assert titles == {"The Matrix", "Matrix Reloaded", "Breaking Bad S01E01"}
+
+    def test_list_wanted_scope_all_returns_everything(
+        self, sync_session, authenticated_client
+    ):
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?scope=all")
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == {"The Matrix", "Matrix Reloaded", "Breaking Bad S01E01"}
+
+    def test_list_wanted_default_scope_is_all(self, sync_session, authenticated_client):
+        """Omitting scope must behave the same as scope=all (no filter)."""
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted")
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == {"The Matrix", "Matrix Reloaded", "Breaking Bad S01E01"}
 
     def test_list_wanted_search_composes_with_other_filters(
         self, sync_session, authenticated_client
     ):
-        """Search must respect item_type, language, and has_any_subs filters."""
+        """Search must respect item_type, language, and scope filters."""
         self._seed_titles(sync_session)
         # "matrix" + Movies + no subs + missing lang en -> only "The Matrix"
         response = authenticated_client.get(
-            "/api/wanted?search=matrix&item_type=movie&has_any_subs=false&language=en"
+            "/api/wanted?search=matrix&item_type=movie&scope=no_subs&language=en"
         )
         assert response.status_code == 200
         titles = {i["title"] for i in response.json()["items"]}
         assert titles == {"The Matrix"}
+
+    @pytest.mark.parametrize(
+        ("scope", "expected_titles"),
+        [
+            ("all", {"The Matrix", "Matrix Reloaded"}),
+            ("missing", {"The Matrix", "Matrix Reloaded"}),
+            ("no_subs", {"The Matrix"}),
+        ],
+    )
+    def test_list_wanted_scope_composes_with_item_type(
+        self, sync_session, authenticated_client, scope, expected_titles
+    ):
+        """scope must apply on top of item_type, not replace it."""
+        self._seed_titles(sync_session)
+        response = authenticated_client.get(
+            f"/api/wanted?scope={scope}&item_type=movie"
+        )
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == expected_titles
+
+    @pytest.mark.parametrize("scope", ["all", "missing", "no_subs"])
+    def test_list_wanted_scope_composes_with_language(
+        self, sync_session, authenticated_client, scope
+    ):
+        """scope must apply on top of the language filter, not replace it.
+
+        language=en matches "The Matrix" and "Breaking Bad S01E01" (both
+        missing an "en" subtitle); "Matrix Reloaded" is missing "fr" and is
+        excluded regardless of scope. Both matches also happen to have
+        has_any_subs=False, so all three scopes agree here - this still
+        exercises the combined language+scope Python-filter code path.
+        """
+        self._seed_titles(sync_session)
+        response = authenticated_client.get(f"/api/wanted?scope={scope}&language=en")
+        assert response.status_code == 200
+        titles = {i["title"] for i in response.json()["items"]}
+        assert titles == {"The Matrix", "Breaking Bad S01E01"}
+
+    def test_list_wanted_scope_no_subs_pagination(
+        self, sync_session, authenticated_client
+    ):
+        """scope=no_subs filters in SQL directly; `total` must still reflect
+        the filtered count, not the unfiltered library size."""
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?scope=no_subs&page_size=1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 2  # The Matrix + Breaking Bad S01E01
+        assert len(data["items"]) == 1
+
+    def test_list_wanted_scope_missing_pagination_recomputed_after_python_filter(
+        self, sync_session, authenticated_client
+    ):
+        """scope=missing filters in Python (SQLite has no json_contains over
+        missing_subtitles); `total` must reflect the filtered count, not the
+        unfiltered SQL count, mirroring the language filter's fix."""
+        self._seed_titles(sync_session)
+        response = authenticated_client.get("/api/wanted?scope=missing&page_size=1")
+        assert response.status_code == 200
+        data = response.json()
+        assert data["total"] == 3  # all three seeded items are missing >=1 language
+        assert len(data["items"]) == 1
 
 
 class TestGetWantedItemEndpoint:

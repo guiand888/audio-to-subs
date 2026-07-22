@@ -134,6 +134,10 @@ export interface WantedListResponse {
   last_refreshed_at: string | null
 }
 
+// Display filter over the synced library (GET /api/wanted?scope=...). Never
+// narrows what a refresh re-syncs - only what's shown from the cache.
+export type WantedScope = "all" | "missing" | "no_subs"
+
 // --------------- Settings ---------------
 
 export interface SettingsOut {
@@ -142,7 +146,6 @@ export interface SettingsOut {
   mistral_input_token_rate_usd: number | null
   mistral_output_token_rate_usd: number | null
   bazarr_poll_interval: number
-  bazarr_track_no_subs: boolean
   bazarr_url: string | null
   bazarr_api_key: string | null
   bazarr_timeout: number
@@ -160,7 +163,6 @@ export interface SettingsPatch {
   mistral_input_token_rate_usd?: number | null
   mistral_output_token_rate_usd?: number | null
   bazarr_poll_interval?: number
-  bazarr_track_no_subs?: boolean
   bazarr_url?: string | null
   bazarr_api_key?: string | null
   bazarr_timeout?: number
@@ -212,7 +214,6 @@ export interface SettingsFormData {
   mistral_input_token_rate_usd: number | null
   mistral_output_token_rate_usd: number | null
   bazarr_poll_interval: number
-  bazarr_track_no_subs: boolean
   bazarr_url: string | null
   bazarr_api_key: string | null
   bazarr_timeout: number
