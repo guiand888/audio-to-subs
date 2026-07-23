@@ -53,11 +53,18 @@ def realistic_movie_item(**overrides: Any) -> dict[str, Any]:
     `audio_language` follows the same wire-shape rules as
     `realistic_series_item` - a JSON array of {name, code2, code3} when the
     DB column is set, a dict-of-nulls when it's NULL.
+
+    `missing_subtitles` and `path` are confirmed present on this endpoint's
+    marshal model (`bazarr/api/movies/movies.py`'s `movies_data_model`) -
+    the full-sync poller relies on both to derive `has_any_subs` state and
+    the authoritative media path without a separate detail call.
     """
     item: dict[str, Any] = {
         "title": "Test Movie",
         "radarrId": 1,
+        "path": "/movies/Test Movie (2024)/Test Movie.mkv",
         "subtitles": [],
+        "missing_subtitles": [],
         "audio_language": [{"name": "French", "code2": "fr", "code3": "fre"}],
         "sceneName": "Test.Movie.2024.1080p",
         "tags": [],

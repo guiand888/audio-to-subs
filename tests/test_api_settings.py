@@ -139,6 +139,32 @@ class TestSettingsResponseModel:
         assert response.bazarr_poll_interval == 7200
         assert response.default_language == "en"
 
+    def test_bazarr_track_no_subs_removed_from_defaults(self):
+        """M8: full sync makes bazarr_track_no_subs redundant - it must be
+        gone from the settings schema/defaults entirely, not kept as a
+        no-op."""
+        from audio_to_subs.api.routes.settings import DEFAULT_SETTINGS
+
+        assert "bazarr_track_no_subs" not in DEFAULT_SETTINGS
+
+    def test_bazarr_track_no_subs_removed_from_response_model(self):
+        from audio_to_subs.api.routes.settings import SettingsResponse
+
+        assert "bazarr_track_no_subs" not in SettingsResponse.model_fields
+
+    def test_bazarr_track_no_subs_removed_from_update_model(self):
+        from audio_to_subs.api.routes.settings import SettingsUpdate
+
+        assert "bazarr_track_no_subs" not in SettingsUpdate.model_fields
+
+    def test_get_settings_response_has_no_track_no_subs_field(
+        self, authenticated_client
+    ):
+        """End-to-end: the field must not appear on the wire either."""
+        response = authenticated_client.get("/api/settings")
+        assert response.status_code == 200
+        assert "bazarr_track_no_subs" not in response.json()
+
 
 class TestSettingsUpdateModel:
     """Test SettingsUpdate model validation."""

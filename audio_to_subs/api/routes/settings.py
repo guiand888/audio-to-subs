@@ -38,7 +38,6 @@ DEFAULT_SETTINGS = {
     "mistral_input_token_rate_usd": None,
     "mistral_output_token_rate_usd": None,
     "bazarr_poll_interval": 3600,
-    "bazarr_track_no_subs": False,
     "bazarr_url": None,
     "bazarr_api_key": None,
     "bazarr_timeout": 30.0,
@@ -68,9 +67,6 @@ class SettingsResponse(BaseModel):
         description="Optional token-based output billing rate (USD per token)",
     )
     bazarr_poll_interval: int = Field(description="Bazarr poll interval in seconds")
-    bazarr_track_no_subs: bool = Field(
-        description="Track items with no subtitles in any language"
-    )
     bazarr_url: str | None = Field(default=None, description="Bazarr API base URL")
     bazarr_api_key: str | None = Field(default=None, description="Bazarr API key")
     bazarr_timeout: float = Field(
@@ -136,9 +132,6 @@ class SettingsUpdate(BaseModel):
     )
     bazarr_poll_interval: int | None = Field(
         default=None, description="Bazarr poll interval in seconds"
-    )
-    bazarr_track_no_subs: bool | None = Field(
-        default=None, description="Track items with no subtitles in any language"
     )
     bazarr_url: str | None = Field(default=None, description="Bazarr API base URL")
     bazarr_api_key: str | None = Field(default=None, description="Bazarr API key")

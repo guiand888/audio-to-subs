@@ -699,6 +699,98 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
 })
 
 
+describe("WantedPage - Scope selector (All/Missing/No subs)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    MockEventSource.reset()
+    vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
+  })
+
+  function scopeTablist() {
+    return screen.getByRole("tablist", { name: "Scope" })
+  }
+
+  it("renders all three scope states, replacing the old no-subs toggle", async () => {
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => {
+      expect(scopeTablist()).toBeInTheDocument()
+    })
+    expect(within(scopeTablist()).getByRole("tab", { name: "All" })).toBeInTheDocument()
+    expect(
+      within(scopeTablist()).getByRole("tab", { name: "Missing" }),
+    ).toBeInTheDocument()
+    expect(
+      within(scopeTablist()).getByRole("tab", { name: "No subs" }),
+    ).toBeInTheDocument()
+    // The old binary toggle must be gone.
+    expect(screen.queryByText("No subtitles only")).not.toBeInTheDocument()
+  })
+
+  it("selecting a scope sends it to the server as a display filter", async () => {
+    const user = userEvent.setup()
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => scopeTablist())
+    await user.click(within(scopeTablist()).getByRole("tab", { name: "Missing" }))
+
+    await waitFor(() => {
+      expect(api.get).toHaveBeenLastCalledWith(
+        expect.stringContaining("scope=missing"),
+      )
+    })
+
+    await user.click(within(scopeTablist()).getByRole("tab", { name: "No subs" }))
+    await waitFor(() => {
+      expect(api.get).toHaveBeenLastCalledWith(
+        expect.stringContaining("scope=no_subs"),
+      )
+    })
+  })
+
+  it("selecting a scope does NOT trigger a refresh (sync stays decoupled from display)", async () => {
+    const user = userEvent.setup()
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => scopeTablist())
+    await user.click(within(scopeTablist()).getByRole("tab", { name: "Missing" }))
+    await user.click(within(scopeTablist()).getByRole("tab", { name: "No subs" }))
+
+    // Only GETs for the list (and no /api/wanted/refresh POST) should have
+    // happened - selecting a scope must never narrow or trigger a re-sync.
+    expect(api.post).not.toHaveBeenCalledWith(
+      "/api/wanted/refresh",
+      expect.anything(),
+    )
+  })
+
+  it("Refresh still syncs the full library regardless of the active scope", async () => {
+    const user = userEvent.setup()
+    render(<WantedPage />, { wrapper })
+
+    await waitFor(() => scopeTablist())
+    await user.click(within(scopeTablist()).getByRole("tab", { name: "No subs" }))
+    await user.click(screen.getByText("Refresh"))
+
+    await waitFor(() => {
+      expect(MockEventSource.latest()).toBeDefined()
+    })
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
+    await waitFor(() => {
+      // The refresh request carries item_type only - no scope field at all.
+      const call = vi
+        .mocked(api.post)
+        .mock.calls.find(([path]) => path === "/api/wanted/refresh")
+      expect(call).toBeDefined()
+      const body = call![1] as Record<string, unknown>
+      expect(body.item_type).toBe("all")
+      expect(body).not.toHaveProperty("scope")
+    })
+  })
+})
+
 describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()

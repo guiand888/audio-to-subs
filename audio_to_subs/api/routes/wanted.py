@@ -37,6 +37,20 @@ class WantedItemType(str, Enum):
     EPISODE = "episode"
 
 
+class WantedScope(str, Enum):
+    """Display-only filter over the already-synced full library.
+
+    Unlike WantedItemType (which also scopes what a refresh re-syncs), this
+    never narrows what gets polled - the poller always ingests the entire
+    library within the active item_type. It only filters what's shown from
+    the cache.
+    """
+
+    ALL = "all"
+    MISSING = "missing"
+    NO_SUBS = "no_subs"
+
+
 class WantedItem(UTCAwareModel):
     """Wanted item with job status."""
 
@@ -161,8 +175,13 @@ async def list_wanted(  # noqa: C901
     search: str | None = Query(
         default=None, description="Case-insensitive title search"
     ),
-    has_any_subs: bool | None = Query(
-        default=None, description="Filter by whether item has any subtitles"
+    scope: WantedScope = Query(  # noqa: B008
+        default=WantedScope.ALL,
+        description=(
+            "Display filter over the synced library: all (no filter), "
+            "missing (>=1 missing subtitle language), no_subs (no subtitle "
+            "at all). Never re-triggers or narrows a sync."
+        ),
     ),
     has_job: bool | None = Query(
         default=None, description="Filter by whether item has an active job"
@@ -172,16 +191,17 @@ async def list_wanted(  # noqa: C901
         default=100, ge=1, le=1000, description="Items per page"
     ),  # noqa: B008
 ) -> WantedListResponse:
-    """List wanted items from Bazarr cache.
+    """List items from the Bazarr cache (the full synced library).
 
-    Returns filtered, paginated list of items that are missing subtitles.
-    Never hits Bazarr directly - reads from local cache only.
+    Returns filtered, paginated list of cached items. Never hits Bazarr
+    directly - reads from local cache only.
 
     Query parameters:
     - item_type: Filter by type (all, movie, episode)
     - language: Filter by specific missing language code
     - search: Case-insensitive title search
-    - has_any_subs: Filter by whether the item has any subtitles
+    - scope: Display filter (all, missing, no_subs) over the full synced
+      library - does not affect what a refresh re-syncs
     - has_job: Filter by whether item has an active job (true/false)
     - page: Page number (1-based)
     - page_size: Items per page
@@ -206,11 +226,14 @@ async def list_wanted(  # noqa: C901
         )
         query = query.where(BazarrCache.title.ilike(f"%{escaped_search}%", escape="\\"))
 
-    # Apply has_any_subs filter
-    if has_any_subs is not None:
-        query = query.where(BazarrCache.has_any_subs == has_any_subs)
+    # scope=no_subs can be expressed in SQL directly. scope=missing needs
+    # Python-side filtering (see below) since SQLite has no json_contains
+    # over missing_subtitles to test "list is non-empty" in SQL.
+    if scope == WantedScope.NO_SUBS:
+        query = query.where(BazarrCache.has_any_subs.is_(False))
 
-    # Note: Language filter applied in Python below (SQLite has no json_contains)
+    # Note: language filter and scope=missing are applied in Python below
+    # (SQLite has no json_contains).
 
     # Apply has_job filter
     if has_job is not None:
@@ -221,22 +244,26 @@ async def list_wanted(  # noqa: C901
 
     offset = (page - 1) * page_size
 
-    if language:
-        # The language filter can't be expressed in SQL (SQLite has no
-        # json_contains over missing_subtitles), so it must run in Python.
-        # That means `total` and the page slice have to be computed from the
-        # *filtered* set here too - computing `total` from a SQL count and
-        # then filtering only the already-paginated page (the previous
-        # approach) desyncs "Page X of Y" from what's actually returned and
-        # can drop matching items on later pages.
+    if language or scope == WantedScope.MISSING:
+        # The language filter and scope=missing can't be expressed in SQL
+        # (SQLite has no json_contains over missing_subtitles), so they must
+        # run in Python. That means `total` and the page slice have to be
+        # computed from the *filtered* set here too - computing `total` from
+        # a SQL count and then filtering only the already-paginated page
+        # (the previous approach) desyncs "Page X of Y" from what's actually
+        # returned and can drop matching items on later pages.
         all_items = list(await db.scalars(query))
         matched_items: list[BazarrCache] = []
         for item in all_items:
-            if item.missing_subtitles:
-                for sub in item.missing_subtitles:
-                    if isinstance(sub, dict) and sub.get("code2") == language:
-                        matched_items.append(item)
-                        break
+            if scope == WantedScope.MISSING and not item.missing_subtitles:
+                continue
+            if language:
+                if not any(
+                    isinstance(sub, dict) and sub.get("code2") == language
+                    for sub in item.missing_subtitles
+                ):
+                    continue
+            matched_items.append(item)
         total = len(matched_items)
         items = matched_items[offset : offset + page_size]
     else:
@@ -416,8 +443,8 @@ async def refresh_wanted_list(
 
     The refresh:
     - Uses database settings first, falling back to environment variables
-    - Respects the item_type filter (all, movies, episodes)
-    - Respects the bazarr_track_no_subs setting
+    - Respects the item_type filter (all, movies, episodes) - within that
+      scope, ingests the ENTIRE library (not just Bazarr's "wanted" subset)
     - Updates the local cache with fresh data from Bazarr
     - Streams progress (processed / total) as it runs
 

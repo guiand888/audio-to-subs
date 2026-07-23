@@ -1,5 +1,6 @@
-// Wanted page: search, tabs (All/Movies/Series), only-no-subs toggle,
-// missing-lang filter, table, live active-job indicator, Transcribe dialog.
+// Wanted page: search, tabs (All/Movies/Series), scope selector
+// (All/Missing/No subs), missing-lang filter, table, live active-job
+// indicator, Transcribe dialog.
 
 import { useState, useEffect, useMemo } from "react"
 import { useQueryClient } from "@tanstack/react-query"
@@ -8,7 +9,6 @@ import { toast } from "sonner"
 import { Input } from "@/components/ui/input"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Switch } from "@/components/ui/switch"
 import { Label } from "@/components/ui/label"
 import { Tabs, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
@@ -46,6 +46,7 @@ import type {
   MissingSubtitle,
   OutputFormat,
   WantedItem,
+  WantedScope,
 } from "@/lib/types"
 
 type ItemType = "all" | "movie" | "episode"
@@ -271,7 +272,10 @@ export function WantedPage() {
   const queryClient = useQueryClient()
   const [itemType, setItemType] = useState<ItemType>("all")
   const [search, setSearch] = useState("")
-  const [onlyNoSubs, setOnlyNoSubs] = useState(false)
+  // Display-only filter over the already-synced full library - selecting a
+  // scope never triggers or narrows a re-sync (see handleRefresh below,
+  // which is keyed only on itemType).
+  const [scope, setScope] = useState<WantedScope>("all")
   const [langFilter, setLangFilter] = useState<string>("")
   const [page, setPage] = useState(1)
   const [pageSize, setPageSize] = useState(50)
@@ -300,16 +304,16 @@ export function WantedPage() {
     item_type: itemType,
     language: langFilter || undefined,
     search: search || undefined,
-    has_any_subs: onlyNoSubs ? false : undefined,
+    scope,
     page,
     page_size: pageSize,
   })
 
-  // Server now applies search + type + language + no-subs filtering, so the
+  // Server now applies search + type + language + scope filtering, so the
   // client only needs to surface the returned items.
   const items = useMemo(() => {
     if (!data?.items) return []
-    // Search, no-subs, and language filtering are applied server-side (see
+    // Search, scope, and language filtering are applied server-side (see
     // the useWanted call above), so the client only sorts what comes back.
     // Default sort: alphabetical by title (case-insensitive). No sorting
     // options or extra categories are exposed yet, so this is the baseline.
@@ -322,7 +326,7 @@ export function WantedPage() {
   const { data: langOptionsData } = useWanted({
     item_type: itemType,
     search: search || undefined,
-    has_any_subs: onlyNoSubs ? false : undefined,
+    scope,
     page: 1,
     page_size: 1000,
   })
@@ -371,27 +375,29 @@ export function WantedPage() {
             setPage(1)
           }}
         >
-          <TabsList>
+          <TabsList aria-label="Type">
             <TabsTrigger value="all">All</TabsTrigger>
             <TabsTrigger value="movie">Movies</TabsTrigger>
             <TabsTrigger value="episode">Series</TabsTrigger>
           </TabsList>
         </Tabs>
 
-        {/* Only no-subs */}
-        <div className="flex items-center gap-2">
-          <Switch
-            id="only-no-subs"
-            checked={onlyNoSubs}
-            onCheckedChange={(v) => {
-              setOnlyNoSubs(v)
-              setPage(1)
-            }}
-          />
-          <Label htmlFor="only-no-subs" className="text-sm cursor-pointer">
-            No subtitles only
-          </Label>
-        </div>
+        {/* Scope: display-only filter over the synced library. Does NOT
+            trigger or narrow a re-sync - only the Movies/Series tab above
+            scopes what Refresh re-syncs. */}
+        <Tabs
+          value={scope}
+          onValueChange={(v) => {
+            setScope(v as WantedScope)
+            setPage(1)
+          }}
+        >
+          <TabsList aria-label="Scope">
+            <TabsTrigger value="all">All</TabsTrigger>
+            <TabsTrigger value="missing">Missing</TabsTrigger>
+            <TabsTrigger value="no_subs">No subs</TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         {/* Language filter */}
         {langOptions.length > 0 && (
