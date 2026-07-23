@@ -25,7 +25,7 @@ if TYPE_CHECKING:
     from sqlalchemy.ext.asyncio import AsyncSession
 
     from audio_to_subs.api.settings import Settings
-    from audio_to_subs.bazarr.schemas import Episode, Movie
+    from audio_to_subs.bazarr.schemas import Episode, Movie, MoviesPage, SeriesPage
 
 logger = logging.getLogger(__name__)
 
@@ -33,13 +33,15 @@ logger = logging.getLogger(__name__)
 class ProgressReporter:
     """Tracks refresh progress and emits throttled updates to a callback.
 
-    The full-library sync fetches movies in a single call, so its total is
-    known up front (Bazarr's ``/api/movies`` response carries a ``total``).
-    Episodes are walked series-by-series (Bazarr has no single "all
-    episodes" endpoint), so their count is only known once fully iterated.
-    To keep a single coherent progress signal, we start with the known
-    movies total and, once that is exhausted, fall back to a live
-    "processed" counter with no denominator for the episodes portion.
+    The full-library sync's total is known up front for BOTH movies and
+    episodes: Bazarr's ``/api/movies`` response carries an exact ``total``,
+    and each series in ``/api/series`` carries ``episodeFileCount`` (a real
+    per-series episode count) which can be summed across the listing without
+    a separate ``/api/episodes`` call. ``poll_bazarr_manually`` computes this
+    combined total and calls ``set_known_total`` once before either phase
+    starts, so a single coherent denominator covers the whole sync - the bar
+    advances continuously from movies into episodes instead of losing its
+    denominator partway through.
 
     Updates are throttled (~1 Hz) so a fast poll loop doesn't flood the
     downstream pub/sub channel.
@@ -56,12 +58,17 @@ class ProgressReporter:
         self._callback = callback
         self._throttle = throttle_seconds
         self._processed = 0
-        self._known_total: int | None = 0
+        # None means "no denominator known yet" (e.g. before the up-front
+        # movies+episodes fetch completes). Deliberately NOT 0 - 0 is a
+        # legitimate total (an empty library) and must be distinguishable
+        # from "not set yet" via `is not None`, not truthiness.
+        self._known_total: int | None = None
         self._stage = "starting"
         self._last_emit = 0.0
 
     def set_known_total(self, total: int) -> None:
-        """Set the denominator known up front (e.g. the movies total)."""
+        """Set the denominator known up front (movies total + summed
+        per-series episode counts - see class docstring)."""
         self._known_total = total
 
     def set_stage(self, stage: str) -> None:
@@ -84,11 +91,12 @@ class ProgressReporter:
 
     @property
     def total(self) -> int | None:
-        # Only report a denominator while the known (movies) portion is being
-        # processed. Once we move into the unknown-total episodes tail,
-        # report None so the UI shows a live counter instead of a fake
-        # estimate.
-        if self._known_total and self._processed <= self._known_total:
+        # Report the known denominator once set, for as long as processed
+        # hasn't drifted past it (e.g. Bazarr's episodeFileCount undercounting
+        # relative to what /api/episodes actually returns) - in that drift
+        # case, fall back to a live counter rather than a total that's
+        # already been exceeded.
+        if self._known_total is not None and self._processed <= self._known_total:
             return self._known_total
         return None
 
@@ -283,6 +291,45 @@ async def poll_once(
 _full_sync_lock = asyncio.Lock()
 
 
+async def _fetch_pages_and_set_total(
+    client: BazarrClient,
+    poll_movies: bool,
+    poll_episodes: bool,
+    reporter: ProgressReporter,
+) -> tuple["MoviesPage | None", "SeriesPage | None"]:
+    """Fetch the movies/series listings needed by this sync and seed the
+    reporter with their combined total, before either phase starts.
+
+    Each listing is already required by the phase that follows it, so
+    fetching both up front (rather than letting `_poll_all_movies`/
+    `_poll_all_episodes` fetch their own) costs no extra HTTP calls, and
+    gives a single, accurate denominator for the WHOLE sync: movies.total is
+    exact, and the episodes total is the sum of each series'
+    episodeFileCount (a real per-series COUNT Bazarr already computes). This
+    keeps one coherent percentage across the movies->episodes boundary
+    instead of losing the denominator partway through.
+
+    Returns:
+        (movies_page, series_page) - either may be None if that type wasn't
+        requested (`poll_movies`/`poll_episodes` False).
+    """
+    movies_page: MoviesPage | None = None
+    series_page: SeriesPage | None = None
+    if poll_movies:
+        movies_page = await client.list_all_movies()
+    if poll_episodes:
+        series_page = await client.list_all_series()
+
+    combined_total = 0
+    if movies_page is not None:
+        combined_total += movies_page.total
+    if series_page is not None:
+        combined_total += sum(series.episodeFileCount for series in series_page.data)
+    reporter.set_known_total(combined_total)
+
+    return movies_page, series_page
+
+
 async def poll_bazarr_manually(
     db: "AsyncSession",
     client: BazarrClient,
@@ -354,14 +401,18 @@ async def poll_bazarr_manually(
             reporter.set_stage("syncing library")
             await reporter.report(force=True)
 
-            if poll_movies:
+            movies_page, series_page = await _fetch_pages_and_set_total(
+                client, poll_movies, poll_episodes, reporter
+            )
+
+            if movies_page is not None:
                 movies_processed = await _poll_all_movies(
-                    db, client, path_map, started_at, reporter
+                    db, movies_page, path_map, started_at, reporter
                 )
 
-            if poll_episodes:
+            if series_page is not None:
                 episodes_processed = await _poll_all_episodes(
-                    db, client, path_map, started_at, reporter
+                    db, client, series_page, path_map, started_at, reporter
                 )
 
             # Delete stale items (no longer present in Bazarr) - only for
@@ -599,42 +650,38 @@ def _chunked(items: list[Any], size: int) -> list[list[Any]]:
 
 async def _poll_all_movies(
     db: "AsyncSession",
-    client: BazarrClient,
+    movies_page: "MoviesPage",
     path_map: PathMap,
     started_at: datetime,
     reporter: ProgressReporter | None = None,
 ) -> int:
-    """Fetch and upsert every movie in the Bazarr library (full sync).
+    """Upsert every movie in an already-fetched Bazarr movies listing.
 
     Ingests ALL movies regardless of subtitle state - both fully-subtitled
     and missing/no-subs items - so the cache carries enough state to serve
     every Wanted display scope (all/missing/no_subs) without re-polling.
 
-    This is now the primary (only) source of movie data for a poll, so a
-    fetch failure here is NOT swallowed - it propagates to the caller
-    (`poll_bazarr_manually`'s outer handler logs it and re-raises), matching
-    the pre-M8 behaviour where a failed wanted-movies fetch also propagated
-    rather than being silently reported as a successful empty poll.
+    Takes the listing pre-fetched by the caller (`poll_bazarr_manually`,
+    which needs it up front to compute the combined movies+episodes progress
+    total before either phase starts) rather than fetching it itself, so
+    there is exactly one `/api/movies` call per sync.
 
-    Movies are fetched in one upfront call (no HTTP batching like episodes),
-    but still committed in `CACHE_COMMIT_BATCH_SIZE`-sized chunks rather than
-    one commit per movie, to bound write-transaction count.
+    Committed in `CACHE_COMMIT_BATCH_SIZE`-sized chunks rather than one
+    commit per movie, to bound write-transaction count.
 
     Args:
         db: Async database session
-        client: BazarrClient instance
+        movies_page: Movies listing already fetched by the caller
         path_map: PathMap for path translation
         started_at: Poll start time
-        reporter: Optional progress reporter. `/api/movies` reports an exact
-            total up front, seeded here as the known denominator.
+        reporter: Optional progress reporter. The caller has already set the
+            known total; this only advances stage/processed.
 
     Returns:
         Number of movies processed during this pass.
     """
     processed = 0
-    movies_page = await client.list_all_movies()
     if reporter is not None:
-        reporter.set_known_total(movies_page.total)
         reporter.set_stage("syncing movies")
         await reporter.report(force=True)
 
@@ -652,24 +699,28 @@ async def _poll_all_movies(
 async def _poll_all_episodes(
     db: "AsyncSession",
     client: BazarrClient,
+    series_page: "SeriesPage",
     path_map: PathMap,
     started_at: datetime,
     reporter: ProgressReporter | None = None,
 ) -> int:
-    """Fetch and upsert every episode in the Bazarr library (full sync).
+    """Upsert every episode for an already-fetched Bazarr series listing.
 
     Ingests ALL episodes regardless of subtitle state, walking series in
     batches since Bazarr has no single "all episodes" endpoint (bounded by
     the number of batches, not one call per series or per episode - see
     `CACHE_COMMIT_BATCH_SIZE`).
 
+    Takes the series listing pre-fetched by the caller (`poll_bazarr_manually`,
+    which needs it up front to sum each series' `episodeFileCount` into the
+    combined progress total before either phase starts) rather than fetching
+    it itself, so there is exactly one `/api/series` call per sync.
+
     Each batch's episodes are upserted as they're fetched, then committed
     once as a group at the end of the batch (one write transaction per
     batch, not per episode), so no write transaction is ever held open
     across the next batch's HTTP call (short-transaction convention).
 
-    A failure listing the series themselves propagates (this is now the
-    primary source of episode data - see `_poll_all_movies`'s docstring).
     A failure fetching one batch's episodes is tolerated - logged and
     skipped - so one bad batch doesn't abort the sync for every other
     series, mirroring the old per-series detail-fetch tolerance.
@@ -677,20 +728,17 @@ async def _poll_all_episodes(
     Args:
         db: Async database session
         client: BazarrClient instance
+        series_page: Series listing already fetched by the caller
         path_map: PathMap for path translation
         started_at: Poll start time
-        reporter: Optional progress reporter. Bazarr has no upfront total
-            for episodes (only known after walking every series), so this
-            pass never sets a known total - the reporter falls back to a
-            live "processed" counter for it. A heartbeat is forced once per
-            batch so a slow/large library still emits progress regularly
-            rather than going silent for the whole episodes phase.
+        reporter: Optional progress reporter. The caller has already set the
+            known total (movies total + summed episodeFileCount); this only
+            advances stage/processed.
 
     Returns:
         Number of episodes processed during this pass.
     """
     processed = 0
-    series_page = await client.list_all_series()
     series_by_id = {series.sonarrSeriesId: series for series in series_page.data}
 
     if reporter is not None:

@@ -489,6 +489,27 @@ class TestSeries:
             ]
 
     @pytest.mark.asyncio
+    async def test_list_all_series_parses_episode_file_count(self, respx_mock):
+        """episodeFileCount - a real per-series episode COUNT Bazarr already
+        computes - is parsed, not silently dropped. It's summed across a full
+        series listing to give the Wanted-refresh progress bar an accurate
+        episode total up front, without a separate /api/episodes call."""
+        mock_response = {
+            "data": [realistic_series_item(episodeFileCount=42)],
+            "total": 1,
+        }
+        respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_series()
+            assert result.data[0].episodeFileCount == 42
+
+    @pytest.mark.asyncio
     async def test_list_all_series_null_heavy_item(self, respx_mock):
         """Only path/title/sonarrSeriesId are non-nullable in Bazarr's DB.
 

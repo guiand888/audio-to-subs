@@ -1029,7 +1029,6 @@ class TestPollAllMovies:
         not just missing-subtitle ones (the pre-M8 behaviour this replaces)."""
         from audio_to_subs.bazarr.schemas import MoviesPage, SubtitleLanguage
 
-        mock_client = AsyncMock(spec=BazarrClient)
         fully_subbed = Movie(
             title="Fully Subbed",
             radarrId=1,
@@ -1042,15 +1041,13 @@ class TestPollAllMovies:
             sceneName="/movies/missing-sub.mkv",
             missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
         )
-        mock_client.list_all_movies.return_value = MoviesPage(
-            data=[fully_subbed, missing_sub], total=2
-        )
+        movies_page = MoviesPage(data=[fully_subbed, missing_sub], total=2)
 
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
         processed = await _poll_all_movies(
-            mock_db_session, mock_client, path_map, started_at
+            mock_db_session, movies_page, path_map, started_at
         )
 
         assert processed == 2
@@ -1068,26 +1065,27 @@ class TestPollAllMovies:
         assert cached[2].missing_subtitles[0]["code2"] == "en"
 
     @pytest.mark.asyncio
-    async def test_poll_all_movies_seeds_reporter_known_total(self, mock_db_session):
-        """The reporter's known total is seeded from `/api/movies`'s own
-        `total` field, fetched in the same single call - no separate probe."""
+    async def test_poll_all_movies_advances_processed_against_preset_total(
+        self, mock_db_session
+    ):
+        """_poll_all_movies no longer seeds the reporter's known total itself
+        (poll_bazarr_manually now sets one combined total for movies+episodes
+        up front, before either phase runs) - it just advances `processed`
+        against whatever total the caller already set."""
         from audio_to_subs.bazarr.schemas import MoviesPage
 
-        mock_client = AsyncMock(spec=BazarrClient)
-        mock_client.list_all_movies.return_value = MoviesPage(
-            data=[Movie(title="A", radarrId=1)], total=458
-        )
+        movies_page = MoviesPage(data=[Movie(title="A", radarrId=1)], total=458)
         reporter = ProgressReporter()
+        reporter.set_known_total(458)
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
         await _poll_all_movies(
-            mock_db_session, mock_client, path_map, started_at, reporter
+            mock_db_session, movies_page, path_map, started_at, reporter
         )
 
-        # `total` reports the known denominator while processed <= it (see
-        # ProgressReporter.total) - confirms `/api/movies`'s total seeded it.
         assert reporter.total == 458
+        assert reporter.processed == 1
 
     @pytest.mark.asyncio
     async def test_poll_all_movies_commits_once_per_batch(self, mock_db_session):
@@ -1096,9 +1094,8 @@ class TestPollAllMovies:
         full sync instead of issuing one per item."""
         from audio_to_subs.bazarr.schemas import MoviesPage
 
-        mock_client = AsyncMock(spec=BazarrClient)
         movies = [Movie(title=f"Movie {i}", radarrId=i) for i in range(1, 6)]
-        mock_client.list_all_movies.return_value = MoviesPage(data=movies, total=5)
+        movies_page = MoviesPage(data=movies, total=5)
 
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
@@ -1108,7 +1105,7 @@ class TestPollAllMovies:
 
         with patch("audio_to_subs.bazarr.poller.CACHE_COMMIT_BATCH_SIZE", 2):
             processed = await _poll_all_movies(
-                mock_db_session, mock_client, path_map, started_at
+                mock_db_session, movies_page, path_map, started_at
             )
 
         # 5 movies at a batch size of 2 -> 3 commits (2, 2, 1), not 5.
@@ -1198,7 +1195,7 @@ class TestPollAllEpisodes:
             sceneName="/bazarr/tv/Test Series/Season 01/Episode 02.mkv",
         )
 
-        mock_client.list_all_series.return_value = SeriesPage(
+        series_page = SeriesPage(
             data=[mock_series],
             total=1,
         )
@@ -1211,7 +1208,7 @@ class TestPollAllEpisodes:
 
         # Call the function
         processed = await _poll_all_episodes(
-            mock_db_session, mock_client, path_map, started_at
+            mock_db_session, mock_client, series_page, path_map, started_at
         )
 
         # Verify BOTH episodes were cached (full sync, not a no-subs filter)
@@ -1274,7 +1271,10 @@ class TestPollAllEpisodes:
             base_url="http://poller-wire-test:6767",
             api_key="wire-test-key",
         ) as client:
-            await _poll_all_episodes(mock_db_session, client, path_map, started_at)
+            series_page = await client.list_all_series()
+            await _poll_all_episodes(
+                mock_db_session, client, series_page, path_map, started_at
+            )
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.kind == "episode")
@@ -1305,7 +1305,7 @@ class TestPollAllEpisodes:
             Series(sonarrSeriesId=i, title=f"Series {i}", path=f"/tv/s{i}")
             for i in range(1, 6)
         ]
-        mock_client.list_all_series.return_value = SeriesPage(data=series, total=5)
+        series_page = SeriesPage(data=series, total=5)
 
         def list_episodes_side_effect(*, seriesid):
             return EpisodesPage(
@@ -1322,7 +1322,7 @@ class TestPollAllEpisodes:
 
         with patch("audio_to_subs.bazarr.poller.CACHE_COMMIT_BATCH_SIZE", 2):
             processed = await _poll_all_episodes(
-                mock_db_session, mock_client, path_map, started_at
+                mock_db_session, mock_client, series_page, path_map, started_at
             )
 
         # 5 series at a batch size of 2 -> 3 calls (2, 2, 1), not 5.
@@ -1349,7 +1349,7 @@ class TestPollAllEpisodes:
             Series(sonarrSeriesId=i, title=f"Series {i}", path=f"/tv/s{i}")
             for i in range(1, 4)
         ]
-        mock_client.list_all_series.return_value = SeriesPage(data=series, total=3)
+        series_page = SeriesPage(data=series, total=3)
 
         def list_episodes_side_effect(*, seriesid):
             return EpisodesPage(
@@ -1369,7 +1369,12 @@ class TestPollAllEpisodes:
 
         with patch("audio_to_subs.bazarr.poller.CACHE_COMMIT_BATCH_SIZE", 1):
             await _poll_all_episodes(
-                mock_db_session, mock_client, path_map, started_at, reporter
+                mock_db_session,
+                mock_client,
+                series_page,
+                path_map,
+                started_at,
+                reporter,
             )
 
         # One force report entering the phase + one per batch (3 series,
@@ -1394,7 +1399,7 @@ class TestPollAllEpisodes:
             Series(sonarrSeriesId=i, title=f"Series {i}", path=f"/tv/s{i}")
             for i in range(1, 6)
         ]
-        mock_client.list_all_series.return_value = SeriesPage(data=series, total=5)
+        series_page = SeriesPage(data=series, total=5)
 
         def list_episodes_side_effect(*, seriesid):
             return EpisodesPage(
@@ -1414,7 +1419,7 @@ class TestPollAllEpisodes:
 
         with patch("audio_to_subs.bazarr.poller.CACHE_COMMIT_BATCH_SIZE", 2):
             processed = await _poll_all_episodes(
-                mock_db_session, mock_client, path_map, started_at
+                mock_db_session, mock_client, series_page, path_map, started_at
             )
 
         # 5 series at a batch size of 2 -> 3 batches (2, 2, 1) -> 3 commits,
@@ -1478,6 +1483,76 @@ class TestManualPolling:
         assert episodes_processed == 1
 
         await mock_client.close()
+
+    @pytest.mark.asyncio
+    async def test_manual_poll_all_uses_combined_movies_and_episodes_total(
+        self, mock_db_session
+    ):
+        """poll_bazarr_manually sets ONE denominator (movies total + summed
+        per-series episodeFileCount) before either phase starts, so the
+        percentage stays coherent across the movies->episodes boundary
+        instead of losing its denominator once movies finish (the root
+        cause of the Wanted-refresh progress bar reverting to a bare "N
+        items" counter for the episodes phase - the majority of a full
+        sync's duration)."""
+        from audio_to_subs.bazarr.schemas import (
+            EpisodesPage,
+            MoviesPage,
+            Series,
+            SeriesPage,
+        )
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[
+                Movie(title="Movie 1", radarrId=1),
+                Movie(title="Movie 2", radarrId=2),
+            ],
+            total=2,
+        )
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[
+                Series(
+                    sonarrSeriesId=1,
+                    title="Series 1",
+                    path="/tv/s1",
+                    episodeFileCount=3,
+                )
+            ],
+            total=1,
+        )
+        mock_client.list_episodes.return_value = EpisodesPage(
+            data=[
+                Episode(sonarrEpisodeId=10, sonarrSeriesId=1, title="Ep1"),
+                Episode(sonarrEpisodeId=11, sonarrSeriesId=1, title="Ep2"),
+                Episode(sonarrEpisodeId=12, sonarrSeriesId=1, title="Ep3"),
+            ]
+        )
+
+        totals_seen: list[int | None] = []
+
+        async def callback(processed, total, percent, stage):
+            totals_seen.append(total)
+
+        reporter = ProgressReporter(callback=callback, throttle_seconds=0)
+        path_map = PathMap()
+
+        movies_processed, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, None, reporter=reporter
+        )
+
+        assert movies_processed == 2
+        assert episodes_processed == 3
+
+        # Combined total: 2 movies + 3 episodes (summed episodeFileCount) = 5.
+        assert reporter.total == 5
+        # Every reported total across the whole run (once set) is the same
+        # combined value - it never reverts to None partway through, unlike
+        # the old movies-only total that vanished once the episodes phase
+        # started.
+        non_none_totals = [t for t in totals_seen if t is not None]
+        assert non_none_totals
+        assert all(t == 5 for t in non_none_totals)
 
     @pytest.mark.asyncio
     async def test_manual_poll_movies_only(self, mock_db_session):
@@ -1967,8 +2042,9 @@ class TestFullLibrarySyncRealisticWireFormat:
             base_url="http://full-sync-test:6767",
             api_key="wire-test-key",
         ) as client:
+            movies_page = await client.list_all_movies()
             processed = await _poll_all_movies(
-                mock_db_session, client, path_map, started_at
+                mock_db_session, movies_page, path_map, started_at
             )
 
         assert processed == 2
@@ -2058,8 +2134,9 @@ class TestFullLibrarySyncRealisticWireFormat:
             base_url="http://full-sync-test:6767",
             api_key="wire-test-key",
         ) as client:
+            series_page = await client.list_all_series()
             processed = await _poll_all_episodes(
-                mock_db_session, client, path_map, started_at
+                mock_db_session, client, series_page, path_map, started_at
             )
 
         assert processed == 2
