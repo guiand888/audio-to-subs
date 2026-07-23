@@ -9,7 +9,7 @@ from typing import TYPE_CHECKING, Annotated, Any
 from uuid import uuid4
 
 from fastapi import APIRouter, Depends, Request
-from sse_starlette.sse import EventSourceResponse
+from sse_starlette.sse import EventSourceResponse, ServerSentEvent
 
 from audio_to_subs.api.deps import SettingsDep, get_db, get_redis
 from audio_to_subs.api.routes._helpers import get_job_or_404
@@ -118,7 +118,7 @@ async def _event_generator(  # noqa: C901
     job_id: str | None = None,
     client_id: str | None = None,
     redis: "Redis | None" = None,
-) -> AsyncGenerator[str, None]:
+) -> AsyncGenerator[str | ServerSentEvent, None]:
     """Generate SSE events for a job or globally.
 
     Each client gets its own subscription queue so events aren't lost
@@ -164,17 +164,32 @@ async def _event_generator(  # noqa: C901
             try:
                 event_data = await asyncio.wait_for(queue.get(), timeout=1.0)
                 last_yield = time.monotonic()
-                yield f"data: {json.dumps(event_data)}\n\n"
+                # Yield the bare JSON payload only - EventSourceResponse
+                # (via sse_starlette's ServerSentEvent.encode()) already
+                # prefixes "data: " and appends the terminating blank line
+                # itself. Manually pre-formatting "data: ...\n\n" here and
+                # yielding it as a plain string double-wraps the frame:
+                # encode() splits whatever string it's given on embedded
+                # newlines and prefixes "data: " to EACH resulting chunk, so
+                # "data: {json}\n\n" became
+                # "data: data: {json}\r\ndata: \r\ndata: \r\n\r\n" on the
+                # wire - which the browser's EventSource can't parse as
+                # JSON, so every event (stream_ready, refresh_progress,
+                # refresh_done, ...) was silently dropped by the frontend's
+                # catch-and-ignore on the JSON.parse failure. Confirmed via a
+                # captured HAR of the actual malformed wire bytes.
+                yield json.dumps(event_data)
             except asyncio.TimeoutError:
                 # No real event in the last 1s. Emit a heartbeat comment frame
                 # at most once per HEARTBEAT_INTERVAL_SECONDS so idle
                 # connections stay alive through proxies without flooding the
-                # log. The leading ": " marks this as a comment per the SSE
-                # spec; EventSource ignores it but the bytes hit the wire.
+                # log. A ServerSentEvent(comment=...) - not a raw ": ..."
+                # string - is required for the same reason as above: encode()
+                # is what adds the leading ": " itself.
                 now = time.monotonic()
                 if now - last_yield >= HEARTBEAT_INTERVAL_SECONDS:
                     last_yield = now
-                    yield ": keepalive\n\n"
+                    yield ServerSentEvent(comment="keepalive")
                 continue  # re-check disconnect on next iteration
     except asyncio.CancelledError:
         logger.debug("SSE connection cancelled for job %s", job_id)
