@@ -593,6 +593,20 @@ async def _poll_all_movies(
     return processed
 
 
+# Number of series batched into a single `/api/episodes?seriesid[]=...` call.
+# Bazarr's endpoint has no pagination and answers any-sized `seriesid[]` list
+# with one `IN (...)` query, so batching trades one HTTP round-trip per
+# series for one per batch. 100 keeps the query string comfortably under
+# typical proxy/header size limits while still cutting a few-hundred-series
+# library down to a handful of requests.
+EPISODE_BATCH_SIZE = 100
+
+
+def _chunked(items: list[Any], size: int) -> list[list[Any]]:
+    """Split `items` into consecutive chunks of at most `size` elements."""
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
 async def _poll_all_episodes(
     db: "AsyncSession",
     client: BazarrClient,
@@ -602,20 +616,21 @@ async def _poll_all_episodes(
 ) -> int:
     """Fetch and upsert every episode in the Bazarr library (full sync).
 
-    Ingests ALL episodes regardless of subtitle state, walking series-by-
-    series since Bazarr has no single "all episodes" endpoint (bounded by
-    the number of series, not one call per episode).
+    Ingests ALL episodes regardless of subtitle state, walking series in
+    batches since Bazarr has no single "all episodes" endpoint (bounded by
+    the number of batches, not one call per series or per episode - see
+    `EPISODE_BATCH_SIZE`).
 
     Each episode is upserted immediately as it's fetched rather than
     collected into a separate DB phase: `_upsert_cache_entry` opens and
     commits its own short transaction per item (select + commit), so no
-    write transaction is ever held open across the next series' HTTP call
+    write transaction is ever held open across the next batch's HTTP call
     (short-transaction convention).
 
     A failure listing the series themselves propagates (this is now the
     primary source of episode data - see `_poll_all_movies`'s docstring).
-    A failure fetching one series' episodes is tolerated - logged and
-    skipped - so one bad series doesn't abort the sync for every other
+    A failure fetching one batch's episodes is tolerated - logged and
+    skipped - so one bad batch doesn't abort the sync for every other
     series, mirroring the old per-series detail-fetch tolerance.
 
     Args:
@@ -626,28 +641,43 @@ async def _poll_all_episodes(
         reporter: Optional progress reporter. Bazarr has no upfront total
             for episodes (only known after walking every series), so this
             pass never sets a known total - the reporter falls back to a
-            live "processed" counter for it.
+            live "processed" counter for it. A heartbeat is forced once per
+            batch so a slow/large library still emits progress regularly
+            rather than going silent for the whole episodes phase.
 
     Returns:
         Number of episodes processed during this pass.
     """
     processed = 0
     series_page = await client.list_all_series()
+    series_by_id = {series.sonarrSeriesId: series for series in series_page.data}
 
-    for series in series_page.data:
+    if reporter is not None:
+        reporter.set_stage("syncing episodes")
+        await reporter.report(force=True)
+
+    for batch in _chunked(series_page.data, EPISODE_BATCH_SIZE):
+        series_ids = [series.sonarrSeriesId for series in batch]
         try:
-            episodes_page = await client.list_episodes(seriesid=series.sonarrSeriesId)
+            episodes_page = await client.list_episodes(seriesid=series_ids)
         except Exception as e:
             logger.warning(
-                "Failed to fetch episodes for series %s (%s): %s",
-                series.sonarrSeriesId,
-                series.title,
+                "Failed to fetch episodes for series batch %s: %s",
+                series_ids,
                 e,
             )
             continue
 
+        if reporter is not None:
+            # Heartbeat right after the (potentially slow) batch call
+            # returns, independent of the throttled per-item stepping below -
+            # bounds the max silent gap to one batch instead of one series.
+            await reporter.report(force=True)
+
         for episode in episodes_page.data:
-            title = f"{series.title} - {episode.title}"
+            series = series_by_id.get(episode.sonarrSeriesId)
+            series_title = series.title if series is not None else "Unknown series"
+            title = f"{series_title} - {episode.title}"
             await _process_episode(db, episode, path_map, started_at, title)
             processed += 1
             if reporter is not None:

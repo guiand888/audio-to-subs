@@ -351,15 +351,17 @@ class BazarrClient:
     async def list_episodes(
         self,
         *,
-        seriesid: int,
+        seriesid: int | list[int],
     ) -> EpisodesPage:
-        """List episodes for a series.
+        """List episodes for one or more series in a single request.
 
         Args:
-            seriesid: Sonarr series ID
+            seriesid: Sonarr series ID, or a list of series IDs to batch into
+                one call (Bazarr's ``/api/episodes`` accepts ``seriesid[]``
+                as a repeated param and queries with ``IN (...)``).
 
         Returns:
-            EpisodesPage with episodes for the series
+            EpisodesPage with episodes for the given series
         """
         params = {"seriesid[]": seriesid}
         data = await self._get("/api/episodes", params)

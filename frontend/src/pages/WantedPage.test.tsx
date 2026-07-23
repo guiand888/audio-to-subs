@@ -696,6 +696,140 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
 
     vi.useRealTimers()
   })
+
+  it("watchdog keeps waiting (no error) when the persisted snapshot shows advancing progress", async () => {
+    // A large-library refresh (e.g. many episodes) can legitimately go a
+    // full watchdog cycle without a live refresh_progress SSE frame. As long
+    // as the persisted snapshot's `processed` count keeps advancing between
+    // checks, the hook must NOT toast an error or reset - it should adopt
+    // the snapshot into the visible progress and keep waiting.
+    vi.useFakeTimers()
+
+    let getCalls = 0
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/wanted/refresh/")) {
+        getCalls += 1
+        if (getCalls === 1) {
+          return {
+            refresh_id: path.split("/").pop()!,
+            status: "started" as const,
+            processed: 50,
+            total: null,
+            percent: 0,
+            stage: "syncing episodes",
+            movies_processed: 0,
+            episodes_processed: 0,
+            error: null,
+            updated_at: "2026-01-01T00:00:00Z",
+          }
+        }
+        return {
+          refresh_id: path.split("/").pop()!,
+          status: "completed" as const,
+          processed: 130,
+          total: null,
+          percent: 100,
+          stage: "done",
+          movies_processed: 30,
+          episodes_processed: 100,
+          error: null,
+          updated_at: "2026-01-01T00:00:01Z",
+        }
+      }
+      return MOCK_WANTED_EMPTY
+    })
+
+    render(<WantedPage />, { wrapper })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"))
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(MockEventSource.latest()).toBeDefined()
+
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(api.post)).toHaveBeenCalled()
+
+    // First watchdog fire: snapshot shows processed=50 (up from unset) ->
+    // adopt it, no error, no reset. (Plain assertions, not waitFor - waitFor
+    // polls via real timers, which never fire while fake timers are active.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(screen.getByText("50 items")).toBeInTheDocument()
+
+    // Second watchdog fire: snapshot is now terminal -> finalize normally.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith("Refreshed 130 items")
+
+    vi.useRealTimers()
+  })
+
+  it("watchdog gives up only after repeated checks show zero progress", async () => {
+    // The flip side: if the persisted snapshot's `processed` count never
+    // moves across several consecutive watchdog checks, the refresh really
+    // is stuck (or the connection is dead) and the hook must eventually
+    // surface the error - just not on the very first miss.
+    vi.useFakeTimers()
+
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/wanted/refresh/")) {
+        return {
+          refresh_id: path.split("/").pop()!,
+          status: "started" as const,
+          processed: 10,
+          total: null,
+          percent: 0,
+          stage: "syncing episodes",
+          movies_processed: 0,
+          episodes_processed: 0,
+          error: null,
+          updated_at: "2026-01-01T00:00:00Z",
+        }
+      }
+      return MOCK_WANTED_EMPTY
+    })
+
+    render(<WantedPage />, { wrapper })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"))
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(MockEventSource.latest()).toBeDefined()
+
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(api.post)).toHaveBeenCalled()
+
+    // First check only establishes the processed=10 baseline (nothing to
+    // compare against yet) - no error. Second check: still 10, one stalled
+    // check - still no error.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+
+    // Third check: still 10, second consecutive stall -> genuinely give up.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).toHaveBeenCalledWith("Refresh status unknown, please retry")
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.getByText("Refresh")).toBeInTheDocument()
+
+    vi.useRealTimers()
+  })
 })
 
 
