@@ -18,7 +18,12 @@ from sqlalchemy.orm import DeclarativeBase
 WAL_PRAGMAS = {
     "journal_mode": "WAL",
     "synchronous": "NORMAL",
-    "busy_timeout": 5000,  # 5 seconds
+    # 15s: gives a writer more room to wait out contention from another
+    # process (the worker) before erroring - the in-process case (API's own
+    # periodic Bazarr poll vs. a manual refresh) is additionally serialized
+    # by poller.py's _full_sync_lock, but that can't cover cross-process
+    # contention, so busy_timeout is the only backstop there.
+    "busy_timeout": 15000,
     "foreign_keys": "ON",
 }
 
