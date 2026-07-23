@@ -75,7 +75,7 @@ This is a documentation milestone — no code commit other than the optional pro
 Tasks:
 - `audio_to_subs/db/`: `base.py` (engine + WAL pragmas), `models.py` (all v2 tables), `session.py` (async + sync session factories), `migrations/` (Alembic with initial revision).
 - `audio_to_subs/auth/`: `passwords.py`, `sessions.py`, `deps.py`, `bootstrap.py`.
-- `audio_to_subs/admin/__main__.py`: `set-password`, `db-init`, `whoami` subcommands.
+- `audio_to_subs/admin/__main__.py`: `db-init`, `whoami` subcommands.
 - `audio_to_subs/api/`: `app.py` (FastAPI factory + lifespan that runs `alembic upgrade head` and `bootstrap_admin`), `settings.py` (`pydantic-settings`), `deps.py`, `routes/auth.py`, `routes/__init__.py`, `routes/healthz.py`.
 - `Dockerfile`: switch CMD to uvicorn.
 - `docker-compose.yml`: backend + redis services (no worker, no frontend yet).
@@ -815,7 +815,6 @@ with the new value (rather than bootstrap only setting the password on
 first-run / when no user exists).
 
 **Depends on**: M1 (DB foundation + auth + bootstrap). Relevant surfaces:
-`audio_to_subs/admin/__main__.py` (`set-password` subcommand already exists),
 `audio_to_subs/auth/bootstrap.py` (`bootstrap_admin`), `audio_to_subs/api/app.py`
 (lifespan calls bootstrap), and `audio_to_subs/api/settings.py` /
 `audio_to_subs/auth/passwords.py`.
@@ -825,11 +824,11 @@ first-run / when no user exists).
   first boot actually update the stored hash, or is it only honoured when no
   user exists? Today `bootstrap_admin` only creates/refuses — verify whether it
   also reconciles on change.
-- If absent: add a reconcile step (on startup or on a `set-password`/admin
+- If absent: add a reconcile step (on startup or on an admin
   trigger) that, when the secret/env value differs from the stored hash, updates
-  the admin password. Reuse the existing `set-password` machinery where possible.
-- Decide trigger model: startup reconcile vs. explicit operator action (e.g.
-  `parolesub admin set-password` or a Settings action). Document the chosen model.
+  the admin password.
+- Decide trigger model: startup reconcile vs. explicit operator action. Document
+  the chosen model.
 - Tests: rotating the secret updates the stored credential; stale secret does
   not silently lock the operator out; placeholder/weak values still refused
   (reuse M6.c's refusal logic).
@@ -839,6 +838,21 @@ first-run / when no user exists).
   the new password being active (verified by login with the new value).
 - No regression to M6.c's placeholder-secret refusal or to first-boot bootstrap.
 - `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
+
+### Resolution (implemented)
+- **Trigger model chosen**: startup reconcile. On every boot, if the resolved
+  secret differs from the stored hash, the hash is rotated automatically.
+- **`set-password` CLI subcommand removed**: the environment secret
+  (`ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE`) is the sole source of truth for
+  the admin password. The former `parolesub admin set-password` /
+  `python -m audio_to_subs.admin set-password` subcommand was removed because it
+  conflicted with the reconcile path (a CLI-set password would be silently
+  reverted to the env value on the next boot). Operators who previously relied
+  on it should switch to the env/secret rotation flow.
+- **Upgrade note**: deployments that used `set-password` to escape a placeholder
+  env (`ADMIN_PASSWORD=admin`) must clear or update the env to a strong secret
+  before upgrading, otherwise the reconcile path will refuse to start with a
+  `ValueError`.
 
 ## M11 — v2.4 Queue: Auto-refresh On by default
 

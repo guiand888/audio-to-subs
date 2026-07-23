@@ -23,8 +23,9 @@ Health checks: backend checks `/api/healthz`, redis uses `redis-cli ping`.
 1. Create external media volume: `docker volume create media`
 2. Drop secret files in ./.secrets/ with proper permissions
 3. Set env (BAZARR_URL, PATH_MAPPINGS_JSON, ADMIN_USERNAME, FRONTEND_PORT)
-4. Bring up: `podman compose up -d`
-5. Visit http://localhost:8080 and log in as admin
+4. Set `ADMIN_PASSWORD` (or `ADMIN_PASSWORD_FILE` secret) to a strong secret — the bootstrap refuses default/placeholder values. This is the sole mechanism for setting and rotating the admin password; a redeploy reconciles the stored hash automatically.
+5. Bring up: `podman compose up -d`
+6. Visit http://localhost:8080 and log in as admin
 
 ## Path mapping
 
