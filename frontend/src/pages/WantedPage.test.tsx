@@ -566,17 +566,20 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
 
     const id = await waitFor(() => lastRefreshIdFromPost())
 
-    // Two intermediate progress frames should each advance processed/total.
+    // Two intermediate progress frames should each advance processed/total,
+    // and the current stage should be visible too - not just a bare count -
+    // so a blocked/slow refresh is distinguishable from a stuck one.
     MockEventSource.latest()!.emit({
       event: "refresh_progress",
       refresh_id: id,
       processed: 1,
       total: 3,
       percent: 33,
-      stage: "refreshing wanted",
+      stage: "syncing movies",
     })
     await waitFor(() => {
       expect(screen.getByText("1 / 3")).toBeInTheDocument()
+      expect(screen.getByText("syncing movies")).toBeInTheDocument()
     })
 
     MockEventSource.latest()!.emit({
@@ -585,10 +588,11 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
       processed: 2,
       total: 3,
       percent: 67,
-      stage: "refreshing wanted",
+      stage: "syncing episodes",
     })
     await waitFor(() => {
       expect(screen.getByText("2 / 3")).toBeInTheDocument()
+      expect(screen.getByText("syncing episodes")).toBeInTheDocument()
     })
 
     MockEventSource.latest()!.emit({
@@ -600,6 +604,39 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
     })
     await waitFor(() => {
       expect(toast.success).toHaveBeenCalledWith("Refreshed 3 items")
+    })
+  })
+
+  it("shows an honest waiting label (not a bare count) while blocked behind another sync", async () => {
+    // When a manual refresh is blocked on the backend's full-sync lock, it
+    // genuinely has no processed/total of its own yet - the stage label is
+    // the only signal that anything is happening, distinguishing "waiting"
+    // from "stuck".
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+    await waitFor(() => screen.getByText("Refresh"))
+    await user.click(screen.getByText("Refresh"))
+
+    await waitFor(() => MockEventSource.latest() !== undefined)
+    MockEventSource.latest()!.emit({ event: "stream_ready" })
+
+    const id = await waitFor(() => lastRefreshIdFromPost())
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_progress",
+      refresh_id: id,
+      processed: 0,
+      total: null,
+      percent: 0,
+      stage: "waiting for another sync to finish",
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText("0 items")).toBeInTheDocument()
+      expect(
+        screen.getByText("waiting for another sync to finish"),
+      ).toBeInTheDocument()
     })
   })
 
