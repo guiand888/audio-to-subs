@@ -105,10 +105,15 @@ class TestProgressReporting:
                 ]
                 assert len(percentage_messages) > 0
 
-                # Verify we have 0% and 100% messages
+                # Verify we have the explicit 0% message. >0% progress
+                # requires httpx to actually consume the streamed file while
+                # sending the request, which doesn't happen here since
+                # `Mistral` (hence `complete()`) is fully mocked; that path
+                # is covered by
+                # tests/test_transcription_client.py::TestTranscriptionClientRealSDK::test_streaming_upload_reconstructs_full_file_body
+                # against the real multipart-encoding path instead.
                 percentages = [msg[1] for msg in percentage_messages]
                 assert 0 in percentages
-                assert 100 in percentages
 
         finally:
             os.unlink(tmp_audio_path)

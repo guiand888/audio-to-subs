@@ -169,6 +169,7 @@ class Pipeline:
             model=transcription_model,
             language=language,
             progress_callback=self.progress_callback if verbose_progress else None,
+            read_timeout=self._transcription_timeout(),
         )
         self.subtitle_generator = SubtitleGenerator()
         self._language = language
@@ -737,13 +738,19 @@ class Pipeline:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
 
     def _transcription_timeout(self) -> float:
-        """Per-request timeout for a single Mistral transcription call.
+        """Read timeout for the TranscriptionClient's httpx client.
+
+        Passed once at ``TranscriptionClient`` construction as
+        ``read_timeout`` — it bounds how long we wait for Mistral to finish
+        processing and respond, not upload time (uploads are streamed in
+        chunks, so they're bounded by a small, fixed, file-size-independent
+        write timeout instead; see ``TranscriptionClient.__init__``).
 
         Scales with ``max_audio_length`` (the split threshold, hence the
-        longest a single segment can be) rather than a flat constant: a
-        multi-hour segment needs far more than the client's 60s default to
-        upload and transcribe. 600s of headroom covers upload time and
-        Mistral-side processing/queueing beyond real-time.
+        longest a single segment can be) since Mistral's processing time for
+        a segment presumably scales with its duration. 600s of headroom is a
+        starting point, not an empirically-derived number — tune with real
+        observed (upload, wait) durations if this proves too tight or loose.
         """
         return float(self.max_audio_length) + 600.0
 
@@ -776,16 +783,14 @@ class Pipeline:
         )
 
         # Pass segment info to transcription client for detailed progress.
-        # timeout scales with max_audio_length (the split threshold, so also
-        # the worst-case duration of any single segment): the client's own
-        # 60s default is sized for short clips and silently truncates large
-        # segments mid-upload/processing with "write operation timed out"
-        # once audio runs long.
+        # Read timeout is configured once on the client itself (see
+        # Pipeline.__init__/_transcription_timeout) — uploads are streamed in
+        # chunks with their own small, fixed write timeout, so there's no
+        # per-call timeout to pass here.
         segments = self.transcription_client.transcribe_audio_with_timestamps(
             segment_path,
             segment_number=segment_index if self.verbose_progress else None,
             total_segments=total_segments if self.verbose_progress else None,
-            timeout=self._transcription_timeout(),
         )
 
         # Extract usage/detected language from the transcription response
