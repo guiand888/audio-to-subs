@@ -129,9 +129,10 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
 
     # Create the shutdown event that run_bazarr_poller watches, then start the
     # poller via the canonical helper that manages app.state.poller_task.
+    # start_poller() already logs "Bazarr poller task started" itself (and
+    # guards against double-starting), so nothing further is logged here.
     app.state.shutdown = asyncio.Event()
     await start_poller(app)
-    logger.info("Bazarr poller task started")
 
     logger.info("Startup complete")
 

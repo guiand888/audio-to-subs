@@ -176,6 +176,16 @@ class Series(BaseModel):
         default_factory=list, description="Alternative titles"
     )
     ended: bool = Field(default=False, description="Whether series has ended")
+    episodeFileCount: int = Field(
+        default=0,
+        description=(
+            "Number of episodes Bazarr tracks for this series (a real "
+            "COUNT(*), not just missing-subtitle episodes) - summed across "
+            "a full series listing to get an accurate up-front episode "
+            "total for progress reporting, without a separate /api/episodes "
+            "call per series."
+        ),
+    )
     lastAired: str | None = Field(default=None, description="Last aired date")
     fanart: str | None = Field(default=None, description="Fanart URL")
     poster: str | None = Field(default=None, description="Poster URL")

@@ -444,20 +444,32 @@ export function WantedPage() {
           </Button>
 
           {refresh.progress.active && (
-            <div className="flex items-center gap-2 min-w-[200px]">
-              <Progress
-                value={
-                  refresh.progress.total != null
-                    ? refresh.progress.percent
-                    : undefined
-                }
-                className="h-2 w-32"
-              />
-              <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
-                {refresh.progress.total != null
-                  ? `${refresh.progress.processed} / ${refresh.progress.total}`
-                  : `${refresh.progress.processed} items`}
-              </span>
+            <div className="flex flex-col gap-1 min-w-[200px]">
+              <div className="flex items-center gap-2">
+                <Progress
+                  value={
+                    refresh.progress.total != null
+                      ? refresh.progress.percent
+                      : undefined
+                  }
+                  className="h-2 w-32"
+                />
+                <span className="text-xs text-muted-foreground tabular-nums whitespace-nowrap">
+                  {refresh.progress.total != null
+                    ? `${refresh.progress.processed} / ${refresh.progress.total}`
+                    : `${refresh.progress.processed} items`}
+                </span>
+              </div>
+              {/* Surfaces what's actually happening (e.g. "waiting for
+                  another sync to finish", "syncing episodes") instead of
+                  leaving an unexplained, possibly-static count as the only
+                  signal - especially important while blocked behind another
+                  in-progress sync, where processed/total can't move yet. */}
+              {refresh.progress.stage && (
+                <span className="text-[11px] text-muted-foreground capitalize whitespace-nowrap">
+                  {refresh.progress.stage}
+                </span>
+              )}
             </div>
           )}
         </div>

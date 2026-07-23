@@ -71,10 +71,19 @@ class PathMap:
                     suffix = suffix[1:]  # Remove leading separator
                 return os.path.normpath(os.path.join(local_prefix, suffix))
 
-        # No match found - warn once per unique prefix
-        # Extract the first path component as the prefix to warn about
-        path_parts = norm_path.split(os.sep)
-        unmatched_prefix = path_parts[0] if path_parts else norm_path
+        # No match found - warn once per unique unmatched prefix, so a large
+        # library with many unmapped files under the same root still logs
+        # once, not once per file. POSIX absolute paths split to a leading
+        # '' component (index 0), so the previous code - which used
+        # path_parts[0] as "the prefix" - always warned on the empty string
+        # for every absolute path, collapsing every distinct unmapped
+        # location into a single warning for the process's lifetime
+        # (rendered as a bare "." once the sentence's trailing period
+        # followed the empty %s). Use the first non-empty path component
+        # instead, so distinct top-level unmapped locations still get their
+        # own warning.
+        parts = [p for p in norm_path.split(os.sep) if p]
+        unmatched_prefix = os.sep + parts[0] if parts else norm_path
 
         if unmatched_prefix not in self._warned_unmatched:
             self._warned_unmatched.add(unmatched_prefix)
@@ -137,16 +146,24 @@ class PathMap:
     def from_settings(cls, path_mappings: list[dict[str, str]]) -> "PathMap":
         """Create PathMap from settings path_mappings list.
 
+        The Settings UI (and therefore the DB) stores each mapping as
+        ``{"from": ..., "to": ...}`` (see PathMappingsForm.tsx / types.ts) -
+        that is the primary shape read here. ``bazarr_prefix``/``local_prefix``
+        is also accepted as a fallback for any data stored in that older
+        shape, but the UI has never written it, so treat it as legacy-only.
+
         Args:
-            path_mappings: List of dicts with 'bazarr_prefix' and 'local_prefix' keys
+            path_mappings: List of dicts, each with either 'from'/'to' keys
+                (current UI shape) or 'bazarr_prefix'/'local_prefix' keys
+                (legacy shape)
 
         Returns:
             Configured PathMap instance
         """
         pairs = []
         for mapping in path_mappings:
-            bazarr_prefix = mapping.get("bazarr_prefix", "")
-            local_prefix = mapping.get("local_prefix", "")
+            bazarr_prefix = mapping.get("from") or mapping.get("bazarr_prefix", "")
+            local_prefix = mapping.get("to") or mapping.get("local_prefix", "")
             if bazarr_prefix and local_prefix:
                 pairs.append((bazarr_prefix, local_prefix))
         return cls(pairs)

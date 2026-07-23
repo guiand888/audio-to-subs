@@ -489,6 +489,27 @@ class TestSeries:
             ]
 
     @pytest.mark.asyncio
+    async def test_list_all_series_parses_episode_file_count(self, respx_mock):
+        """episodeFileCount - a real per-series episode COUNT Bazarr already
+        computes - is parsed, not silently dropped. It's summed across a full
+        series listing to give the Wanted-refresh progress bar an accurate
+        episode total up front, without a separate /api/episodes call."""
+        mock_response = {
+            "data": [realistic_series_item(episodeFileCount=42)],
+            "total": 1,
+        }
+        respx_mock.get("http://test-bazarr:6767/api/series").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_all_series()
+            assert result.data[0].episodeFileCount == 42
+
+    @pytest.mark.asyncio
     async def test_list_all_series_null_heavy_item(self, respx_mock):
         """Only path/title/sonarrSeriesId are non-nullable in Bazarr's DB.
 
@@ -617,6 +638,51 @@ class TestSeries:
             query_string = str(respx_mock.calls[0].request.url.query)
             # seriesid[] is URL-encoded as seriesid%5B%5D
             assert "seriesid%5B%5D" in query_string or "seriesid[]" in query_string
+
+    @pytest.mark.asyncio
+    async def test_list_episodes_accepts_batched_series_ids(self, respx_mock):
+        """Passing a list of series IDs sends one request with a repeated
+        seriesid[] param covering all of them - the batching the poller
+        relies on to avoid one HTTP round-trip per series."""
+        mock_response = {
+            "data": [
+                {
+                    "sonarrEpisodeId": 100,
+                    "sonarrSeriesId": 1,
+                    "title": "Ep A",
+                    "subtitles": [],
+                    "season": 1,
+                    "episode": 1,
+                    "path": "/tv/a.mkv",
+                    "sceneName": "/tv/a.mkv",
+                },
+                {
+                    "sonarrEpisodeId": 200,
+                    "sonarrSeriesId": 2,
+                    "title": "Ep B",
+                    "subtitles": [],
+                    "season": 1,
+                    "episode": 1,
+                    "path": "/tv/b.mkv",
+                    "sceneName": "/tv/b.mkv",
+                },
+            ],
+        }
+
+        respx_mock.get("http://test-bazarr:6767/api/episodes").mock(
+            return_value=httpx.Response(200, json=mock_response)
+        )
+
+        async with BazarrClient(
+            base_url="http://test-bazarr:6767",
+            api_key="test-key",
+        ) as client:
+            result = await client.list_episodes(seriesid=[1, 2])
+
+            assert len(result.data) == 2
+            assert len(respx_mock.calls) == 1
+            query_string = str(respx_mock.calls[0].request.url.query)
+            assert query_string.count("seriesid") == 2
 
     @pytest.mark.asyncio
     async def test_list_episodes_real_wire_format(self, respx_mock):

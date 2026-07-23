@@ -4,6 +4,8 @@ import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { toast } from "sonner"
 import { api, ApiError } from "@/lib/api"
+import { useJobsStream } from "@/hooks/useJobsStream"
+import { IDLE, useRefreshStore } from "@/lib/refreshStore"
 import { WantedPage } from "./WantedPage"
 
 // vi.mock calls are hoisted to the top of the file by vitest, so they must be
@@ -65,11 +67,11 @@ const MOCK_REFRESH_FAILURE = {
   error: "Connection failed",
 }
 
-// Minimal EventSource stand-in: jsdom has no native EventSource, and
-// useWantedRefresh opens one against /api/jobs/stream as soon as a refresh
-// starts. Tests grab the latest instance and call `.emit(...)` to simulate
-// server-sent frames (including the stream_ready handshake that triggers
-// the POST).
+// Minimal EventSource stand-in: jsdom has no native EventSource. useJobsStream
+// (mounted by StreamMount in the wrapper below, matching how AppLayout mounts
+// it once app-wide) opens one against /api/jobs/stream on mount - not per
+// refresh. Tests grab the latest instance and call `.emit(...)` to simulate
+// server-sent frames.
 class MockEventSource {
   static instances: MockEventSource[] = []
   onmessage: ((ev: { data: string }) => void) | null = null
@@ -118,6 +120,15 @@ function lastRefreshIdFromPost(): string {
   throw new Error("No /api/wanted/refresh POST found")
 }
 
+// Refresh progress now rides the single persistent SSE connection normally
+// mounted once in AppLayout (see useJobsStream.ts / refreshStore.ts) rather
+// than a connection WantedPage opens itself - mount it here so
+// MockEventSource keeps capturing the connection these tests emit frames on.
+function StreamMount({ children }: { children: React.ReactNode }) {
+  useJobsStream()
+  return <>{children}</>
+}
+
 function wrapper({ children }: { children: React.ReactNode }) {
   const client = new QueryClient({
     defaultOptions: {
@@ -125,13 +136,18 @@ function wrapper({ children }: { children: React.ReactNode }) {
       mutations: { retry: false },
     },
   })
-  return <QueryClientProvider client={client}>{children}</QueryClientProvider>
+  return (
+    <QueryClientProvider client={client}>
+      <StreamMount>{children}</StreamMount>
+    </QueryClientProvider>
+  )
 }
 
 describe("WantedPage - Refresh Wanted List", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.reset()
+    useRefreshStore.setState({ refreshId: null, progress: IDLE })
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
@@ -200,11 +216,8 @@ describe("WantedPage - Refresh Wanted List", () => {
       expect(screen.getByText("Refreshing...")).toBeInTheDocument()
     })
 
-    // The hook waits for stream_ready before POSTing so it can't miss
-    // refresh_done on a fast refresh (race fix). Emit the handshake, then
-    // the terminal frame addressed to whatever id the client generated.
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
-
+    // The POST fires immediately on click (the persistent SSE connection
+    // is already subscribed since app load - no handshake to wait for).
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
         "/api/wanted/refresh",
@@ -236,14 +249,8 @@ describe("WantedPage - Refresh Wanted List", () => {
     })
     await user.click(screen.getByText("Refresh"))
 
-    // The POST only fires after stream_ready arrives - emit it so the
-    // mocked failure response is processed without waiting for the
-    // 5s ready-timeout fallback.
-    await waitFor(() => {
-      expect(MockEventSource.latest()).toBeDefined()
-    })
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
-
+    // The POST fires immediately on click; the mocked failure response
+    // resolves on its own without any handshake to wait for.
     await waitFor(() => {
       expect(toast.error).toHaveBeenCalled()
     })
@@ -491,16 +498,22 @@ describe("WantedPage - Transcribe Dialog language selection", () => {
 })
 
 describe("WantedPage - Refresh race & watchdog regressions", () => {
-  // These tests cover the failure mode that motivated the rewrite:
-  // the old useRefreshProgress hook opened its EventSource AFTER POSTing,
-  // so a fast refresh could publish refresh_done before pubsub.subscribe
-  // completed and the UI would hang on "Refreshing..." forever. The new
-  // useWantedRefresh hook waits for stream_ready before POSTing and falls
-  // back to GET /api/wanted/refresh/{id} if SSE goes silent for 30s.
+  // These tests cover the failure mode that motivated the useWantedRefresh
+  // rewrite (see refreshStore.ts): refresh progress must never silently
+  // vanish, whether from a race against Redis pub/sub having no backlog, or
+  // (more recently) the SSE connection dropping mid-stream, or the page
+  // being navigated away from and back. The store falls back to
+  // GET /api/wanted/refresh/{id} if SSE goes silent for 30s.
+  //
+  // Refresh events now ride the single persistent SSE connection mounted
+  // once in AppLayout (already subscribed since app load - see
+  // useJobsStream/wrapper below), not a fresh per-refresh EventSource, so
+  // there's no subscribe-first handshake to wait for before POSTing.
 
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.reset()
+    useRefreshStore.setState({ refreshId: null, progress: IDLE })
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
@@ -511,28 +524,19 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
     vi.useRealTimers()
   })
 
-  it("stream_ready is emitted before POST /api/wanted/refresh (subscribe-first)", async () => {
-    // Regression: the POST must not fire until stream_ready arrives. If it
-    // fires earlier, the original race (events published before subscribe)
-    // is reintroduced.
+  it("POST /api/wanted/refresh fires immediately on click (no subscribe-first wait)", async () => {
+    // Historically a fresh EventSource was opened per refresh and the hook
+    // had to wait for its own stream_ready frame before POSTing, to avoid a
+    // race against Redis pub/sub having no backlog. Now that refresh events
+    // ride the persistent connection (already subscribed since app load),
+    // that race can't happen the same way, so the POST fires as soon as the
+    // button is clicked.
     const user = userEvent.setup()
-    let resolvePost: (v: typeof MOCK_REFRESH_STARTED) => void
-    const pending = new Promise<typeof MOCK_REFRESH_STARTED>((r) => {
-      resolvePost = r
-    })
-    vi.mocked(api.post).mockReturnValue(pending)
 
     render(<WantedPage />, { wrapper })
     await waitFor(() => screen.getByText("Refresh"))
     await user.click(screen.getByText("Refresh"))
 
-    // No POST before stream_ready.
-    expect(vi.mocked(api.post)).not.toHaveBeenCalled()
-
-    await waitFor(() => MockEventSource.latest() !== undefined)
-
-    // stream_ready arrives -> POST fires immediately.
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
     await waitFor(() => {
       expect(vi.mocked(api.post)).toHaveBeenCalledWith(
         "/api/wanted/refresh",
@@ -541,7 +545,6 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
     })
 
     // Finalize so the test ends cleanly.
-    resolvePost!(MOCK_REFRESH_STARTED)
     MockEventSource.latest()!.emit({
       event: "refresh_done",
       refresh_id: lastRefreshIdFromPost(),
@@ -561,22 +564,22 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
     await waitFor(() => screen.getByText("Refresh"))
     await user.click(screen.getByText("Refresh"))
 
-    await waitFor(() => MockEventSource.latest() !== undefined)
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
-
     const id = await waitFor(() => lastRefreshIdFromPost())
 
-    // Two intermediate progress frames should each advance processed/total.
+    // Two intermediate progress frames should each advance processed/total,
+    // and the current stage should be visible too - not just a bare count -
+    // so a blocked/slow refresh is distinguishable from a stuck one.
     MockEventSource.latest()!.emit({
       event: "refresh_progress",
       refresh_id: id,
       processed: 1,
       total: 3,
       percent: 33,
-      stage: "refreshing wanted",
+      stage: "syncing movies",
     })
     await waitFor(() => {
       expect(screen.getByText("1 / 3")).toBeInTheDocument()
+      expect(screen.getByText("syncing movies")).toBeInTheDocument()
     })
 
     MockEventSource.latest()!.emit({
@@ -585,10 +588,11 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
       processed: 2,
       total: 3,
       percent: 67,
-      stage: "refreshing wanted",
+      stage: "syncing episodes",
     })
     await waitFor(() => {
       expect(screen.getByText("2 / 3")).toBeInTheDocument()
+      expect(screen.getByText("syncing episodes")).toBeInTheDocument()
     })
 
     MockEventSource.latest()!.emit({
@@ -603,11 +607,41 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
     })
   })
 
+  it("shows an honest waiting label (not a bare count) while blocked behind another sync", async () => {
+    // When a manual refresh is blocked on the backend's full-sync lock, it
+    // genuinely has no processed/total of its own yet - the stage label is
+    // the only signal that anything is happening, distinguishing "waiting"
+    // from "stuck".
+    const user = userEvent.setup()
+
+    render(<WantedPage />, { wrapper })
+    await waitFor(() => screen.getByText("Refresh"))
+    await user.click(screen.getByText("Refresh"))
+
+    const id = await waitFor(() => lastRefreshIdFromPost())
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_progress",
+      refresh_id: id,
+      processed: 0,
+      total: null,
+      percent: 0,
+      stage: "waiting for another sync to finish",
+    })
+
+    await waitFor(() => {
+      expect(screen.getByText("0 items")).toBeInTheDocument()
+      expect(
+        screen.getByText("waiting for another sync to finish"),
+      ).toBeInTheDocument()
+    })
+  })
+
   it("watchdog recovers from a missed refresh_done via GET status endpoint", async () => {
-    // Simulates the original race: stream_ready is emitted, the POST
-    // succeeds, but no refresh_done ever arrives (e.g. EventSource dropped
-    // mid-stream). After 30s the watchdog must GET the persisted-state
-    // endpoint and finalize from the snapshot.
+    // Simulates the original race: the POST succeeds but no refresh_done
+    // ever arrives (e.g. the persistent connection dropped mid-stream).
+    // After 30s the watchdog must GET the persisted-state endpoint and
+    // finalize from the snapshot.
     //
     // Uses fireEvent (not userEvent) because userEvent's internal delays
     // don't play well with fake timers; fireEvent.click is synchronous.
@@ -615,7 +649,7 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
 
     // GET /api/wanted/refresh/{id} - mock returns the terminal snapshot.
     // The request URL contains the client's refresh_id; echo it back so
-    // the hook's filter logic is happy.
+    // the store's filter logic is happy.
     vi.mocked(api.get).mockImplementation(async (path: string) => {
       if (path.startsWith("/api/wanted/refresh/")) {
         return {
@@ -639,13 +673,8 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
       fireEvent.click(screen.getByText("Refresh"))
     })
 
-    // Drain initial render + EventSource construction.
-    await vi.advanceTimersByTimeAsync(0)
-    expect(MockEventSource.latest()).toBeDefined()
-
-    // stream_ready triggers doPost() synchronously inside emit's act().
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
-    // Flush the POST resolution + watchdog arming.
+    // The POST fires synchronously inside the click handler; flush its
+    // promise resolution + watchdog arming.
     await vi.advanceTimersByTimeAsync(0)
     expect(vi.mocked(api.post)).toHaveBeenCalledWith(
       "/api/wanted/refresh",
@@ -667,7 +696,7 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
 
   it("watchdog surfaces an error when status endpoint returns 404", async () => {
     // Same race scenario but the persisted state has expired (TTL elapsed)
-    // or never existed. The hook must surface a clear error and reset so
+    // or never existed. The store must surface a clear error and reset so
     // the user can retry, rather than hang.
     vi.useFakeTimers()
 
@@ -677,10 +706,6 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
     await act(async () => {
       fireEvent.click(screen.getByText("Refresh"))
     })
-    await vi.advanceTimersByTimeAsync(0)
-    expect(MockEventSource.latest()).toBeDefined()
-
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
     await vi.advanceTimersByTimeAsync(0)
     expect(vi.mocked(api.post)).toHaveBeenCalled()
 
@@ -696,13 +721,221 @@ describe("WantedPage - Refresh race & watchdog regressions", () => {
 
     vi.useRealTimers()
   })
+
+  it("watchdog keeps waiting (no error) when the persisted snapshot shows advancing progress", async () => {
+    // A large-library refresh (e.g. many episodes) can legitimately go a
+    // full watchdog cycle without a live refresh_progress SSE frame. As long
+    // as the persisted snapshot's `processed` count keeps advancing between
+    // checks, the store must NOT toast an error or reset - it should adopt
+    // the snapshot into the visible progress and keep waiting.
+    vi.useFakeTimers()
+
+    let getCalls = 0
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/wanted/refresh/")) {
+        getCalls += 1
+        if (getCalls === 1) {
+          return {
+            refresh_id: path.split("/").pop()!,
+            status: "started" as const,
+            processed: 50,
+            total: null,
+            percent: 0,
+            stage: "syncing episodes",
+            movies_processed: 0,
+            episodes_processed: 0,
+            error: null,
+            updated_at: "2026-01-01T00:00:00Z",
+          }
+        }
+        return {
+          refresh_id: path.split("/").pop()!,
+          status: "completed" as const,
+          processed: 130,
+          total: null,
+          percent: 100,
+          stage: "done",
+          movies_processed: 30,
+          episodes_processed: 100,
+          error: null,
+          updated_at: "2026-01-01T00:00:01Z",
+        }
+      }
+      return MOCK_WANTED_EMPTY
+    })
+
+    render(<WantedPage />, { wrapper })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"))
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(api.post)).toHaveBeenCalled()
+
+    // First watchdog fire: snapshot shows processed=50 (up from unset) ->
+    // adopt it, no error, no reset. (Plain assertions, not waitFor - waitFor
+    // polls via real timers, which never fire while fake timers are active.)
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(screen.getByText("50 items")).toBeInTheDocument()
+
+    // Second watchdog fire: snapshot is now terminal -> finalize normally.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    expect(toast.success).toHaveBeenCalledWith("Refreshed 130 items")
+
+    vi.useRealTimers()
+  })
+
+  it("watchdog gives up only after repeated checks show zero progress", async () => {
+    // The flip side: if the persisted snapshot's `processed` count never
+    // moves across several consecutive watchdog checks, the refresh really
+    // is stuck (or the connection is dead) and the store must eventually
+    // surface the error - just not on the very first miss.
+    vi.useFakeTimers()
+
+    vi.mocked(api.get).mockImplementation(async (path: string) => {
+      if (path.startsWith("/api/wanted/refresh/")) {
+        return {
+          refresh_id: path.split("/").pop()!,
+          status: "started" as const,
+          processed: 10,
+          total: null,
+          percent: 0,
+          stage: "syncing episodes",
+          movies_processed: 0,
+          episodes_processed: 0,
+          error: null,
+          updated_at: "2026-01-01T00:00:00Z",
+        }
+      }
+      return MOCK_WANTED_EMPTY
+    })
+
+    render(<WantedPage />, { wrapper })
+    await act(async () => {
+      fireEvent.click(screen.getByText("Refresh"))
+    })
+    await vi.advanceTimersByTimeAsync(0)
+    expect(vi.mocked(api.post)).toHaveBeenCalled()
+
+    // First check only establishes the processed=10 baseline (nothing to
+    // compare against yet) - no error. Second check: still 10, one stalled
+    // check - still no error.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).not.toHaveBeenCalled()
+
+    // Third check: still 10, second consecutive stall -> genuinely give up.
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(31_000)
+    })
+    expect(toast.error).toHaveBeenCalledWith("Refresh status unknown, please retry")
+
+    await act(async () => {
+      await vi.advanceTimersByTimeAsync(0)
+    })
+    expect(screen.getByText("Refresh")).toBeInTheDocument()
+
+    vi.useRealTimers()
+  })
 })
 
+// Simulates a route change: WantedPage swaps in/out, but the wrapper
+// (standing in for AppLayout, which stays mounted across every route in the
+// real app - see router.tsx) does not. RTL's rerender() replaces children
+// within the SAME wrapper instance from the original render() call, which
+// is exactly this: the persistent SSE connection (StreamMount) and the
+// refresh store never unmount, only the page content swaps.
+function NavigationHarness({ showWanted }: { showWanted: boolean }) {
+  return showWanted ? <WantedPage /> : <div>Queue placeholder</div>
+}
+
+describe("WantedPage - Refresh survives navigation", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+    MockEventSource.reset()
+    useRefreshStore.setState({ refreshId: null, progress: IDLE })
+    vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
+    vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
+  })
+
+  it("keeps showing live progress after navigating away and back", async () => {
+    const user = userEvent.setup()
+
+    const { rerender } = render(<NavigationHarness showWanted={true} />, {
+      wrapper,
+    })
+    await waitFor(() => screen.getByText("Refresh"))
+    await user.click(screen.getByText("Refresh"))
+
+    const id = await waitFor(() => lastRefreshIdFromPost())
+
+    MockEventSource.latest()!.emit({
+      event: "refresh_progress",
+      refresh_id: id,
+      processed: 100,
+      total: 457,
+      percent: 21,
+      stage: "syncing movies",
+    })
+    await waitFor(() => {
+      expect(screen.getByText("100 / 457")).toBeInTheDocument()
+    })
+
+    // Navigate away: WantedPage unmounts.
+    rerender(<NavigationHarness showWanted={false} />)
+    expect(screen.queryByText("Refresh")).not.toBeInTheDocument()
+
+    // The refresh keeps progressing while "on another page" - the
+    // persistent connection (StreamMount, never unmounted by this
+    // rerender) and the module-scope store keep receiving/holding it.
+    MockEventSource.latest()!.emit({
+      event: "refresh_progress",
+      refresh_id: id,
+      processed: 300,
+      total: 457,
+      percent: 65,
+      stage: "syncing episodes",
+    })
+
+    // Navigate back: progress must be visible IMMEDIATELY on remount, not
+    // reset to idle - this is the actual regression being guarded against.
+    rerender(<NavigationHarness showWanted={true} />)
+    await waitFor(() => {
+      expect(screen.getByText("300 / 457")).toBeInTheDocument()
+      expect(screen.getByText("syncing episodes")).toBeInTheDocument()
+    })
+    // Crucially, navigating back did not start a second refresh.
+    expect(vi.mocked(api.post)).toHaveBeenCalledTimes(1)
+
+    // And it still finalizes correctly after remounting.
+    MockEventSource.latest()!.emit({
+      event: "refresh_done",
+      refresh_id: id,
+      status: "completed",
+      movies_processed: 457,
+      episodes_processed: 0,
+    })
+    await waitFor(() => {
+      expect(toast.success).toHaveBeenCalledWith("Refreshed 457 items")
+    })
+  })
+})
 
 describe("WantedPage - Scope selector (All/Missing/No subs)", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.reset()
+    useRefreshStore.setState({ refreshId: null, progress: IDLE })
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
@@ -774,11 +1007,6 @@ describe("WantedPage - Scope selector (All/Missing/No subs)", () => {
     await user.click(screen.getByText("Refresh"))
 
     await waitFor(() => {
-      expect(MockEventSource.latest()).toBeDefined()
-    })
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
-
-    await waitFor(() => {
       // The refresh request carries item_type only - no scope field at all.
       const call = vi
         .mocked(api.post)
@@ -795,6 +1023,7 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     MockEventSource.reset()
+    useRefreshStore.setState({ refreshId: null, progress: IDLE })
     vi.mocked(api.get).mockResolvedValue(MOCK_WANTED_EMPTY)
     vi.mocked(api.post).mockResolvedValue(MOCK_REFRESH_STARTED)
   })
@@ -809,12 +1038,6 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
     })
     await user.click(screen.getByRole("tab", { name: "Movies" }))
     await user.click(screen.getByText("Refresh"))
-
-    await waitFor(() => {
-      expect(MockEventSource.latest()).toBeDefined()
-    })
-    // stream_ready triggers the POST (subscribe-first protocol).
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
 
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
@@ -848,11 +1071,6 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
     await user.click(screen.getByText("Refresh"))
 
     await waitFor(() => {
-      expect(MockEventSource.latest()).toBeDefined()
-    })
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
-
-    await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
         "/api/wanted/refresh",
         expect.objectContaining({ item_type: "episode" }),
@@ -881,11 +1099,6 @@ describe("WantedPage - Tab Selection Drives Refresh Scope", () => {
       expect(screen.getByText("Refresh")).toBeInTheDocument()
     })
     await user.click(screen.getByText("Refresh"))
-
-    await waitFor(() => {
-      expect(MockEventSource.latest()).toBeDefined()
-    })
-    MockEventSource.latest()!.emit({ event: "stream_ready" })
 
     await waitFor(() => {
       expect(api.post).toHaveBeenCalledWith(
