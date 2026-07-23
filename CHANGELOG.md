@@ -2,6 +2,33 @@
 
 All notable changes to this project are documented in this file. Versions follow [Semantic Versioning](https://semver.org/) with `v2.0.0-beta.*` pre-releases leading to the stable v2.0.0 release.
 
+## v2.6.0-beta.1 - 2026-07-23
+
+Consolidated feature release covering milestones M8 and M10–M13 (the full v2.1–v2.6 line planned in `MILESTONES.md`). All changes are backward-compatible except the removal of the `set-password` CLI subcommand noted below.
+
+### Added
+
+- **Bazarr full library sync (M8)**: the poller now syncs the entire Bazarr library (movies + series/episodes) instead of only missing-subtitle items. The old `bazarr_track_no_subs` toggle is replaced by a 3-way scope filter (`all` / `missing` / `no_subs`) derived at query time from the wanted cache. An Alembic migration (`0006`) cleans up the orphaned settings row on upgrade.
+- **History Retry action (M12)**: failed jobs that aren't already covered by Overwrite & retry or Rename now show a Retry button that re-queues the job with `overwrite: true`.
+- **History filter buttons (M13)**: Apply and Reset buttons for the filter form, ordered Apply-first/Reset-second as an equal-width matched pair.
+- **ParoleSub logo (M13)**: brand lockup added to the sidebar (mark-only when collapsed, full lockup when expanded) and the login page, with light/dark variants.
+
+### Changed
+
+- **Admin password reconcile on boot (M10)**: the stored admin password hash is now reconciled against the resolved secret (`ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE`) on every startup. Rotating the Podman secret or `.env` value and redeploying is the sole mechanism for changing the admin password — the hash is updated automatically on the next boot.
+- **Queue auto-refresh default On (M11)**: the Queue panel's Auto-refresh toggle now defaults to On so a freshly opened page live-updates without manual intervention.
+- Renumbered the v3.0 Redis milestone (M11→M14 in `MILESTONES.md`) after the v2.x feature line.
+
+### Removed
+
+- `parolesub admin set-password` / `python -m audio_to_subs.admin set-password` subcommand removed. The environment secret is now the single source of truth for the admin password; the CLI command conflicted with the reconcile path (a CLI-set password would be silently reverted to the env value on the next boot).
+
+### Upgrade Notes
+
+- Deployments that previously used `set-password` to set a real password while leaving `ADMIN_PASSWORD` set to a placeholder (`admin`, `changeme`, etc.) in the environment must update the env to a strong secret before upgrading. Otherwise the reconcile path will refuse to start with a `ValueError`, since it will detect the stored hash no longer matches the placeholder env and refuse to rotate to a default/placeholder value.
+
+---
+
 ## v2.0.0 - 2026-07-20
 
 Stable release. No functional changes since v2.0.0-beta.13 — this release finalizes the version bump and documentation.

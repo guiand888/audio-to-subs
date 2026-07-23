@@ -4,6 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { HistoryPage } from "./HistoryPage"
 import { api } from "@/lib/api"
+import { useJobsStore } from "@/lib/jobsStore"
 import type { JobResponse } from "@/lib/types"
 
 const EMPTY_HISTORY = {
@@ -26,7 +27,7 @@ const EMPTY_HISTORY = {
 }
 
 vi.mock("@/lib/api", () => ({
-  api: { get: vi.fn(), patch: vi.fn() },
+  api: { get: vi.fn(), patch: vi.fn(), post: vi.fn() },
 }))
 
 const BASE_JOB: JobResponse = {
@@ -69,10 +70,24 @@ function wrapper({ children }: { children: React.ReactNode }) {
   return <QueryClientProvider client={client}>{children}</QueryClientProvider>
 }
 
+// A plain failed job with no output_exists sentinel and no language-review
+// flag - the ordinary case the M12 Retry button targets.
+const FAILED_JOB: JobResponse = {
+  ...BASE_JOB,
+  status: "failed",
+  needs_language_review: false,
+  language_code: "en",
+  language_mode: "explicit",
+  error_message: "transcription crashed",
+}
+
 describe("HistoryPage", () => {
   beforeEach(() => {
     vi.clearAllMocks()
     vi.mocked(api.get).mockResolvedValue(EMPTY_HISTORY)
+    // Reset the live jobs store between tests - the Retry button's
+    // visibility is derived from it.
+    useJobsStore.setState({ jobs: {}, pendingNewCount: 0, lastTerminalJobId: null })
   })
 
   it("opens the Status filter without throwing Radix empty-value error", async () => {
@@ -220,5 +235,163 @@ describe("HistoryPage", () => {
       expect(screen.getByText("Runtime")).toBeInTheDocument()
     })
     expect(screen.getAllByText("1m 0s")).toHaveLength(2)
+  })
+
+  describe("Retry action (M12)", () => {
+    it("renders a Retry button for a plain failed job", async () => {
+      vi.mocked(api.get).mockResolvedValue(historyWith([FAILED_JOB]))
+
+      render(<HistoryPage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Retry" })).toBeInTheDocument()
+      })
+    })
+
+    it("does not render Retry for done/running/queued jobs", async () => {
+      for (const status of ["done", "running", "queued"] as const) {
+        vi.mocked(api.get).mockResolvedValue(
+          historyWith([{ ...FAILED_JOB, status, needs_language_review: false }]),
+        )
+        const { unmount } = render(<HistoryPage />, { wrapper })
+        await waitFor(() => {
+          expect(screen.getByText(FAILED_JOB.media_path)).toBeInTheDocument()
+        })
+        expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+        unmount()
+      }
+    })
+
+    it("does not render Retry for a job already covered by output_exists (Overwrite & retry)", async () => {
+      vi.mocked(api.get).mockResolvedValue(
+        historyWith([
+          {
+            ...FAILED_JOB,
+            error_message: "output_exists: refusing to overwrite",
+          },
+        ]),
+      )
+
+      render(<HistoryPage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Overwrite & retry" })).toBeInTheDocument()
+      })
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+    })
+
+    it("does not render Retry for a job already covered by needs_language_review (Rename)", async () => {
+      vi.mocked(api.get).mockResolvedValue(
+        historyWith([{ ...FAILED_JOB, needs_language_review: true }]),
+      )
+
+      render(<HistoryPage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument()
+      })
+      expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+    })
+
+    it("clicking Retry posts buildRetry(job)'s exact payload, shows a success toast, and hides Retry once the store reflects the new queued job", async () => {
+      vi.mocked(api.get).mockResolvedValue(historyWith([FAILED_JOB]))
+      const newJob: JobResponse = {
+        ...FAILED_JOB,
+        id: "job-retry-1",
+        status: "queued",
+        error_message: null,
+      }
+      vi.mocked(api.post).mockResolvedValue(newJob)
+      const user = userEvent.setup()
+
+      render(<HistoryPage />, { wrapper })
+
+      const retryButton = await screen.findByRole("button", { name: "Retry" })
+      await user.click(retryButton)
+
+      await waitFor(() => {
+        expect(api.post).toHaveBeenCalledWith("/api/jobs", {
+          source: FAILED_JOB.source,
+          source_ref: FAILED_JOB.source_ref,
+          media_path: FAILED_JOB.media_path,
+          output_path: FAILED_JOB.output_path,
+          language_code: FAILED_JOB.language_code,
+          language_mode: FAILED_JOB.language_mode,
+          output_format: FAILED_JOB.output_format,
+          overwrite: true,
+        })
+      })
+
+      await waitFor(() => {
+        expect(screen.queryByRole("button", { name: "Retry" })).not.toBeInTheDocument()
+      })
+    })
+
+    it("does not affect the existing Overwrite & retry / Rename buttons", async () => {
+      vi.mocked(api.get).mockResolvedValue(
+        historyWith([
+          { ...FAILED_JOB, id: "job-overwrite", error_message: "output_exists: nope" },
+          { ...FAILED_JOB, id: "job-rename", needs_language_review: true },
+        ]),
+      )
+
+      render(<HistoryPage />, { wrapper })
+
+      await waitFor(() => {
+        expect(screen.getByRole("button", { name: "Overwrite & retry" })).toBeInTheDocument()
+      })
+      expect(screen.getByRole("button", { name: "Rename" })).toBeInTheDocument()
+    })
+  })
+
+  it("renders Apply before Reset as an equal-width matched pair (M13)", async () => {
+    render(<HistoryPage />, { wrapper })
+
+    const applyButton = await screen.findByRole("button", { name: /apply/i })
+    const resetButton = screen.getByRole("button", { name: /reset/i })
+
+    const allButtons = screen.getAllByRole("button")
+    expect(allButtons.indexOf(applyButton)).toBeLessThan(
+      allButtons.indexOf(resetButton),
+    )
+
+    // Both buttons share the same width-related utility class so they read
+    // as a matched pair.
+    const applyClasses = applyButton.className.split(/\s+/)
+    const resetClasses = resetButton.className.split(/\s+/)
+    const sharedWidthClass = applyClasses.find(
+      (c) => resetClasses.includes(c) && /^(flex-1|w-)/.test(c),
+    )
+    expect(sharedWidthClass).toBeTruthy()
+  })
+
+  it("Apply submits the language filter and Reset clears it", async () => {
+    const user = userEvent.setup()
+    render(<HistoryPage />, { wrapper })
+
+    const languageInput = await screen.findByPlaceholderText("e.g. en, fr")
+    await user.type(languageInput, "fr")
+    await user.click(screen.getByRole("button", { name: /apply/i }))
+
+    await waitFor(() => {
+      const calls = vi.mocked(api.get).mock.calls
+      const lastUrl = calls[calls.length - 1]?.[0] as string
+      expect(lastUrl).toContain("language_filter=fr")
+    })
+
+    await user.click(screen.getByRole("button", { name: /reset/i }))
+
+    await waitFor(() => {
+      const calls = vi.mocked(api.get).mock.calls
+      const lastUrl = calls[calls.length - 1]?.[0] as string
+      expect(lastUrl).not.toContain("language_filter")
+    })
+    // Reset also clears the input back to empty. The filter form remounts
+    // on each refetch (HistoryPage shows a full-page loading state while
+    // fetching), so re-query rather than reuse the earlier `languageInput`
+    // reference, which points at a now-detached node.
+    await waitFor(() => {
+      expect(screen.getByPlaceholderText("e.g. en, fr")).toHaveValue("")
+    })
   })
 })

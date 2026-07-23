@@ -104,6 +104,20 @@ is included for this — point Caddy at it for automatic Let's Encrypt HTTPS in
 front of the frontend's port 8080. Set `BEHIND_TLS=true` in `.env` once a proxy
 is in front, so the session cookie gets the `Secure` flag.
 
+### Admin Password
+
+The admin password is set via the `ADMIN_PASSWORD` environment variable or the
+`ADMIN_PASSWORD_FILE` secret (Podman secret / `.env`), never through a CLI
+command. On first boot the admin user is created from these. On every
+subsequent boot the stored hash is reconciled against the resolved secret —
+so rotating the Podman secret or `.env` value and redeploying is the only
+mechanism for changing the admin password.
+
+The shipped `docker-compose.yml` uses `ADMIN_PASSWORD=admin` as a placeholder;
+the bootstrap refuses to start with any known default (`admin`, `changeme`,
+`password`, `root`, `123456`, empty). Set a strong secret before the first
+boot.
+
 ## Usage
 
 ParoleSub is primarily used through its web application. The CLI commands below are optional, for one-off or advanced transcriptions.

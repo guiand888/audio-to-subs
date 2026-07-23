@@ -41,7 +41,17 @@ export function LoginPage() {
   return (
     <div className="flex min-h-screen items-center justify-center bg-background px-4">
       <Card className="w-full max-w-sm">
-        <CardHeader>
+        <CardHeader className="flex flex-col items-center gap-2">
+          <img
+            src="/parolesub-lockup-light.svg"
+            alt="ParoleSub"
+            className="h-8 dark:hidden"
+          />
+          <img
+            src="/parolesub-lockup-dark.svg"
+            alt="ParoleSub"
+            className="hidden h-8 dark:block"
+          />
           <CardTitle className="text-center text-xl">Parolesub</CardTitle>
         </CardHeader>
         <CardContent>

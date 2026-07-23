@@ -28,11 +28,11 @@ Six milestones, each independently shippable and reviewable. The order encodes h
 | M8 — v2.1 Wanted scope: sync everything, filter client-side | ⏳ Not Started | - | Depends on M6; refines M3 polling + Wanted UI |
 | M9 — v2.2 (TBD — scope to be defined) | ⏳ Not Started | - | Depends on M8 |
 | M10 — v2.3 Admin password sync on secret/env change | ⏳ Not Started | - | Depends on M1 (auth/bootstrap); see note |
-| M11 — v3.0 Redis/jobs-progress architecture refactor | ⏳ In progress (branch `investigate-progress-bar`) | - | Absorbs the in-flight `investigate-progress-bar` work; depends on M5.8 |
-| M12 — v2.4 Queue: Auto-refresh On by default | ⏳ Not Started | - | Depends on M4 (Queue UI) |
-| M13 — v2.5 History: Retry action for failed jobs | ⏳ Not Started | - | Depends on M5 (History UI) + M6.g retry machinery |
-| M14 — v2.6 Visual polish: History filter buttons + ParoleSub logo | ⏳ Not Started | - | Depends on M4/M5 UI |
-| M15 — v4.0 Periodic, configurable jobs (Bazarr sync + auto-schedule) | ⏳ Not Started | - | Depends on M3 (Bazarr) + M11 (progress arch) |
+| M11 — v2.4 Queue: Auto-refresh On by default | ⏳ Not Started | - | Depends on M4 (Queue UI) |
+| M12 — v2.5 History: Retry action for failed jobs | ⏳ Not Started | - | Depends on M5 (History UI) + M6.g retry machinery |
+| M13 — v2.6 Visual polish: History filter buttons + ParoleSub logo | ⏳ Not Started | - | Depends on M4/M5 UI |
+| M14 — v3.0 Redis/jobs-progress architecture refactor | ⏳ In progress (branch `investigate-progress-bar`) | - | Absorbs the in-flight `investigate-progress-bar` work; depends on M5.8 |
+| M15 — v4.0 Periodic, configurable jobs (Bazarr sync + auto-schedule) | ⏳ Not Started | - | Depends on M3 (Bazarr) + M14 (progress arch) |
 | M16 — Documentation rewrite & dev-docs reorganization (deferred) | ⏳ Not Started | - | Depends on M6; deferred until after M8–M15 |
 
 Every milestone ends with the same quality bar:
@@ -75,7 +75,7 @@ This is a documentation milestone — no code commit other than the optional pro
 Tasks:
 - `audio_to_subs/db/`: `base.py` (engine + WAL pragmas), `models.py` (all v2 tables), `session.py` (async + sync session factories), `migrations/` (Alembic with initial revision).
 - `audio_to_subs/auth/`: `passwords.py`, `sessions.py`, `deps.py`, `bootstrap.py`.
-- `audio_to_subs/admin/__main__.py`: `set-password`, `db-init`, `whoami` subcommands.
+- `audio_to_subs/admin/__main__.py`: `db-init`, `whoami` subcommands.
 - `audio_to_subs/api/`: `app.py` (FastAPI factory + lifespan that runs `alembic upgrade head` and `bootstrap_admin`), `settings.py` (`pydantic-settings`), `deps.py`, `routes/auth.py`, `routes/__init__.py`, `routes/healthz.py`.
 - `Dockerfile`: switch CMD to uvicorn.
 - `docker-compose.yml`: backend + redis services (no worker, no frontend yet).
@@ -793,7 +793,7 @@ stays as a separate axis.
   regression in sync coverage.
 - `pytest`, `black --check`, `ruff check`, `mypy --strict` clean; frontend
   `vitest` + `tsc --noEmit` clean; new code ≥ 80% coverage.
-- Doc note: M7 (doc rewrite, now M12) must capture the new sync model.
+- Doc note: M7 (doc rewrite, now M16) must capture the new sync model.
 
 ## M9 — v2.2
 
@@ -815,7 +815,6 @@ with the new value (rather than bootstrap only setting the password on
 first-run / when no user exists).
 
 **Depends on**: M1 (DB foundation + auth + bootstrap). Relevant surfaces:
-`audio_to_subs/admin/__main__.py` (`set-password` subcommand already exists),
 `audio_to_subs/auth/bootstrap.py` (`bootstrap_admin`), `audio_to_subs/api/app.py`
 (lifespan calls bootstrap), and `audio_to_subs/api/settings.py` /
 `audio_to_subs/auth/passwords.py`.
@@ -825,11 +824,11 @@ first-run / when no user exists).
   first boot actually update the stored hash, or is it only honoured when no
   user exists? Today `bootstrap_admin` only creates/refuses — verify whether it
   also reconciles on change.
-- If absent: add a reconcile step (on startup or on a `set-password`/admin
+- If absent: add a reconcile step (on startup or on an admin
   trigger) that, when the secret/env value differs from the stored hash, updates
-  the admin password. Reuse the existing `set-password` machinery where possible.
-- Decide trigger model: startup reconcile vs. explicit operator action (e.g.
-  `parolesub admin set-password` or a Settings action). Document the chosen model.
+  the admin password.
+- Decide trigger model: startup reconcile vs. explicit operator action. Document
+  the chosen model.
 - Tests: rotating the secret updates the stored credential; stale secret does
   not silently lock the operator out; placeholder/weak values still refused
   (reuse M6.c's refusal logic).
@@ -840,54 +839,22 @@ first-run / when no user exists).
 - No regression to M6.c's placeholder-secret refusal or to first-boot bootstrap.
 - `pytest`, `black --check`, `ruff check`, `mypy --strict` clean.
 
-## M11 — v3.0 Redis / jobs-progress architecture refactor
+### Resolution (implemented)
+- **Trigger model chosen**: startup reconcile. On every boot, if the resolved
+  secret differs from the stored hash, the hash is rotated automatically.
+- **`set-password` CLI subcommand removed**: the environment secret
+  (`ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE`) is the sole source of truth for
+  the admin password. The former `parolesub admin set-password` /
+  `python -m audio_to_subs.admin set-password` subcommand was removed because it
+  conflicted with the reconcile path (a CLI-set password would be silently
+  reverted to the env value on the next boot). Operators who previously relied
+  on it should switch to the env/secret rotation flow.
+- **Upgrade note**: deployments that used `set-password` to escape a placeholder
+  env (`ADMIN_PASSWORD=admin`) must clear or update the env to a strong secret
+  before upgrading, otherwise the reconcile path will refuse to start with a
+  `ValueError`.
 
-**Goal**: land the in-depth architecture refactoring of how live job progress is
-stored, delivered, and reconciled — currently in flight on the
-`investigate-progress-bar` branch (commit `828c19e`, "store live job progress in
-Redis, drop DB columns (Phase 1+2)"). This milestone formally adopts that branch
-work as v3.0 and drives it to completion, including the phases not yet shipped.
-
-**Depends on**: M5.8 (Queue progress reporting — step-based UX, Redis-only SSE
-delivery, `progress_stage`/`step_index`/`step_total`).
-
-### Status of in-flight work (`investigate-progress-bar`)
-- **Phase 1** (live progress mirrored to Redis hash `job:progress:{id}`,
-  authoritative live store; worker writes via the progress bridge; cleared on
-  terminal/claim/reap): **done** in `828c19e`.
-- **Phase 2** (DB no longer stores `progress_*` columns; ORM dropped them;
-  removes last per-event DB write and the SQLite single-writer contention):
-  **done** in `828c19e`. No Alembic migration shipped (Option B) — orphaned
-  columns linger in existing SQLite DBs; `MIGRATIONS.md` documents the one-time
-  `DROP COLUMN` (incl. a `docker run --rm` method for hosts without sqlite3).
-- Branch is **not yet merged into `dev`** as of 2026-07-19. Suite: 704 passed /
-  4 skipped (1 pre-existing `test_db_migrations` sandbox failure — no alembic on
-  PATH).
-
-### Open scope for v3.0 (proposed phases beyond 1+2)
-- **Phase 3+**: reconcile the poller/Wanted progress read path fully onto the
-  Redis snapshot (already partially done in `828c19e` for Wanted); confirm
-  `GET /api/jobs` and `/api/jobs/{id}` overlay logic is consistent across SSE +
-  polling + refresh.
-- **Claim/reap consistency**: ensure a reaped-and-requeued job rebuilds its
-  progress snapshot from Redis (or resets cleanly) — covered by the Phase 1
-  clear-on-claim/reap logic; add regression tests.
-- **Migration hygiene**: decide whether v3.0 should ship an Alembic migration to
-  actually drop the orphaned `progress_*` columns (vs. the current Option B
-  manual DROP), so fresh + upgraded DBs match. Reconcile `MIGRATIONS.md`.
-- **Docs**: `QUEUE.md` / `ARCHITECTURE.md` / `DATABASE.md` must reflect
-  Redis-as-authoritative-progress (the M12 doc rewrite should consume this).
-
-### Acceptance (proposed)
-- `investigate-progress-bar` merged to `dev`; live progress is Redis-authoritative
-  with no per-event DB writes on the progress path.
-- Terminal jobs derive progress from status; non-terminal jobs overlay the Redis
-  snapshot consistently across SSE + REST.
-- Existing SQLite DBs either auto-migrate or have a documented, tested DROP path.
-- No SQLite single-writer contention regression; `pytest`/`black`/`ruff`/`mypy`
-  clean; frontend `vitest`/`tsc` clean.
-
-## M12 — v2.4 Queue: Auto-refresh On by default
+## M11 — v2.4 Queue: Auto-refresh On by default
 
 **Goal**: make the Queue panel's "Auto-refresh" toggle default to **On**, so a
 freshly opened Queue page live-updates progress without the operator having to
@@ -909,7 +876,7 @@ useState(false)` (line ~183) should initialize to `true`.
 - Toggling Off stops the polling; toggling back On resumes it.
 - Frontend `vitest` + `tsc --noEmit` clean.
 
-## M13 — v2.5 History: Retry action for failed jobs
+## M12 — v2.5 History: Retry action for failed jobs
 
 **Goal**: surface a **Retry** action button for any job that ended in `failed`,
 distinct from the existing M6.g "Overwrite & retry" (which only appears for the
@@ -955,7 +922,7 @@ in flight / tracked as a new job).
   "Rename" buttons remain unchanged.
 - Frontend `vitest` + `tsc --noEmit` clean.
 
-## M14 — v2.6 Visual polish: History filter buttons + ParoleSub logo
+## M13 — v2.6 Visual polish: History filter buttons + ParoleSub logo
 
 **Goal**: two UI polish items — (1) in the History panel, make the filter
 **Reset** and **Apply** buttons the same size and **swap their order** so Apply is
@@ -987,6 +954,53 @@ product UI (sidebar / login / topbar) as part of the rebrand completed in M6.i.
 - No regression to filter behaviour (Apply still applies, Reset still clears).
 - Frontend `vitest` + `tsc --noEmit` clean.
 
+## M14 — v3.0 Redis / jobs-progress architecture refactor
+
+**Goal**: land the in-depth architecture refactoring of how live job progress is
+stored, delivered, and reconciled — currently in flight on the
+`investigate-progress-bar` branch (commit `828c19e`, "store live job progress in
+Redis, drop DB columns (Phase 1+2)"). This milestone formally adopts that branch
+work as v3.0 and drives it to completion, including the phases not yet shipped.
+
+**Depends on**: M5.8 (Queue progress reporting — step-based UX, Redis-only SSE
+delivery, `progress_stage`/`step_index`/`step_total`).
+
+### Status of in-flight work (`investigate-progress-bar`)
+- **Phase 1** (live progress mirrored to Redis hash `job:progress:{id}`,
+  authoritative live store; worker writes via the progress bridge; cleared on
+  terminal/claim/reap): **done** in `828c19e`.
+- **Phase 2** (DB no longer stores `progress_*` columns; ORM dropped them;
+  removes last per-event DB write and the SQLite single-writer contention):
+  **done** in `828c19e`. No Alembic migration shipped (Option B) — orphaned
+  columns linger in existing SQLite DBs; `MIGRATIONS.md` documents the one-time
+  `DROP COLUMN` (incl. a `docker run --rm` method for hosts without sqlite3).
+- Branch is **not yet merged into `dev`** as of 2026-07-19. Suite: 704 passed /
+  4 skipped (1 pre-existing `test_db_migrations` sandbox failure — no alembic on
+  PATH).
+
+### Open scope for v3.0 (proposed phases beyond 1+2)
+- **Phase 3+**: reconcile the poller/Wanted progress read path fully onto the
+  Redis snapshot (already partially done in `828c19e` for Wanted); confirm
+  `GET /api/jobs` and `/api/jobs/{id}` overlay logic is consistent across SSE +
+  polling + refresh.
+- **Claim/reap consistency**: ensure a reaped-and-requeued job rebuilds its
+  progress snapshot from Redis (or resets cleanly) — covered by the Phase 1
+  clear-on-claim/reap logic; add regression tests.
+- **Migration hygiene**: decide whether v3.0 should ship an Alembic migration to
+  actually drop the orphaned `progress_*` columns (vs. the current Option B
+  manual DROP), so fresh + upgraded DBs match. Reconcile `MIGRATIONS.md`.
+- **Docs**: `QUEUE.md` / `ARCHITECTURE.md` / `DATABASE.md` must reflect
+  Redis-as-authoritative-progress (the M16 doc rewrite should consume this).
+
+### Acceptance (proposed)
+- `investigate-progress-bar` merged to `dev`; live progress is Redis-authoritative
+  with no per-event DB writes on the progress path.
+- Terminal jobs derive progress from status; non-terminal jobs overlay the Redis
+  snapshot consistently across SSE + REST.
+- Existing SQLite DBs either auto-migrate or have a documented, tested DROP path.
+- No SQLite single-writer contention regression; `pytest`/`black`/`ruff`/`mypy`
+  clean; frontend `vitest`/`tsc` clean.
+
 ## M15 — v4.0 Periodic, configurable jobs (Bazarr sync + auto-schedule)
 
 **Goal**: introduce a scheduling subsystem so the app can run work on a recurring,
@@ -997,7 +1011,7 @@ transcription for items matching a rule (e.g. wanted items missing a subtitle,
 optionally scoped by language/type) on a configurable interval, instead of
 requiring manual "Transcribe" clicks.
 
-**Depends on**: M3 (Bazarr client/poller/`/api/wanted`), M11 (Redis/progress
+**Depends on**: M3 (Bazarr client/poller/`/api/wanted`), M14 (Redis/progress
 architecture — so auto-queued jobs share the same progress/SSE path as manual
 ones). Builds on the existing `bazarr_poll_interval` setting and the
 manual-job creation service.

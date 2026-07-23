@@ -125,9 +125,26 @@ export function AppLayout() {
             collapsed ? "w-[56px]" : "w-[200px]",
           )}
         >
-          {/* Brand */}
-          <div className="flex h-16 items-center px-4 font-semibold text-sm tracking-tight">
-            {collapsed ? "P" : "Parolesub"}
+          {/* Brand — mark-only rail when collapsed, full light/dark lockup
+              (theme-swapped via the existing `dark` class, see
+              ThemeProvider) when expanded. */}
+          <div className="flex h-16 items-center px-4">
+            {collapsed ? (
+              <img src="/parolesub-mark.svg" alt="ParoleSub" className="h-8 w-8" />
+            ) : (
+              <>
+                <img
+                  src="/parolesub-lockup-light.svg"
+                  alt="ParoleSub"
+                  className="h-7 dark:hidden"
+                />
+                <img
+                  src="/parolesub-lockup-dark.svg"
+                  alt="ParoleSub"
+                  className="hidden h-7 dark:block"
+                />
+              </>
+            )}
           </div>
           <Separator />
 

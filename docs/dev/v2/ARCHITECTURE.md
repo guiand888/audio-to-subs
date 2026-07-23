@@ -119,7 +119,7 @@ parolesub/
       progress.py               # progress callback -> DB + Redis
     admin/
       __init__.py
-      __main__.py               # set-password, create-user, db-init
+      __main__.py               # db-init, whoami
   tests/
     test_*.py                   # mirrors source tree
     fixtures/

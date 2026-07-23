@@ -16,8 +16,6 @@ from audio_to_subs.bazarr.schemas import (
     Movie,
     MoviesPage,
     SeriesPage,
-    WantedEpisodesPage,
-    WantedMoviesPage,
 )
 
 logger = logging.getLogger(__name__)
@@ -323,57 +321,9 @@ class BazarrClient:
         """
         return await self._request("PATCH", path, params)
 
-    # --- Wanted lists (the main listing endpoints) ---
-
-    async def list_wanted_movies(
-        self,
-        *,
-        start: int = 0,
-        length: int = -1,
-        radarrid: list[int] | None = None,
-    ) -> WantedMoviesPage:
-        """List movies missing subtitles.
-
-        Args:
-            start: Paging start (default 0)
-            length: Paging length (default -1 for all)
-            radarrid: Filter by specific Radarr IDs
-
-        Returns:
-            WantedMoviesPage with list of wanted movies
-        """
-        params: dict[str, Any] = {"start": start, "length": length}
-        if radarrid:
-            params["radarrid[]"] = radarrid
-
-        data = await self._get("/api/movies/wanted", params)
-        return WantedMoviesPage.model_validate(data)
-
-    async def list_wanted_episodes(
-        self,
-        *,
-        start: int = 0,
-        length: int = -1,
-        episodeid: list[int] | None = None,
-    ) -> WantedEpisodesPage:
-        """List episodes missing subtitles.
-
-        Args:
-            start: Paging start (default 0)
-            length: Paging length (default -1 for all)
-            episodeid: Filter by specific episode IDs
-
-        Returns:
-            WantedEpisodesPage with list of wanted episodes
-        """
-        params: dict[str, Any] = {"start": start, "length": length}
-        if episodeid:
-            params["episodeid[]"] = episodeid
-
-        data = await self._get("/api/episodes/wanted", params)
-        return WantedEpisodesPage.model_validate(data)
-
-    # --- Full lists (for the "no subs in any language" filter) ---
+    # --- Full lists (the poller's full-library sync ingests every item via
+    # these, not just Bazarr's "wanted" (missing-subtitle) subset - see
+    # audio_to_subs/bazarr/poller.py's _poll_all_movies/_poll_all_episodes) ---
 
     async def list_all_movies(
         self,

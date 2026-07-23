@@ -3,7 +3,6 @@ import { Check, Eye, EyeOff, Loader2 } from "lucide-react"
 import { Button } from "@/components/ui/button"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
-import { Switch } from "@/components/ui/switch"
 import { api } from "@/lib/api"
 import { toast } from "sonner"
 import type {
@@ -71,10 +70,6 @@ export function BazarrSettingsForm({
     if (!isNaN(num)) {
       onChange({ [field]: num })
     }
-  }
-
-  const handleBooleanChange = (field: keyof SettingsPatch) => (checked: boolean) => {
-    onChange({ [field]: checked })
   }
 
   const failTestConnection = (message: string) => {
@@ -201,22 +196,8 @@ export function BazarrSettingsForm({
           onChange={handleNumberChange("bazarr_poll_interval")}
         />
         <p className="text-sm text-muted-foreground">
-          How often to poll Bazarr for new items missing subtitles.
+          How often to sync the full Bazarr library (movies and series).
         </p>
-      </div>
-
-      <div className="flex items-center justify-between">
-        <div>
-          <Label htmlFor="track-no-subs">Track Items with No Subtitles</Label>
-          <p className="text-sm text-muted-foreground">
-            Include items that have no subtitles in any language.
-          </p>
-        </div>
-        <Switch
-          id="track-no-subs"
-          checked={formData.bazarr_track_no_subs ?? false}
-          onCheckedChange={handleBooleanChange("bazarr_track_no_subs")}
-        />
       </div>
 
       <div className="flex items-center gap-2">

@@ -12,21 +12,24 @@ from sqlalchemy import select
 from audio_to_subs.bazarr.client import BazarrClient
 from audio_to_subs.bazarr.pathmap import PathMap
 from audio_to_subs.bazarr.poller import (
+    ProgressReporter,
     _delete_stale,
     _get_poll_interval,
     _poll_all_episodes,
+    _poll_all_movies,
     _process_episode,
     _process_movie,
     get_bazarr_client,
     get_bazarr_client_with_settings,
     get_path_map,
     get_settings_value,
-    get_track_no_subs,
+    poll_bazarr_manually,
     poll_once,
     run_bazarr_poller,
     start_poller,
     stop_poller,
 )
+from audio_to_subs.bazarr.schemas import Episode, Movie, SubtitleLanguage
 from audio_to_subs.db.models import BazarrCache, Setting
 
 
@@ -343,50 +346,22 @@ class TestGetSettingsValue:
         assert value == "default_value"
 
 
-class TestGetTrackNoSubs:
-    """Test get_track_no_subs function."""
-
-    @pytest.mark.asyncio
-    async def test_get_track_no_subs_false(self, mock_db_session):
-        """Test get_track_no_subs returns False by default."""
-        value = await get_track_no_subs(mock_db_session)
-
-        assert value is False
-
-    @pytest.mark.asyncio
-    async def test_get_track_no_subs_true(self, mock_db_session):
-        """Test get_track_no_subs returns True when set."""
-        setting = Setting(
-            key="bazarr_track_no_subs",
-            value_json=json.dumps(True),
-        )
-        mock_db_session.add(setting)
-        await mock_db_session.commit()
-
-        value = await get_track_no_subs(mock_db_session)
-
-        assert value is True
-
-
 class TestProcessMovie:
-    """Test _process_movie function."""
+    """Test _process_movie function against Bazarr's full `/api/movies` Movie
+    schema (full-sync ingest - no separate wanted/detail split anymore)."""
 
     @pytest.mark.asyncio
     async def test_process_movie_new_entry(self, mock_db_session):
         """Test processing a movie creates a new cache entry."""
-
-        # Create a mock wanted movie
-        class MockWantedMovie:
-            title = "Inception"
-            radarrId = 123
-            sceneName = "/bazarr/movies/Inception.mkv"
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+        movie = Movie(
+            title="Inception",
+            radarrId=123,
+            sceneName="/bazarr/movies/Inception.mkv",
+        )
         path_map = PathMap([("/bazarr/movies", "/local/movies")])
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(mock_db_session, mock_movie, path_map, started_at)
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         # Check that the entry was created
         result = await mock_db_session.execute(
@@ -418,18 +393,15 @@ class TestProcessMovie:
         mock_db_session.add(existing)
         await mock_db_session.commit()
 
-        # Create a mock wanted movie with updated info
-        class MockWantedMovie:
-            title = "New Title"
-            radarrId = 123
-            sceneName = "/bazarr/movies/NewTitle.mkv"
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+        movie = Movie(
+            title="New Title",
+            radarrId=123,
+            sceneName="/bazarr/movies/NewTitle.mkv",
+        )
         path_map = PathMap([("/bazarr/movies", "/local/movies")])
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(mock_db_session, mock_movie, path_map, started_at)
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         # Check that the entry was updated
         result = await mock_db_session.execute(
@@ -443,34 +415,18 @@ class TestProcessMovie:
 
     @pytest.mark.asyncio
     async def test_process_movie_stores_audio_language(self, mock_db_session):
-        """audio_language, when passed, is stored on the cache row - it's
-        never present on the wanted-movie object itself (Bazarr's wanted
-        endpoint doesn't carry it), so callers must fetch and pass it in."""
-
-        class MockAudioLanguage:
-            name = "French"
-            code2 = "fr"
-            code3 = "fre"
-            forced = False
-            hi = False
-
-        class MockWantedMovie:
-            title = "French Film"
-            radarrId = 321
-            sceneName = "/bazarr/movies/French Film.mkv"
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+        """The movie's own audio_language (carried by `/api/movies`) is
+        stored on the cache row - no separate detail fetch is needed."""
+        movie = Movie(
+            title="French Film",
+            radarrId=321,
+            sceneName="/bazarr/movies/French Film.mkv",
+            audio_language=[SubtitleLanguage(name="French", code2="fr", code3="fre")],
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(
-            mock_db_session,
-            mock_movie,
-            path_map,
-            started_at,
-            [MockAudioLanguage()],
-        )
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:321")
@@ -494,18 +450,15 @@ class TestProcessMovie:
     ):
         """When Bazarr can't report an audio language, the cache stores []
         (not None) - this is what drives the frontend's Auto-only dropdown."""
-
-        class MockWantedMovie:
-            title = "Unknown Audio Film"
-            radarrId = 322
-            sceneName = "/bazarr/movies/Unknown.mkv"
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+        movie = Movie(
+            title="Unknown Audio Film",
+            radarrId=322,
+            sceneName="/bazarr/movies/Unknown.mkv",
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(mock_db_session, mock_movie, path_map, started_at)
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:322")
@@ -516,61 +469,43 @@ class TestProcessMovie:
         assert entry.audio_language == []
 
     @pytest.mark.asyncio
-    async def test_process_movie_prefers_detail_path_over_sceneName(
-        self, mock_db_session
-    ):
-        """The wanted endpoint's sceneName is often null in real Bazarr; the
-        authoritative media path comes from the full movie details endpoint.
-        media_path_detail must win over sceneName when both are present."""
-
-        class MockWantedMovie:
-            title = "Inception"
-            radarrId = 700
-            sceneName = "Inception.2010.1080p.BluRay.x264-GROUP"
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+    async def test_process_movie_prefers_path_over_sceneName(self, mock_db_session):
+        """`/api/movies`'s `path` field is authoritative; `sceneName` is only
+        the release name and is often null. `path` must win when both are
+        present."""
+        movie = Movie(
+            title="Inception",
+            radarrId=700,
+            sceneName="Inception.2010.1080p.BluRay.x264-GROUP",
+            path="/bazarr/movies/Inception (2010)/Inception.mkv",
+        )
         path_map = PathMap([("/bazarr/movies", "/local/movies")])
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(
-            mock_db_session,
-            mock_movie,
-            path_map,
-            started_at,
-            media_path_detail="/bazarr/movies/Inception (2010)/Inception.mkv",
-        )
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:700")
         )
         entry = result.scalar_one()
-        # The full-detail path was translated and stored, not the sceneName.
+        # The `path` field was translated and stored, not the sceneName.
         assert entry.media_path == "/local/movies/Inception (2010)/Inception.mkv"
 
     @pytest.mark.asyncio
-    async def test_process_movie_null_sceneName_uses_detail_path(self, mock_db_session):
-        """Mirrors the real-world bug: the wanted endpoint returns
-        sceneName=None and the cache must still get a usable media_path
-        from the joined-in full-detail path."""
-
-        class MockWantedMovie:
-            title = "The Players"
-            radarrId = 701
-            sceneName = None
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+    async def test_process_movie_null_path_falls_back_to_sceneName(
+        self, mock_db_session
+    ):
+        """When `path` is null, media_path falls back to sceneName."""
+        movie = Movie(
+            title="The Players",
+            radarrId=701,
+            sceneName="/movies/The Players (2012)/The Players 720p H264.mkv",
+            path=None,
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(
-            mock_db_session,
-            mock_movie,
-            path_map,
-            started_at,
-            media_path_detail="/movies/The Players (2012)/The Players 720p H264.mkv",
-        )
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:701")
@@ -584,36 +519,22 @@ class TestProcessMovie:
     async def test_process_movie_has_any_subs_from_present_subtitles(
         self, mock_db_session
     ):
-        """has_any_subs reflects PRESENT subtitle files, not the missing list (B10).
+        """has_any_subs reflects PRESENT subtitle files, not the missing list.
 
-        Mirrors the episode case: a movie still wanted for English but already
-        carrying a French subtitle file must report has_any_subs=True.
+        A movie still missing English but already carrying a French
+        subtitle file must report has_any_subs=True.
         """
-
-        class MockSubtitle:
-            name = "French"
-            code2 = "fr"
-            code3 = "fre"
-            forced = False
-            hi = False
-
-        class MockWantedMovie:
-            title = "Mixed Movie"
-            radarrId = 4242
-            sceneName = "/bazarr/movies/Mixed Movie.mkv"
-            missing_subtitles = [MockSubtitle()]  # still missing English...
-
-        mock_movie = MockWantedMovie()
+        movie = Movie(
+            title="Mixed Movie",
+            radarrId=4242,
+            sceneName="/bazarr/movies/Mixed Movie.mkv",
+            missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
+            subtitles=[SubtitleLanguage(name="French", code2="fr", code3="fre")],
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(
-            mock_db_session,
-            mock_movie,
-            path_map,
-            started_at,
-            subtitles=[MockSubtitle()],  # ...but a French sub file is present
-        )
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:4242")
@@ -628,18 +549,15 @@ class TestProcessMovie:
         self, mock_db_session
     ):
         """Without any present subtitle file, has_any_subs is False."""
-
-        class MockWantedMovie:
-            title = "No Subs Movie"
-            radarrId = 4243
-            sceneName = "/bazarr/movies/No Subs Movie.mkv"
-            missing_subtitles = []
-
-        mock_movie = MockWantedMovie()
+        movie = Movie(
+            title="No Subs Movie",
+            radarrId=4243,
+            sceneName="/bazarr/movies/No Subs Movie.mkv",
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
-        await _process_movie(mock_db_session, mock_movie, path_map, started_at)
+        await _process_movie(mock_db_session, movie, path_map, started_at)
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "movie:4243")
@@ -649,38 +567,58 @@ class TestProcessMovie:
         assert entry is not None
         assert entry.has_any_subs is False
 
+    @pytest.mark.asyncio
+    async def test_process_movie_stores_missing_subtitles(self, mock_db_session):
+        """missing_subtitles (now present on the full `/api/movies` schema)
+        round-trips onto the cache row - full sync no longer loses this."""
+        movie = Movie(
+            title="Partially Subbed",
+            radarrId=4244,
+            sceneName="/bazarr/movies/Partial.mkv",
+            missing_subtitles=[SubtitleLanguage(name="German", code2="de")],
+        )
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _process_movie(mock_db_session, movie, path_map, started_at)
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.id == "movie:4244")
+        )
+        entry = result.scalar_one()
+        assert entry.missing_subtitles == [
+            {
+                "name": "German",
+                "code2": "de",
+                "code3": None,
+                "forced": False,
+                "hi": False,
+            }
+        ]
+
 
 class TestProcessEpisode:
-    """Test _process_episode function."""
+    """Test _process_episode function against Bazarr's full `/api/episodes`
+    Episode schema (full-sync ingest - no separate wanted/detail split
+    anymore). `title` is now an explicit caller-supplied argument since a
+    per-episode payload doesn't carry its series' title."""
 
     @pytest.mark.asyncio
     async def test_process_episode_new_entry(self, mock_db_session):
         """Test processing an episode creates a new cache entry."""
-
-        # Create a mock wanted episode
-        class MockSubtitleLanguage:
-            name = "English"
-            code2 = "en"
-            code3 = "eng"
-            forced = False
-            hi = False
-
-        class MockWantedEpisode:
-            seriesTitle = "Test Show"
-            episodeTitle = "Pilot"
-            episode_number = "1x01"
-            sonarrEpisodeId = 456
-            sonarrSeriesId = 789
-            sceneName = "/bazarr/tv/Test Show/Pilot.mkv"
-            missing_subtitles = [MockSubtitleLanguage()]
-            tags = []
-            seriesType = "standard"
-
-        mock_episode = MockWantedEpisode()
+        episode = Episode(
+            sonarrEpisodeId=456,
+            sonarrSeriesId=789,
+            title="Pilot",
+            sceneName="/bazarr/tv/Test Show/Pilot.mkv",
+            missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
+        )
         path_map = PathMap([("/bazarr/tv", "/local/tv")])
         started_at = datetime.now(timezone.utc)
 
-        await _process_episode(mock_db_session, mock_episode, path_map, started_at)
+        await _process_episode(
+            mock_db_session, episode, path_map, started_at, "Test Show - Pilot"
+        )
 
         # Check that the entry was created
         result = await mock_db_session.execute(
@@ -691,49 +629,30 @@ class TestProcessEpisode:
         assert entry is not None
         assert entry.kind == "episode"
         assert entry.ext_id == 456
-        assert "Test Show - Pilot" in entry.title
+        assert entry.title == "Test Show - Pilot"
 
     @pytest.mark.asyncio
     async def test_process_episode_has_any_subs_from_present_subtitles(
         self, mock_db_session
     ):
-        """has_any_subs reflects PRESENT subtitle files, not the missing list (B10).
+        """has_any_subs reflects PRESENT subtitle files, not the missing list.
 
-        Regression for B10: _process_episode used to derive has_any_subs from
-        ``missing_subtitles == []`` (i.e. "fully satisfied"), which is the wrong
-        signal for the frontend's "No subtitles only" filter. The authoritative
-        source is the detail endpoint's ``subtitles`` list of files actually on
-        disk.
-
-        This pins that an episode which is still wanted for English but already
-        HAS a French subtitle is reported as has_any_subs=True (so the "No
-        subtitles only" filter correctly drops it).
+        This pins that an episode which is still missing English but
+        already HAS a French subtitle is reported as has_any_subs=True.
         """
-
-        class MockSubtitle:
-            name = "French"
-            code2 = "fr"
-            code3 = "fre"
-            forced = False
-            hi = False
-
-        class MockWantedEpisode:
-            seriesTitle = "Test Show"
-            episodeTitle = "Mixed"
-            sonarrEpisodeId = 999
-            sceneName = "/bazarr/tv/Test Show/Mixed.mkv"
-            missing_subtitles = [MockSubtitle()]  # still missing English...
-
-        mock_episode = MockWantedEpisode()
+        episode = Episode(
+            sonarrEpisodeId=999,
+            sonarrSeriesId=1,
+            title="Mixed",
+            sceneName="/bazarr/tv/Test Show/Mixed.mkv",
+            missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
+            subtitles=[SubtitleLanguage(name="French", code2="fr", code3="fre")],
+        )
         path_map = PathMap([])
         started_at = datetime.now(timezone.utc)
 
         await _process_episode(
-            mock_db_session,
-            mock_episode,
-            path_map,
-            started_at,
-            subtitles=[MockSubtitle()],  # ...but a French sub file is present
+            mock_db_session, episode, path_map, started_at, "Test Show - Mixed"
         )
 
         result = await mock_db_session.execute(
@@ -748,26 +667,19 @@ class TestProcessEpisode:
     async def test_process_episode_has_any_subs_false_when_no_present_subs(
         self, mock_db_session
     ):
-        """Without any present subtitle file, has_any_subs is False.
-
-        The detail fetch is the only source of truth for present subs; when it
-        yields nothing (or is unavailable), the item is conservatively reported
-        as having no subs - even if the wanted endpoint reports nothing missing.
-        """
-
-        class MockWantedEpisode:
-            seriesTitle = "Test Show"
-            episodeTitle = "Complete"
-            sonarrEpisodeId = 1000
-            sceneName = "/bazarr/tv/Test Show/Complete.mkv"
-            missing_subtitles = []
-
-        mock_episode = MockWantedEpisode()
+        """Without any present subtitle file, has_any_subs is False."""
+        episode = Episode(
+            sonarrEpisodeId=1000,
+            sonarrSeriesId=1,
+            title="Complete",
+            sceneName="/bazarr/tv/Test Show/Complete.mkv",
+        )
         path_map = PathMap([])
         started_at = datetime.now(timezone.utc)
 
-        # No subtitles passed (None) -> conservatively reported as no subs.
-        await _process_episode(mock_db_session, mock_episode, path_map, started_at)
+        await _process_episode(
+            mock_db_session, episode, path_map, started_at, "Test Show - Complete"
+        )
 
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.id == "episode:1000")
@@ -779,33 +691,20 @@ class TestProcessEpisode:
 
     @pytest.mark.asyncio
     async def test_process_episode_stores_audio_language(self, mock_db_session):
-        """audio_language, when passed, is stored on the cache row."""
-
-        class MockAudioLanguage:
-            name = "German"
-            code2 = "de"
-            code3 = "ger"
-            forced = False
-            hi = False
-
-        class MockWantedEpisode:
-            seriesTitle = "German Show"
-            episodeTitle = "Pilot"
-            sonarrEpisodeId = 1001
-            sonarrSeriesId = 2001
-            sceneName = "/bazarr/tv/German Show/Pilot.mkv"
-            missing_subtitles = []
-
-        mock_episode = MockWantedEpisode()
+        """The episode's own audio_language (carried by `/api/episodes`) is
+        stored on the cache row - no separate detail fetch is needed."""
+        episode = Episode(
+            sonarrEpisodeId=1001,
+            sonarrSeriesId=2001,
+            title="Pilot",
+            sceneName="/bazarr/tv/German Show/Pilot.mkv",
+            audio_language=[SubtitleLanguage(name="German", code2="de", code3="ger")],
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
         await _process_episode(
-            mock_db_session,
-            mock_episode,
-            path_map,
-            started_at,
-            [MockAudioLanguage()],
+            mock_db_session, episode, path_map, started_at, "German Show - Pilot"
         )
 
         result = await mock_db_session.execute(
@@ -826,34 +725,25 @@ class TestProcessEpisode:
 
 
 class TestProcessEpisodePath:
-    """Test _process_episode media_path resolution from full-detail path."""
+    """Test _process_episode media_path resolution from `/api/episodes`."""
 
     @pytest.mark.asyncio
-    async def test_process_episode_null_sceneName_uses_detail_path(
+    async def test_process_episode_null_path_falls_back_to_sceneName(
         self, mock_db_session
     ):
-        """The wanted-episodes endpoint returns sceneName=None; the real file
-        path is joined in from the full episodes endpoint and must populate
-        media_path."""
-
-        class MockWantedEpisode:
-            seriesTitle = "Baron Noir"
-            episodeTitle = "Jupiter"
-            sonarrEpisodeId = 324
-            sonarrSeriesId = 5
-            sceneName = None
-            missing_subtitles = []
-
-        mock_episode = MockWantedEpisode()
+        """When `path` is null, media_path falls back to sceneName."""
+        episode = Episode(
+            sonarrEpisodeId=324,
+            sonarrSeriesId=5,
+            title="Jupiter",
+            sceneName="/tv/Baron Noir/S01E03.mkv",
+            path=None,
+        )
         path_map = PathMap()
         started_at = datetime.now(timezone.utc)
 
         await _process_episode(
-            mock_db_session,
-            mock_episode,
-            path_map,
-            started_at,
-            media_path_detail="/tv/Baron Noir/S01E03.mkv",
+            mock_db_session, episode, path_map, started_at, "Baron Noir - Jupiter"
         )
 
         result = await mock_db_session.execute(
@@ -863,29 +753,20 @@ class TestProcessEpisodePath:
         assert entry.media_path == "/tv/Baron Noir/S01E03.mkv"
 
     @pytest.mark.asyncio
-    async def test_process_episode_prefers_detail_path_over_sceneName(
-        self, mock_db_session
-    ):
-        """media_path_detail wins over sceneName when both are present."""
-
-        class MockWantedEpisode:
-            seriesTitle = "Test Show"
-            episodeTitle = "Pilot"
-            sonarrEpisodeId = 702
-            sonarrSeriesId = 9
-            sceneName = "Test.Show.S01E01.1080p.WEB.x264-GROUP"
-            missing_subtitles = []
-
-        mock_episode = MockWantedEpisode()
+    async def test_process_episode_prefers_path_over_sceneName(self, mock_db_session):
+        """`path` wins over sceneName when both are present."""
+        episode = Episode(
+            sonarrEpisodeId=702,
+            sonarrSeriesId=9,
+            title="Pilot",
+            sceneName="Test.Show.S01E01.1080p.WEB.x264-GROUP",
+            path="/bazarr/tv/Test Show/S01E01.mkv",
+        )
         path_map = PathMap([("/bazarr/tv", "/local/tv")])
         started_at = datetime.now(timezone.utc)
 
         await _process_episode(
-            mock_db_session,
-            mock_episode,
-            path_map,
-            started_at,
-            media_path_detail="/bazarr/tv/Test Show/S01E01.mkv",
+            mock_db_session, episode, path_map, started_at, "Test Show - Pilot"
         )
 
         result = await mock_db_session.execute(
@@ -987,18 +868,16 @@ class TestPollerIntegration:
 
     @pytest.mark.asyncio
     async def test_poll_once_with_mock_client(self, mock_db_session):
-        """Test poll_once with a mock client."""
+        """Test poll_once with a mock client (full-library sync)."""
+        from audio_to_subs.bazarr.schemas import EpisodesPage, MoviesPage, SeriesPage
+
         # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
 
-        # Mock empty responses
-        mock_client.list_wanted_movies.return_value = AsyncMock()
-        mock_client.list_wanted_movies.return_value.data = []
-        mock_client.list_wanted_movies.return_value.total = 0
-
-        mock_client.list_wanted_episodes.return_value = AsyncMock()
-        mock_client.list_wanted_episodes.return_value.data = []
-        mock_client.list_wanted_episodes.return_value.total = 0
+        # Mock empty library
+        mock_client.list_all_movies.return_value = MoviesPage(data=[], total=0)
+        mock_client.list_all_series.return_value = SeriesPage(data=[], total=0)
+        mock_client.list_episodes.return_value = EpisodesPage(data=[])
 
         path_map = PathMap()
 
@@ -1006,10 +885,9 @@ class TestPollerIntegration:
         processed = await poll_once(mock_db_session, mock_client, path_map)
 
         assert processed == 0
-        # Each is fetched exactly once (length=200); that single response
-        # seeds both the progress-bar total and the processed items.
-        mock_client.list_wanted_movies.assert_awaited_once()
-        mock_client.list_wanted_episodes.assert_awaited_once()
+        # Full sync: movies and series are each fetched exactly once.
+        mock_client.list_all_movies.assert_awaited_once()
+        mock_client.list_all_series.assert_awaited_once()
 
     @pytest.mark.asyncio
     async def test_start_poller(self):
@@ -1140,12 +1018,85 @@ class TestPollerIntegration:
         ), f"Session must close before the inter-poll sleep; lifecycle={lifecycle}"
 
 
+class TestPollAllMovies:
+    """Test _poll_all_movies implementation (full-library sync)."""
+
+    @pytest.mark.asyncio
+    async def test_poll_all_movies_caches_every_movie_regardless_of_subs(
+        self, mock_db_session
+    ):
+        """_poll_all_movies caches EVERY movie - fully-subtitled included,
+        not just missing-subtitle ones (the pre-M8 behaviour this replaces)."""
+        from audio_to_subs.bazarr.schemas import MoviesPage, SubtitleLanguage
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        fully_subbed = Movie(
+            title="Fully Subbed",
+            radarrId=1,
+            sceneName="/movies/fully-subbed.mkv",
+            subtitles=[SubtitleLanguage(name="English", code2="en")],
+        )
+        missing_sub = Movie(
+            title="Missing Sub",
+            radarrId=2,
+            sceneName="/movies/missing-sub.mkv",
+            missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
+        )
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[fully_subbed, missing_sub], total=2
+        )
+
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        processed = await _poll_all_movies(
+            mock_db_session, mock_client, path_map, started_at
+        )
+
+        assert processed == 2
+        cached = {
+            c.ext_id: c
+            for c in (
+                await mock_db_session.execute(
+                    select(BazarrCache).where(BazarrCache.kind == "movie")
+                )
+            ).scalars()
+        }
+        assert len(cached) == 2
+        assert cached[1].has_any_subs is True
+        assert cached[2].has_any_subs is False
+        assert cached[2].missing_subtitles[0]["code2"] == "en"
+
+    @pytest.mark.asyncio
+    async def test_poll_all_movies_seeds_reporter_known_total(self, mock_db_session):
+        """The reporter's known total is seeded from `/api/movies`'s own
+        `total` field, fetched in the same single call - no separate probe."""
+        from audio_to_subs.bazarr.schemas import MoviesPage
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[Movie(title="A", radarrId=1)], total=458
+        )
+        reporter = ProgressReporter()
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        await _poll_all_movies(
+            mock_db_session, mock_client, path_map, started_at, reporter
+        )
+
+        # `total` reports the known denominator while processed <= it (see
+        # ProgressReporter.total) - confirms `/api/movies`'s total seeded it.
+        assert reporter.total == 458
+
+
 class TestPollAllEpisodes:
-    """Test _poll_all_episodes implementation."""
+    """Test _poll_all_episodes implementation (full-library sync)."""
 
     @pytest.mark.asyncio
     async def test_poll_all_episodes_implementation(self, mock_db_session):
-        """Test that _poll_all_episodes fetches and caches episodes with no subtitles."""
+        """_poll_all_episodes caches EVERY episode - fully-subtitled included,
+        not just no-subs ones (the pre-M8 behaviour this replaces)."""
         from audio_to_subs.bazarr.client import BazarrClient
         from audio_to_subs.bazarr.pathmap import PathMap
 
@@ -1222,35 +1173,32 @@ class TestPollAllEpisodes:
         started_at = datetime.now(timezone.utc)
 
         # Call the function
-        await _poll_all_episodes(mock_db_session, mock_client, path_map, started_at)
+        processed = await _poll_all_episodes(
+            mock_db_session, mock_client, path_map, started_at
+        )
 
-        # Verify only episode without subtitles was cached
+        # Verify BOTH episodes were cached (full sync, not a no-subs filter)
         result = await mock_db_session.execute(
             select(BazarrCache).where(BazarrCache.kind == "episode")
         )
-        cached = result.scalars().all()
+        cached = {c.ext_id: c for c in result.scalars().all()}
 
-        assert len(cached) == 1
-        assert cached[0].ext_id == 100  # Only the episode without subs
-        assert cached[0].has_any_subs is False
-        assert "/local/tv" in cached[0].media_path  # Path was translated
-
-
-class TestPollAllEpisodesRealisticWireFormat:
-    """`bazarr_track_no_subs` polling against Bazarr's real /api/series wire format.
-
-    Unlike TestPollAllEpisodes above (which mocks list_all_series at the
-    client-method level, bypassing schema validation entirely), this drives
-    a REAL BazarrClient through respx so the actual /api/series response
-    Bazarr sends is parsed - proving the opt-in "track items with no
-    subtitles" feature survives it instead of silently logging a warning
-    and skipping every series (the schema bug this test guards against).
-    """
+        assert processed == 2
+        assert len(cached) == 2
+        assert cached[100].has_any_subs is False
+        assert "/local/tv" in cached[100].media_path  # Path was translated
+        assert cached[101].has_any_subs is True
+        assert "/local/tv" in cached[101].media_path
 
     @pytest.mark.asyncio
     async def test_poll_all_episodes_survives_realistic_series_payload(
         self, mock_db_session, respx_mock
     ):
+        """Drives a REAL BazarrClient through respx so the actual
+        `/api/series` response Bazarr sends is parsed (not just mocked at
+        the client-method level), proving the full sync survives it instead
+        of silently logging a warning and skipping every series (the schema
+        bug this test guards against)."""
         import httpx
 
         from tests.bazarr_fixtures import realistic_series_item
@@ -1302,56 +1250,45 @@ class TestPollAllEpisodesRealisticWireFormat:
 
 
 class TestManualPolling:
-    """Test manual polling functionality with type filtering."""
+    """Test manual polling functionality with type filtering (full sync)."""
 
     @pytest.mark.asyncio
     async def test_manual_poll_all(self, mock_db_session):
         """Test manual polling without type filter polls both movies and episodes."""
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.schemas import (
-            WantedEpisode,
-            WantedEpisodesPage,
-            WantedMovie,
-            WantedMoviesPage,
+            EpisodesPage,
+            MoviesPage,
+            Series,
+            SeriesPage,
         )
 
-        # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
 
-        movie = WantedMovie(
-            title="Test Movie",
-            radarrId=123,
-            sceneName="/bazarr/movies/Test Movie.mkv",
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[Movie(title="Test Movie", radarrId=123, sceneName="/m.mkv")],
+            total=1,
         )
-        episode = WantedEpisode(
-            seriesTitle="Test Series",
-            episode_number="S01E01",
-            episodeTitle="Pilot",
-            sonarrSeriesId=1,
-            sonarrEpisodeId=456,
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[
+                Series(sonarrSeriesId=1, title="Test Series", path="/tv/Test Series")
+            ],
+            total=1,
         )
-
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=[movie], total=1
-        )
-        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
-            data=[episode], total=1
+        mock_client.list_episodes.return_value = EpisodesPage(
+            data=[Episode(sonarrEpisodeId=456, sonarrSeriesId=1, title="Pilot")]
         )
 
         path_map = PathMap()
 
-        # Call the function
         movies_processed, episodes_processed = await poll_bazarr_manually(
             mock_db_session, mock_client, path_map, None
         )
 
-        # Verify both API calls were made - exactly once each (length=200);
-        # that single response seeds both the progress-bar total and the
-        # processed items.
-        mock_client.list_wanted_movies.assert_awaited_once()
-        mock_client.list_wanted_episodes.assert_awaited_once()
+        # Full sync: each endpoint fetched exactly once per type.
+        mock_client.list_all_movies.assert_awaited_once()
+        mock_client.list_all_series.assert_awaited_once()
+        mock_client.list_episodes.assert_awaited_once()
 
-        # Verify counts
         assert movies_processed == 1
         assert episodes_processed == 1
 
@@ -1361,42 +1298,25 @@ class TestManualPolling:
     async def test_manual_poll_movies_only(self, mock_db_session):
         """Test manual polling for movies only skips episode API calls."""
         from audio_to_subs.api.routes.wanted import WantedItemType
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
-        from audio_to_subs.bazarr.schemas import (
-            WantedEpisodesPage,
-            WantedMovie,
-            WantedMoviesPage,
-        )
+        from audio_to_subs.bazarr.schemas import MoviesPage
 
-        # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
 
-        movie = WantedMovie(
-            title="Test Movie",
-            radarrId=123,
-            sceneName="/bazarr/movies/Test Movie.mkv",
-        )
-
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=[movie], total=1
-        )
-        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
-            data=[], total=0
+        mock_client.list_all_movies.return_value = MoviesPage(
+            data=[Movie(title="Test Movie", radarrId=123, sceneName="/m.mkv")],
+            total=1,
         )
 
         path_map = PathMap()
 
-        # Call the function with movies only filter
         movies_processed, episodes_processed = await poll_bazarr_manually(
             mock_db_session, mock_client, path_map, WantedItemType.MOVIE
         )
 
-        # Verify only movie API call was made - exactly once (length=200).
-        mock_client.list_wanted_movies.assert_awaited_once()
-        # Episode API should not be called
-        mock_client.list_wanted_episodes.assert_not_awaited()
+        mock_client.list_all_movies.assert_awaited_once()
+        mock_client.list_all_series.assert_not_awaited()
+        mock_client.list_episodes.assert_not_awaited()
 
-        # Verify counts
         assert movies_processed == 1
         assert episodes_processed == 0
 
@@ -1406,54 +1326,42 @@ class TestManualPolling:
     async def test_manual_poll_episodes_only(self, mock_db_session):
         """Test manual polling for episodes only skips movie API calls."""
         from audio_to_subs.api.routes.wanted import WantedItemType
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
-        from audio_to_subs.bazarr.schemas import (
-            WantedEpisode,
-            WantedEpisodesPage,
-            WantedMoviesPage,
-        )
+        from audio_to_subs.bazarr.schemas import EpisodesPage, Series, SeriesPage
 
-        # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
 
-        episode = WantedEpisode(
-            seriesTitle="Test Series",
-            episode_number="S01E01",
-            episodeTitle="Pilot",
-            sonarrSeriesId=1,
-            sonarrEpisodeId=456,
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[
+                Series(sonarrSeriesId=1, title="Test Series", path="/tv/Test Series")
+            ],
+            total=1,
         )
-
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(data=[], total=0)
-        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
-            data=[episode], total=1
+        mock_client.list_episodes.return_value = EpisodesPage(
+            data=[Episode(sonarrEpisodeId=456, sonarrSeriesId=1, title="Pilot")]
         )
 
         path_map = PathMap()
 
-        # Call the function with episodes only filter
         movies_processed, episodes_processed = await poll_bazarr_manually(
             mock_db_session, mock_client, path_map, WantedItemType.EPISODE
         )
 
-        # Verify only episode API call was made - exactly once (length=200).
-        mock_client.list_wanted_episodes.assert_awaited_once()
-        # Movie API should not be called
-        mock_client.list_wanted_movies.assert_not_awaited()
+        mock_client.list_all_series.assert_awaited_once()
+        mock_client.list_episodes.assert_awaited_once()
+        mock_client.list_all_movies.assert_not_awaited()
 
-        # Verify counts
         assert movies_processed == 0
         assert episodes_processed == 1
 
         await mock_client.close()
 
     @pytest.mark.asyncio
-    async def test_manual_poll_with_track_no_subs(self, mock_db_session):
-        """Test manual polling respects bazarr_track_no_subs setting."""
-        import json
-
-        from audio_to_subs.api.routes.wanted import WantedItemType
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+    async def test_manual_poll_ingests_fully_subtitled_and_missing_together(
+        self, mock_db_session
+    ):
+        """The headline M8 behaviour: one poll ingests BOTH a fully-subtitled
+        item and a missing-subtitle item - not just Bazarr's "wanted"
+        (missing-subtitle) subset, which is all the pre-M8 poller cached."""
         from audio_to_subs.bazarr.schemas import (
             Episode,
             EpisodesPage,
@@ -1461,102 +1369,72 @@ class TestManualPolling:
             MoviesPage,
             Series,
             SeriesPage,
-            WantedEpisode,
-            WantedEpisodesPage,
-            WantedMovie,
-            WantedMoviesPage,
+            SubtitleLanguage,
         )
-        from audio_to_subs.db.models import Setting
 
-        # Enable track_no_subs setting
-        setting = Setting(
-            key="bazarr_track_no_subs",
-            value_json=json.dumps(True),
-        )
-        mock_db_session.add(setting)
-        await mock_db_session.commit()
-
-        # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
 
-        movie = WantedMovie(
-            title="Test Movie",
-            radarrId=123,
-            sceneName="/bazarr/movies/Test Movie.mkv",
+        fully_subbed_movie = Movie(
+            title="Fully Subbed Movie",
+            radarrId=1,
+            sceneName="/movies/fully-subbed.mkv",
+            subtitles=[SubtitleLanguage(name="English", code2="en")],
+            missing_subtitles=[],
         )
-        episode = WantedEpisode(
-            seriesTitle="Test Series",
-            episode_number="S01E01",
-            episodeTitle="Pilot",
-            sonarrSeriesId=1,
-            sonarrEpisodeId=456,
-        )
-
-        # Movie with no subtitles
-        movie_no_subs = Movie(
-            radarrId=789,
-            title="Movie No Subs",
-            sceneName="/bazarr/movies/No Subs.mkv",
+        missing_sub_movie = Movie(
+            title="Missing Sub Movie",
+            radarrId=2,
+            sceneName="/movies/missing-sub.mkv",
             subtitles=[],
-        )
-
-        # Series and episode with no subtitles
-        series_no_subs = Series(
-            sonarrSeriesId=101,
-            title="Series No Subs",
-            path="/bazarr/tv/Series No Subs",
-            monitored=True,
-            ended=False,
-        )
-        episode_no_subs = Episode(
-            sonarrEpisodeId=202,
-            sonarrSeriesId=101,
-            title="Episode No Subs",
-            path="/bazarr/tv/Series No Subs/ep1.mkv",
-            sceneName="/bazarr/tv/Series No Subs/ep1.mkv",
-            subtitles=[],
-        )
-
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=[movie], total=1
-        )
-        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
-            data=[episode], total=1
+            missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
         )
         mock_client.list_all_movies.return_value = MoviesPage(
-            data=[movie_no_subs], total=1
+            data=[fully_subbed_movie, missing_sub_movie], total=2
         )
-        mock_client.list_all_series.return_value = SeriesPage(
-            data=[series_no_subs], total=1
+
+        series = Series(sonarrSeriesId=1, title="Test Series", path="/tv/Test Series")
+        mock_client.list_all_series.return_value = SeriesPage(data=[series], total=1)
+
+        fully_subbed_episode = Episode(
+            sonarrEpisodeId=100,
+            sonarrSeriesId=1,
+            title="Fully Subbed Episode",
+            subtitles=[SubtitleLanguage(name="English", code2="en")],
+            missing_subtitles=[],
         )
-        mock_client.list_episodes.return_value = EpisodesPage(data=[episode_no_subs])
+        missing_sub_episode = Episode(
+            sonarrEpisodeId=101,
+            sonarrSeriesId=1,
+            title="Missing Sub Episode",
+            subtitles=[],
+            missing_subtitles=[SubtitleLanguage(name="English", code2="en")],
+        )
+        mock_client.list_episodes.return_value = EpisodesPage(
+            data=[fully_subbed_episode, missing_sub_episode]
+        )
 
         path_map = PathMap()
-
-        # Call the function with ALL type (which should also poll all items when track_no_subs is enabled)
         movies_processed, episodes_processed = await poll_bazarr_manually(
-            mock_db_session, mock_client, path_map, WantedItemType.ALL
+            mock_db_session, mock_client, path_map, None
         )
 
-        # Verify all API calls were made (wanted + all for track_no_subs).
-        # list_all_movies/list_episodes are each called twice here: once to
-        # batch-fetch audio_language for the wanted items, and once more by
-        # the (independent) track_no_subs full-library scan - two distinct
-        # purposes, not a regression of the "bounded, not per-item" guarantee.
-        # list_wanted_movies/list_wanted_episodes are each fetched exactly
-        # once (length=200); that response seeds both the progress-bar total
-        # and the processed items.
-        mock_client.list_wanted_movies.assert_awaited_once()
-        mock_client.list_wanted_episodes.assert_awaited_once()
-        assert mock_client.list_all_movies.await_count == 2
-        mock_client.list_all_series.assert_awaited_once()
-        assert mock_client.list_episodes.await_count == 2
+        assert movies_processed == 2
+        assert episodes_processed == 2
 
-        # Verify counts include both wanted and no-subs items
-        assert movies_processed >= 1  # At least the wanted movie
-        assert episodes_processed >= 1  # At least the wanted episode
+        cached = {
+            c.id: c
+            for c in (await mock_db_session.execute(select(BazarrCache))).scalars()
+        }
 
-        await mock_client.close()
+        assert cached["movie:1"].has_any_subs is True
+        assert cached["movie:1"].missing_subtitles == []
+        assert cached["movie:2"].has_any_subs is False
+        assert cached["movie:2"].missing_subtitles[0]["code2"] == "en"
+
+        assert cached["episode:100"].has_any_subs is True
+        assert cached["episode:100"].missing_subtitles == []
+        assert cached["episode:101"].has_any_subs is False
+        assert cached["episode:101"].missing_subtitles[0]["code2"] == "en"
 
     @pytest.mark.asyncio
     async def test_manual_poll_handles_client_error(
@@ -1566,16 +1444,15 @@ class TestManualPolling:
         from sqlalchemy import select
 
         from audio_to_subs.bazarr.client import BazarrServerError
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.db.models import JobLog, LogLevel
 
         # Create mock client that raises error
         mock_client = AsyncMock(spec=BazarrClient)
-        mock_client.list_wanted_movies.side_effect = BazarrServerError("Server error")
+        mock_client.list_all_movies.side_effect = BazarrServerError("Server error")
 
         path_map = PathMap()
 
-        # A failure fetching wanted movies must propagate, not be swallowed and
+        # A failure fetching movies must propagate, not be swallowed and
         # reported as a successful poll with 0 items processed.
         with pytest.raises(BazarrServerError):
             await poll_bazarr_manually(mock_db_session, mock_client, path_map, None)
@@ -1590,52 +1467,87 @@ class TestManualPolling:
         assert "Bazarr sync failed" in log.message
 
     @pytest.mark.asyncio
+    async def test_manual_poll_tolerates_one_bad_series(self, mock_db_session):
+        """A failure fetching one series' episodes is logged and skipped,
+        not fatal to the whole episode sync - the other series still land."""
+        from audio_to_subs.bazarr.client import BazarrServerError
+        from audio_to_subs.bazarr.schemas import (
+            Episode,
+            EpisodesPage,
+            Series,
+            SeriesPage,
+        )
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        good_series = Series(sonarrSeriesId=1, title="Good Series", path="/tv/good")
+        bad_series = Series(sonarrSeriesId=2, title="Bad Series", path="/tv/bad")
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[bad_series, good_series], total=2
+        )
+
+        async def list_episodes_side_effect(*, seriesid):
+            if seriesid == 2:
+                raise BazarrServerError("boom")
+            return EpisodesPage(
+                data=[Episode(sonarrEpisodeId=10, sonarrSeriesId=1, title="Ep1")]
+            )
+
+        mock_client.list_episodes.side_effect = list_episodes_side_effect
+
+        path_map = PathMap()
+        _, episodes_processed = await poll_bazarr_manually(
+            mock_db_session, mock_client, path_map, "episode"
+        )
+
+        assert episodes_processed == 1
+        entry = (
+            await mock_db_session.execute(
+                select(BazarrCache).where(BazarrCache.id == "episode:10")
+            )
+        ).scalar_one()
+        assert entry.title == "Good Series - Ep1"
+
+        await mock_client.close()
+
+    @pytest.mark.asyncio
     async def test_manual_poll_returns_counts(self, mock_db_session, sync_session):
         """Test manual polling returns accurate counts."""
         from sqlalchemy import select
 
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
         from audio_to_subs.bazarr.schemas import (
-            WantedEpisode,
-            WantedEpisodesPage,
-            WantedMovie,
-            WantedMoviesPage,
+            Episode,
+            EpisodesPage,
+            Movie,
+            MoviesPage,
+            Series,
+            SeriesPage,
         )
         from audio_to_subs.db.models import JobLog, LogLevel
 
-        # Create mock client
         mock_client = AsyncMock(spec=BazarrClient)
 
         movies = [
-            WantedMovie(title=f"Movie {i}", radarrId=i, sceneName=f"/m{i}.mkv")
+            Movie(title=f"Movie {i}", radarrId=i, sceneName=f"/m{i}.mkv")
             for i in range(1, 4)
         ]
         episodes = [
-            WantedEpisode(
-                seriesTitle="Series 1",
-                episode_number=f"S01E0{i}",
-                episodeTitle=f"Ep{i}",
-                sonarrSeriesId=1,
-                sonarrEpisodeId=100 + i,
-            )
+            Episode(sonarrEpisodeId=100 + i, sonarrSeriesId=1, title=f"Ep{i}")
             for i in range(1, 3)
         ]
 
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=movies, total=3
+        mock_client.list_all_movies.return_value = MoviesPage(data=movies, total=3)
+        mock_client.list_all_series.return_value = SeriesPage(
+            data=[Series(sonarrSeriesId=1, title="Series 1", path="/tv/series1")],
+            total=1,
         )
-        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
-            data=episodes, total=2
-        )
+        mock_client.list_episodes.return_value = EpisodesPage(data=episodes)
 
         path_map = PathMap()
 
-        # Call the function
         movies_processed, episodes_processed = await poll_bazarr_manually(
             mock_db_session, mock_client, path_map, None
         )
 
-        # Verify counts are accurate
         assert movies_processed == 3
         assert episodes_processed == 2
 
@@ -1648,31 +1560,15 @@ class TestManualPolling:
         assert "2 episodes" in log.message
 
 
-class TestAudioLanguageEnrichment:
-    """Test that poll_bazarr_manually joins in audio_language from the
-    full-detail endpoints, bounded (one call per poll / per distinct series),
-    not one call per wanted item."""
+class TestFullSyncBounding:
+    """Full sync must remain bounded: one call for movies (not one per
+    movie), one call per distinct series (not one per episode)."""
 
     @pytest.mark.asyncio
-    async def test_movies_audio_language_batched_and_joined(self, mock_db_session):
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
-        from audio_to_subs.bazarr.schemas import (
-            Movie,
-            MoviesPage,
-            SubtitleLanguage,
-            WantedMovie,
-            WantedMoviesPage,
-        )
+    async def test_movies_fetched_in_a_single_call(self, mock_db_session):
+        from audio_to_subs.bazarr.schemas import Movie, MoviesPage, SubtitleLanguage
 
         mock_client = AsyncMock(spec=BazarrClient)
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=[
-                WantedMovie(title="Movie A", radarrId=1, sceneName="/a.mkv"),
-                WantedMovie(title="Movie B", radarrId=2, sceneName="/b.mkv"),
-            ],
-            total=2,
-        )
-        mock_client.list_wanted_episodes.return_value.data = []
         mock_client.list_all_movies.return_value = MoviesPage(
             data=[
                 Movie(
@@ -1697,7 +1593,7 @@ class TestAudioLanguageEnrichment:
         await poll_bazarr_manually(mock_db_session, mock_client, path_map, "movie")
 
         # Bounded: exactly one call for this poll, not one per movie.
-        mock_client.list_all_movies.assert_awaited_once_with(radarrid=[1, 2])
+        mock_client.list_all_movies.assert_awaited_once_with()
 
         entry_a = (
             await mock_db_session.execute(
@@ -1713,46 +1609,23 @@ class TestAudioLanguageEnrichment:
         assert entry_b.audio_language[0]["code2"] == "de"
 
     @pytest.mark.asyncio
-    async def test_episodes_audio_language_batched_by_unique_series(
-        self, mock_db_session
-    ):
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
+    async def test_episodes_fetched_once_per_distinct_series(self, mock_db_session):
         from audio_to_subs.bazarr.schemas import (
             Episode,
             EpisodesPage,
+            Series,
+            SeriesPage,
             SubtitleLanguage,
-            WantedEpisode,
-            WantedEpisodesPage,
         )
 
         mock_client = AsyncMock(spec=BazarrClient)
-        mock_client.list_wanted_movies.return_value.data = []
-        # Three wanted episodes across only two distinct series.
-        mock_client.list_wanted_episodes.return_value = WantedEpisodesPage(
+        # Two distinct series, three episodes total across them.
+        mock_client.list_all_series.return_value = SeriesPage(
             data=[
-                WantedEpisode(
-                    seriesTitle="Series 1",
-                    episode_number="S01E01",
-                    episodeTitle="Ep1",
-                    sonarrSeriesId=10,
-                    sonarrEpisodeId=101,
-                ),
-                WantedEpisode(
-                    seriesTitle="Series 1",
-                    episode_number="S01E02",
-                    episodeTitle="Ep2",
-                    sonarrSeriesId=10,
-                    sonarrEpisodeId=102,
-                ),
-                WantedEpisode(
-                    seriesTitle="Series 2",
-                    episode_number="S01E01",
-                    episodeTitle="Ep1",
-                    sonarrSeriesId=20,
-                    sonarrEpisodeId=201,
-                ),
+                Series(sonarrSeriesId=10, title="Series 1", path="/tv/series1"),
+                Series(sonarrSeriesId=20, title="Series 2", path="/tv/series2"),
             ],
-            total=3,
+            total=2,
         )
 
         def list_episodes_side_effect(*, seriesid):
@@ -1793,7 +1666,7 @@ class TestAudioLanguageEnrichment:
         path_map = PathMap()
         await poll_bazarr_manually(mock_db_session, mock_client, path_map, "episode")
 
-        # Bounded by distinct series (2), not by wanted-episode count (3).
+        # Bounded by distinct series (2), not by episode count (3).
         assert mock_client.list_episodes.await_count == 2
 
         entry_101 = (
@@ -1809,34 +1682,167 @@ class TestAudioLanguageEnrichment:
         assert entry_101.audio_language[0]["code2"] == "en"
         assert entry_201.audio_language[0]["code2"] == "es"
 
-    @pytest.mark.asyncio
-    async def test_audio_language_fetch_failure_degrades_gracefully(
-        self, mock_db_session
-    ):
-        """If the enrichment call fails, the poll must still succeed - items
-        just end up with an empty audio_language (Auto-only in the UI)."""
-        from audio_to_subs.bazarr.poller import poll_bazarr_manually
-        from audio_to_subs.bazarr.schemas import WantedMovie, WantedMoviesPage
 
-        mock_client = AsyncMock(spec=BazarrClient)
-        mock_client.list_wanted_movies.return_value = WantedMoviesPage(
-            data=[WantedMovie(title="Movie A", radarrId=1, sceneName="/a.mkv")],
-            total=1,
+class TestFullLibrarySyncRealisticWireFormat:
+    """Drives a REAL BazarrClient through respx against Bazarr's actual wire
+    format (see tests/bazarr_fixtures.py), proving the headline M8 behaviour:
+    a single poll ingests a fully-subtitled item AND a missing-subtitle item
+    together - the pre-M8 poller only ever cached the latter (Bazarr's
+    "wanted" subset)."""
+
+    @pytest.mark.asyncio
+    async def test_full_poll_caches_fully_subtitled_and_missing_movie(
+        self, mock_db_session, respx_mock
+    ):
+        import httpx
+
+        from tests.bazarr_fixtures import realistic_movie_item
+
+        fully_subbed = realistic_movie_item(
+            radarrId=1,
+            title="Fully Subbed Movie",
+            subtitles=[
+                {
+                    "name": "English",
+                    "code2": "en",
+                    "code3": "eng",
+                    "forced": False,
+                    "hi": False,
+                }
+            ],
+            missing_subtitles=[],
         )
-        mock_client.list_wanted_episodes.return_value.data = []
-        mock_client.list_all_movies.side_effect = Exception("Bazarr unreachable")
+        missing_sub = realistic_movie_item(
+            radarrId=2,
+            title="Missing Sub Movie",
+            subtitles=[],
+            missing_subtitles=[
+                {
+                    "name": "English",
+                    "code2": "en",
+                    "code3": "eng",
+                    "forced": False,
+                    "hi": False,
+                }
+            ],
+        )
+        respx_mock.get("http://full-sync-test:6767/api/movies").mock(
+            return_value=httpx.Response(
+                200, json={"data": [fully_subbed, missing_sub], "total": 2}
+            )
+        )
 
         path_map = PathMap()
-        movies_processed, _ = await poll_bazarr_manually(
-            mock_db_session, mock_client, path_map, "movie"
+        started_at = datetime.now(timezone.utc)
+
+        async with BazarrClient(
+            base_url="http://full-sync-test:6767",
+            api_key="wire-test-key",
+        ) as client:
+            processed = await _poll_all_movies(
+                mock_db_session, client, path_map, started_at
+            )
+
+        assert processed == 2
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.kind == "movie")
+        )
+        cached = {c.ext_id: c for c in result.scalars().all()}
+
+        assert len(cached) == 2
+        # The fully-subtitled item is cached (the pre-M8 poller would have
+        # dropped it entirely - only "wanted" i.e. missing-subtitle items
+        # were ever ingested).
+        assert cached[1].has_any_subs is True
+        assert cached[1].missing_subtitles == []
+        # The missing-subtitle item is cached too, side by side.
+        assert cached[2].has_any_subs is False
+        assert cached[2].missing_subtitles[0]["code2"] == "en"
+
+    @pytest.mark.asyncio
+    async def test_full_poll_caches_fully_subtitled_and_missing_episode(
+        self, mock_db_session, respx_mock
+    ):
+        import httpx
+
+        from tests.bazarr_fixtures import realistic_series_item
+
+        respx_mock.get("http://full-sync-test:6767/api/series").mock(
+            return_value=httpx.Response(
+                200,
+                json={"data": [realistic_series_item(sonarrSeriesId=789)], "total": 1},
+            )
+        )
+        respx_mock.get("http://full-sync-test:6767/api/episodes").mock(
+            return_value=httpx.Response(
+                200,
+                json={
+                    "data": [
+                        {
+                            "sonarrEpisodeId": 100,
+                            "sonarrSeriesId": 789,
+                            "title": "Fully Subbed Episode",
+                            "subtitles": [
+                                {
+                                    "name": "English",
+                                    "code2": "en",
+                                    "code3": "eng",
+                                    "forced": False,
+                                    "hi": False,
+                                }
+                            ],
+                            "missing_subtitles": [],
+                            "season": 1,
+                            "episode": 1,
+                            "path": "/bazarr/tv/Test Series/Episode 01.mkv",
+                            "sceneName": None,
+                        },
+                        {
+                            "sonarrEpisodeId": 101,
+                            "sonarrSeriesId": 789,
+                            "title": "Missing Sub Episode",
+                            "subtitles": [],
+                            "missing_subtitles": [
+                                {
+                                    "name": "English",
+                                    "code2": "en",
+                                    "code3": "eng",
+                                    "forced": False,
+                                    "hi": False,
+                                }
+                            ],
+                            "season": 1,
+                            "episode": 2,
+                            "path": "/bazarr/tv/Test Series/Episode 02.mkv",
+                            "sceneName": None,
+                        },
+                    ],
+                    "total": 2,
+                },
+            )
         )
 
-        assert movies_processed == 1
-        entry = (
-            await mock_db_session.execute(
-                select(BazarrCache).where(BazarrCache.id == "movie:1")
-            )
-        ).scalar_one()
-        assert entry.audio_language == []
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
 
-        await mock_client.close()
+        async with BazarrClient(
+            base_url="http://full-sync-test:6767",
+            api_key="wire-test-key",
+        ) as client:
+            processed = await _poll_all_episodes(
+                mock_db_session, client, path_map, started_at
+            )
+
+        assert processed == 2
+
+        result = await mock_db_session.execute(
+            select(BazarrCache).where(BazarrCache.kind == "episode")
+        )
+        cached = {c.ext_id: c for c in result.scalars().all()}
+
+        assert len(cached) == 2
+        assert cached[100].has_any_subs is True
+        assert cached[100].missing_subtitles == []
+        assert cached[101].has_any_subs is False
+        assert cached[101].missing_subtitles[0]["code2"] == "en"

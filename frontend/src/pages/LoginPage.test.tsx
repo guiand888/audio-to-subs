@@ -104,3 +104,24 @@ describe("LoginPage - error messages", () => {
     })
   })
 })
+
+describe("LoginPage - branding (M13)", () => {
+  beforeEach(() => {
+    vi.clearAllMocks()
+  })
+
+  it("renders the ParoleSub logo above the sign-in form with accessible alt text", () => {
+    render(<LoginPage />, { wrapper })
+
+    const logos = screen.getAllByAltText("ParoleSub")
+    expect(logos.length).toBeGreaterThanOrEqual(1)
+    logos.forEach((logo) => expect(logo.tagName).toBe("IMG"))
+
+    // The logo lives above the username field in DOM order.
+    const usernameField = screen.getByLabelText("Username")
+    expect(
+      logos[0].compareDocumentPosition(usernameField) &
+        Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+})

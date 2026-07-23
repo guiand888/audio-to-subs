@@ -10,6 +10,7 @@ import { useCreateJob, useUpdateJobLanguage } from "@/hooks/useJobs"
 import { useTimezoneSetting, formatDateTime } from "@/lib/datetime"
 import { formatCost, formatDuration } from "@/lib/utils"
 import { ApiError } from "@/lib/api"
+import { useJobsStore, selectHasActiveJobForSource } from "@/lib/jobsStore"
 import type {
   HistoryFilters,
   HistoryResponse,
@@ -194,12 +195,12 @@ function HistoryFiltersForm({ filters, onChange }: HistoryFiltersProps) {
         </div>
 
         <div className="flex gap-2">
-          <Button size="sm" variant="outline" onClick={handleReset}>
-            Reset
-          </Button>
-          <Button size="sm" onClick={handleApply}>
+          <Button size="sm" className="flex-1" onClick={handleApply}>
             <Filter className="h-4 w-4 mr-2" />
             Apply
+          </Button>
+          <Button size="sm" variant="outline" className="flex-1" onClick={handleReset}>
+            Reset
           </Button>
         </div>
       </CardContent>
@@ -342,6 +343,11 @@ export function HistoryPage() {
 
   const { data, isLoading, isError } = useHistory(filters)
   const createJob = useCreateJob()
+  // Live job state (queued/running), kept fresh app-wide by useJobsStream()
+  // mounted in AppLayout. Used to gate the Retry button: a plain `failed`
+  // job should only offer Retry while no active job already exists for its
+  // (media_path, language_code) source.
+  const liveJobs = useJobsStore((s) => s.jobs)
 
   const timezone = useTimezoneSetting()
 
@@ -520,6 +526,39 @@ export function HistoryPage() {
                                 Rename
                               </Button>
                             )}
+                            {/* M12: general Retry for an ordinary failed job -
+                                distinct from the output_exists/language-review
+                                cases above, which keep their own buttons.
+                                Gated off live job state (not local component
+                                state) so it correctly disappears once a retry
+                                is in flight, and reappears if that retry
+                                itself later fails. */}
+                            {job.status === "failed" &&
+                              !isOutputExists(job) &&
+                              !needsLanguageRename(job) &&
+                              !selectHasActiveJobForSource(
+                                liveJobs,
+                                job.media_path,
+                                job.language_code,
+                              ) && (
+                                <Button
+                                  size="sm"
+                                  variant="outline"
+                                  disabled={createJob.isPending}
+                                  onClick={() =>
+                                    createJob.mutate(buildRetry(job), {
+                                      onSuccess: (newJob) => {
+                                        useJobsStore.getState().merge([newJob])
+                                        toast.success("Retry queued")
+                                      },
+                                      onError: () =>
+                                        toast.error("Failed to queue retry"),
+                                    })
+                                  }
+                                >
+                                  {createJob.isPending ? "Queuing…" : "Retry"}
+                                </Button>
+                              )}
                           </div>
                         </TableCell>
                       </TableRow>

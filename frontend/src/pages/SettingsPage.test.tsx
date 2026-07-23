@@ -53,7 +53,6 @@ const MOCK_SETTINGS = {
   mistral_input_token_rate_usd: null,
   mistral_output_token_rate_usd: null,
   bazarr_poll_interval: 3600,
-  bazarr_track_no_subs: false,
   bazarr_url: "http://localhost:6767",
   bazarr_api_key: "test-api-key",
   bazarr_timeout: 30.0,
