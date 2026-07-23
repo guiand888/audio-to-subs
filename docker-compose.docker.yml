@@ -87,7 +87,6 @@ services:
     restart: unless-stopped
     security_opt:
       - no-new-privileges:true
-    user: "1000:1000"
 
   worker:
     build:
