@@ -2,11 +2,22 @@
 
 All notable changes to this project are documented in this file. Versions follow [Semantic Versioning](https://semver.org/) with `v2.0.0-beta.*` pre-releases leading to the stable v2.0.0 release.
 
-## [Unreleased]
+## v2.6.0 - 2026-07-23
+
+Consolidated feature release covering milestones M8 and M10–M13 (the full v2.1–v2.6 line planned in `MILESTONES.md`). All changes are backward-compatible except the removal of the `set-password` CLI subcommand noted below.
+
+### Added
+
+- **Bazarr full library sync (M8)**: the poller now syncs the entire Bazarr library (movies + series/episodes) instead of only missing-subtitle items. The old `bazarr_track_no_subs` toggle is replaced by a 3-way scope filter (`all` / `missing` / `no_subs`) derived at query time from the wanted cache. An Alembic migration (`0006`) cleans up the orphaned settings row on upgrade.
+- **History Retry action (M12)**: failed jobs that aren't already covered by Overwrite & retry or Rename now show a Retry button that re-queues the job with `overwrite: true`.
+- **History filter buttons (M13)**: Apply and Reset buttons for the filter form, ordered Apply-first/Reset-second as an equal-width matched pair.
+- **ParoleSub logo (M13)**: brand lockup added to the sidebar (mark-only when collapsed, full lockup when expanded) and the login page, with light/dark variants.
 
 ### Changed
 
-- Admin password is now reconciled from `ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE` on every boot (startup reconcile trigger model). Rotating the Podman secret or `.env` value and redeploying is the sole mechanism for changing the admin password — the stored hash is updated automatically on the next boot.
+- **Admin password reconcile on boot (M10)**: the stored admin password hash is now reconciled against the resolved secret (`ADMIN_PASSWORD` / `ADMIN_PASSWORD_FILE`) on every startup. Rotating the Podman secret or `.env` value and redeploying is the sole mechanism for changing the admin password — the hash is updated automatically on the next boot.
+- **Queue auto-refresh default On (M11)**: the Queue panel's Auto-refresh toggle now defaults to On so a freshly opened page live-updates without manual intervention.
+- Renumbered the v3.0 Redis milestone (M11→M14 in `MILESTONES.md`) after the v2.x feature line.
 
 ### Removed
 
