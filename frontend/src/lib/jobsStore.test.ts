@@ -1,5 +1,6 @@
 import { describe, it, expect, beforeEach } from "vitest"
-import { useJobsStore } from "./jobsStore"
+import { useJobsStore, selectHasActiveJobForSource } from "./jobsStore"
+import type { LiveJob } from "./jobsStore"
 import type { JobResponse, SseEventData } from "./types"
 
 // Mock job data
@@ -480,5 +481,96 @@ describe("jobsStore", () => {
       expect(job2.status).toBe("queued")
       expect(useJobsStore.getState().lastTerminalJobId).toBe("job-1")
     })
+  })
+})
+
+// Build a minimal LiveJob for selector tests, overriding only the fields
+// selectHasActiveJobForSource cares about.
+function makeLiveJob(overrides: Partial<LiveJob>): LiveJob {
+  return {
+    id: "job-x",
+    status: "queued",
+    percent: 0,
+    stage: "",
+    message: "",
+    step_index: null,
+    step_total: null,
+    source: "manual",
+    source_ref: null,
+    media_path: "/path/to/file.mp4",
+    language_code: "en",
+    language_mode: "explicit",
+    output_format: "srt",
+    created_at: "",
+    started_at: null,
+    finished_at: null,
+    cancel_requested: false,
+    audio_duration_seconds: null,
+    runtime_seconds: null,
+    estimated_cost_usd: null,
+    error_message: null,
+    ...overrides,
+  }
+}
+
+describe("selectHasActiveJobForSource()", () => {
+  it("returns true when a queued job matches media_path and language_code", () => {
+    const jobs = {
+      "job-1": makeLiveJob({ id: "job-1", status: "queued" }),
+    }
+    expect(
+      selectHasActiveJobForSource(jobs, "/path/to/file.mp4", "en"),
+    ).toBe(true)
+  })
+
+  it("returns true when a running job matches media_path and language_code", () => {
+    const jobs = {
+      "job-1": makeLiveJob({ id: "job-1", status: "running" }),
+    }
+    expect(
+      selectHasActiveJobForSource(jobs, "/path/to/file.mp4", "en"),
+    ).toBe(true)
+  })
+
+  it("returns false when the matching job is done/failed/cancelled", () => {
+    for (const status of ["done", "failed", "cancelled"]) {
+      const jobs = {
+        "job-1": makeLiveJob({ id: "job-1", status }),
+      }
+      expect(
+        selectHasActiveJobForSource(jobs, "/path/to/file.mp4", "en"),
+      ).toBe(false)
+    }
+  })
+
+  it("returns false when media_path does not match", () => {
+    const jobs = {
+      "job-1": makeLiveJob({ id: "job-1", status: "queued", media_path: "/other.mp4" }),
+    }
+    expect(
+      selectHasActiveJobForSource(jobs, "/path/to/file.mp4", "en"),
+    ).toBe(false)
+  })
+
+  it("returns false when language_code does not match", () => {
+    const jobs = {
+      "job-1": makeLiveJob({ id: "job-1", status: "queued", language_code: "fr" }),
+    }
+    expect(
+      selectHasActiveJobForSource(jobs, "/path/to/file.mp4", "en"),
+    ).toBe(false)
+  })
+
+  it("matches on null language_code (auto mode with no code yet)", () => {
+    const jobs = {
+      "job-1": makeLiveJob({ id: "job-1", status: "queued", language_code: null }),
+    }
+    expect(
+      selectHasActiveJobForSource(jobs, "/path/to/file.mp4", null),
+    ).toBe(true)
+  })
+
+  it("returns false for an empty jobs map", () => {
+    expect(selectHasActiveJobForSource({}, "/path/to/file.mp4", "en")).toBe(false)
   })
 })
