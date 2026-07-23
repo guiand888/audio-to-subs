@@ -5,7 +5,7 @@ services:
       # version. The application version is baked at build time from the
       # repo-root VERSION file (see setup.py / pyproject.toml) and reported by
       # the backend's GET /api/version, independent of how it's deployed.
-      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.6.0-beta.2}
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.6.0-beta.3}
       dockerfile: Dockerfile
     image: parolesub:backend
     container_name: parolesub-backend
@@ -85,7 +85,7 @@ services:
 
   worker:
     build:
-      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.6.0-beta.2}
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.6.0-beta.3}
       dockerfile: Dockerfile
     image: parolesub:worker
     container_name: parolesub-worker
@@ -131,7 +131,7 @@ services:
 
   frontend:
     build:
-      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.6.0-beta.2}:frontend
+      context: https://github.com/guiand888/parolesub.git#${PAROLESUB_TAG:-v2.6.0-beta.3}:frontend
       dockerfile: Dockerfile
     image: parolesub:frontend
     container_name: parolesub-frontend
