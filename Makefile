@@ -20,22 +20,34 @@ help:  ## Show this help message
 build:  ## Build production container
 	podman build -t $(PROD_IMAGE) .
 
-version-check:  ## Verify VERSION is non-empty and (on a tagged commit) equals the git tag
+version-check:  ## Verify VERSION is non-empty, (on a tagged commit) equals the git tag, and compose PAROLESUB_TAG fallbacks match
 	@test -n "$(APP_VERSION)" || { echo "VERSION file is empty or missing"; exit 1; }
 	@tag=$$(git describe --tags --exact-match 2>/dev/null); \
 	if [ -n "$$tag" ] && [ "$$tag" != "$(APP_VERSION)" ]; then \
 		echo "MISMATCH: git tag $$tag != VERSION=$(APP_VERSION)"; exit 1; \
 	fi
+	@stale=$$(grep -o 'PAROLESUB_TAG:-[^}]*' docker-compose.yml docker-compose.docker.yml 2>/dev/null \
+		| sed 's/.*:-//' | sort -u); \
+	for v in $$stale; do \
+		if [ "$$v" != "$(APP_VERSION)" ]; then \
+			echo "MISMATCH: compose PAROLESUB_TAG fallback=$$v != VERSION=$(APP_VERSION)"; \
+			echo "Run 'make release VERSION=$(APP_VERSION)' to align, or edit docker-compose*.yml manually."; \
+			exit 1; \
+		fi; \
+	done
 	@echo "Version coherence OK ($(APP_VERSION))"
 
 release:  ## Bump version and create an annotated tag: make release VERSION=v2.0.0-beta.11
 	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=vX.Y.Z"; exit 1; }
 	@printf '%s\n' "$(VERSION)" > VERSION
+	@sed -i 's|\$${PAROLESUB_TAG:-[^}]*}|\$${PAROLESUB_TAG:-$(VERSION)}|g' \
+		docker-compose.yml docker-compose.docker.yml
 	@git tag -a "$(VERSION)" -m "$(VERSION)"
 	@echo ""
 	@echo "VERSION is now $(VERSION) (the single source of truth; baked into the"
 	@echo "package at build time from this file)."
 	@echo "Annotated tag $(VERSION) created (so 'git push --follow-tags' pushes it)."
+	@echo "Compose PAROLESUB_TAG fallbacks updated to $(VERSION)."
 	@echo "Next (run manually):"
 	@echo "  git commit -am 'release: $(VERSION)'"
 	@echo "  git push --follow-tags"
