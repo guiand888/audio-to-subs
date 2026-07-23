@@ -438,6 +438,10 @@ async def _upsert_cache_entry(
 ) -> None:
     """Upsert a Bazarr cache entry (select-update/insert pattern).
 
+    Does not commit - the caller commits once per processed chunk (see
+    `_poll_all_movies`/`_poll_all_episodes`) so a full sync issues a handful
+    of write transactions instead of one per item.
+
     Args:
         db: Async database session
         cache_id: Unique cache ID
@@ -479,8 +483,6 @@ async def _upsert_cache_entry(
             active_job_id=None,
         )
         db.add(cache_entry)
-
-    await db.commit()
 
 
 async def _process_movie(
@@ -575,6 +577,26 @@ async def _process_episode(
     )
 
 
+# Batch size for both the episodes HTTP fetch (`/api/episodes?seriesid[]=...`,
+# one call per batch of series) and the cache-commit granularity for both
+# movies and episodes (one `db.commit()` per processed chunk instead of per
+# item). Bazarr's episodes endpoint has no pagination and answers any-sized
+# `seriesid[]` list with one `IN (...)` query, and 100 keeps that query
+# string comfortably under typical proxy/header size limits while cutting a
+# few-hundred-series library down to a handful of requests. Reusing the same
+# size for commit chunking bounds each write transaction to ~100 items
+# instead of the 1 item/commit before it - trading finer per-item failure
+# isolation for far fewer SQLite write transactions per full sync (a sync
+# with ~3,250 items previously issued ~3,250 transactions; this cuts it to a
+# few dozen).
+CACHE_COMMIT_BATCH_SIZE = 100
+
+
+def _chunked(items: list[Any], size: int) -> list[list[Any]]:
+    """Split `items` into consecutive chunks of at most `size` elements."""
+    return [items[i : i + size] for i in range(0, len(items), size)]
+
+
 async def _poll_all_movies(
     db: "AsyncSession",
     client: BazarrClient,
@@ -594,6 +616,10 @@ async def _poll_all_movies(
     the pre-M8 behaviour where a failed wanted-movies fetch also propagated
     rather than being silently reported as a successful empty poll.
 
+    Movies are fetched in one upfront call (no HTTP batching like episodes),
+    but still committed in `CACHE_COMMIT_BATCH_SIZE`-sized chunks rather than
+    one commit per movie, to bound write-transaction count.
+
     Args:
         db: Async database session
         client: BazarrClient instance
@@ -612,27 +638,15 @@ async def _poll_all_movies(
         reporter.set_stage("syncing movies")
         await reporter.report(force=True)
 
-    for movie in movies_page.data:
-        await _process_movie(db, movie, path_map, started_at)
-        processed += 1
-        if reporter is not None:
-            await reporter.step()
+    for chunk in _chunked(movies_page.data, CACHE_COMMIT_BATCH_SIZE):
+        for movie in chunk:
+            await _process_movie(db, movie, path_map, started_at)
+            processed += 1
+            if reporter is not None:
+                await reporter.step()
+        await db.commit()
 
     return processed
-
-
-# Number of series batched into a single `/api/episodes?seriesid[]=...` call.
-# Bazarr's endpoint has no pagination and answers any-sized `seriesid[]` list
-# with one `IN (...)` query, so batching trades one HTTP round-trip per
-# series for one per batch. 100 keeps the query string comfortably under
-# typical proxy/header size limits while still cutting a few-hundred-series
-# library down to a handful of requests.
-EPISODE_BATCH_SIZE = 100
-
-
-def _chunked(items: list[Any], size: int) -> list[list[Any]]:
-    """Split `items` into consecutive chunks of at most `size` elements."""
-    return [items[i : i + size] for i in range(0, len(items), size)]
 
 
 async def _poll_all_episodes(
@@ -647,13 +661,12 @@ async def _poll_all_episodes(
     Ingests ALL episodes regardless of subtitle state, walking series in
     batches since Bazarr has no single "all episodes" endpoint (bounded by
     the number of batches, not one call per series or per episode - see
-    `EPISODE_BATCH_SIZE`).
+    `CACHE_COMMIT_BATCH_SIZE`).
 
-    Each episode is upserted immediately as it's fetched rather than
-    collected into a separate DB phase: `_upsert_cache_entry` opens and
-    commits its own short transaction per item (select + commit), so no
-    write transaction is ever held open across the next batch's HTTP call
-    (short-transaction convention).
+    Each batch's episodes are upserted as they're fetched, then committed
+    once as a group at the end of the batch (one write transaction per
+    batch, not per episode), so no write transaction is ever held open
+    across the next batch's HTTP call (short-transaction convention).
 
     A failure listing the series themselves propagates (this is now the
     primary source of episode data - see `_poll_all_movies`'s docstring).
@@ -684,7 +697,7 @@ async def _poll_all_episodes(
         reporter.set_stage("syncing episodes")
         await reporter.report(force=True)
 
-    for batch in _chunked(series_page.data, EPISODE_BATCH_SIZE):
+    for batch in _chunked(series_page.data, CACHE_COMMIT_BATCH_SIZE):
         series_ids = [series.sonarrSeriesId for series in batch]
         try:
             episodes_page = await client.list_episodes(seriesid=series_ids)
@@ -710,6 +723,8 @@ async def _poll_all_episodes(
             processed += 1
             if reporter is not None:
                 await reporter.step()
+
+        await db.commit()
 
     return processed
 
