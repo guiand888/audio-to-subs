@@ -169,6 +169,7 @@ class Pipeline:
             model=transcription_model,
             language=language,
             progress_callback=self.progress_callback if verbose_progress else None,
+            read_timeout=self._transcription_timeout(),
         )
         self.subtitle_generator = SubtitleGenerator()
         self._language = language
@@ -736,6 +737,23 @@ class Pipeline:
         except Exception as e:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
 
+    def _transcription_timeout(self) -> float:
+        """Read timeout for the TranscriptionClient's httpx client.
+
+        Passed once at ``TranscriptionClient`` construction as
+        ``read_timeout`` — it bounds how long we wait for Mistral to finish
+        processing and respond, not upload time (uploads are streamed in
+        chunks, so they're bounded by a small, fixed, file-size-independent
+        write timeout instead; see ``TranscriptionClient.__init__``).
+
+        Scales with ``max_audio_length`` (the split threshold, hence the
+        longest a single segment can be) since Mistral's processing time for
+        a segment presumably scales with its duration. 600s of headroom is a
+        starting point, not an empirically-derived number — tune with real
+        observed (upload, wait) durations if this proves too tight or loose.
+        """
+        return float(self.max_audio_length) + 600.0
+
     def _transcribe_single_segment(
         self, segment_path: str, segment_index: int, total_segments: int
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str | None]:
@@ -764,7 +782,11 @@ class Pipeline:
             segment_count=total_segments,
         )
 
-        # Pass segment info to transcription client for detailed progress
+        # Pass segment info to transcription client for detailed progress.
+        # Read timeout is configured once on the client itself (see
+        # Pipeline.__init__/_transcription_timeout) — uploads are streamed in
+        # chunks with their own small, fixed write timeout, so there's no
+        # per-call timeout to pass here.
         segments = self.transcription_client.transcribe_audio_with_timestamps(
             segment_path,
             segment_number=segment_index if self.verbose_progress else None,
