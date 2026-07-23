@@ -736,6 +736,17 @@ class Pipeline:
         except Exception as e:
             raise PipelineError(f"Transcription failed: {str(e)}") from e
 
+    def _transcription_timeout(self) -> float:
+        """Per-request timeout for a single Mistral transcription call.
+
+        Scales with ``max_audio_length`` (the split threshold, hence the
+        longest a single segment can be) rather than a flat constant: a
+        multi-hour segment needs far more than the client's 60s default to
+        upload and transcribe. 600s of headroom covers upload time and
+        Mistral-side processing/queueing beyond real-time.
+        """
+        return float(self.max_audio_length) + 600.0
+
     def _transcribe_single_segment(
         self, segment_path: str, segment_index: int, total_segments: int
     ) -> tuple[list[dict[str, Any]], dict[str, Any] | None, str | None]:
@@ -764,11 +775,17 @@ class Pipeline:
             segment_count=total_segments,
         )
 
-        # Pass segment info to transcription client for detailed progress
+        # Pass segment info to transcription client for detailed progress.
+        # timeout scales with max_audio_length (the split threshold, so also
+        # the worst-case duration of any single segment): the client's own
+        # 60s default is sized for short clips and silently truncates large
+        # segments mid-upload/processing with "write operation timed out"
+        # once audio runs long.
         segments = self.transcription_client.transcribe_audio_with_timestamps(
             segment_path,
             segment_number=segment_index if self.verbose_progress else None,
             total_segments=total_segments if self.verbose_progress else None,
+            timeout=self._transcription_timeout(),
         )
 
         # Extract usage/detected language from the transcription response
