@@ -1655,6 +1655,46 @@ class TestManualPolling:
         assert "2 episodes" in log.message
 
 
+class TestFullSyncSerialization:
+    """poll_bazarr_manually serializes concurrent full syncs (periodic
+    poller vs. manual refresh) via a lock. Two concurrent full syncs each
+    issue thousands of short read/write transactions against the same
+    SQLite file and can exceed busy_timeout, crashing with 'database is
+    locked' - this is a regression test for that production incident."""
+
+    @pytest.mark.asyncio
+    async def test_concurrent_calls_never_overlap(self, mock_db_session):
+        from audio_to_subs.bazarr.schemas import MoviesPage, SeriesPage
+
+        concurrent_count = 0
+        max_concurrent = 0
+
+        async def list_all_movies_side_effect(*args, **kwargs):
+            nonlocal concurrent_count, max_concurrent
+            concurrent_count += 1
+            max_concurrent = max(max_concurrent, concurrent_count)
+            await asyncio.sleep(0.05)
+            concurrent_count -= 1
+            return MoviesPage(data=[], total=0)
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        mock_client.list_all_movies.side_effect = list_all_movies_side_effect
+        mock_client.list_all_series.return_value = SeriesPage(data=[], total=0)
+
+        path_map = PathMap()
+
+        await asyncio.gather(
+            poll_bazarr_manually(mock_db_session, mock_client, path_map, "movie"),
+            poll_bazarr_manually(mock_db_session, mock_client, path_map, "movie"),
+        )
+
+        # The two calls' list_all_movies invocations must never be in
+        # flight at the same time - proves the lock actually serializes
+        # them rather than letting both proceed concurrently.
+        assert max_concurrent == 1
+        assert mock_client.list_all_movies.await_count == 2
+
+
 class TestFullSyncBounding:
     """Full sync must remain bounded: one call for movies (not one per
     movie), one call per distinct series (not one per episode)."""

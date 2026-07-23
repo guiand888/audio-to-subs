@@ -272,6 +272,17 @@ async def poll_once(
     return movies_processed + episodes_processed
 
 
+# Serializes full-library Bazarr syncs: the periodic poller (poll_once) and
+# on-demand manual refreshes (the Wanted page's Refresh button) both call
+# poll_bazarr_manually. Without this, two concurrent full syncs each issue
+# thousands of short read/write transactions against the same SQLite file
+# and can exceed busy_timeout, raising "database is locked" - which aborts
+# the refresh and can collaterally starve the worker's own job-claiming
+# query on the same file. At most one full sync now runs at a time; a
+# second caller waits for the lock instead of racing the DB.
+_full_sync_lock = asyncio.Lock()
+
+
 async def poll_bazarr_manually(
     db: "AsyncSession",
     client: BazarrClient,
@@ -311,64 +322,81 @@ async def poll_bazarr_manually(
     if reporter is None:
         reporter = ProgressReporter()
 
-    started_at = datetime.now(timezone.utc)
-    logger.info(
-        "Starting Bazarr poll at %s (item_type=%s)", started_at.isoformat(), item_type
-    )
-
-    movies_processed = 0
-    episodes_processed = 0
-
-    try:
-        # Determine which types to poll
-        poll_movies = item_type is None or item_type == "all" or item_type == "movie"
-        poll_episodes = (
-            item_type is None or item_type == "all" or item_type == "episode"
-        )
-
-        reporter.set_stage("syncing library")
-        await reporter.report(force=True)
-
-        if poll_movies:
-            movies_processed = await _poll_all_movies(
-                db, client, path_map, started_at, reporter
-            )
-
-        if poll_episodes:
-            episodes_processed = await _poll_all_episodes(
-                db, client, path_map, started_at, reporter
-            )
-
-        # Delete stale items (no longer present in Bazarr) - only for types
-        # that were actually polled
-        deleted_count = await _delete_stale(db, started_at, poll_movies, poll_episodes)
-        if deleted_count > 0:
-            logger.info("Deleted %d stale items from cache", deleted_count)
-
-        reporter.set_stage("done")
-        await reporter.report(force=True)
-
+    if _full_sync_lock.locked():
         logger.info(
-            "Bazarr poll complete: processed %d movies, %d episodes, deleted %d stale",
-            movies_processed,
-            episodes_processed,
-            deleted_count,
+            "Waiting for an in-progress Bazarr sync to finish before starting "
+            "(item_type=%s)",
+            item_type,
         )
-        await write_job_log(
-            db,
-            LogLevel.INFO,
-            f"Bazarr sync completed: {movies_processed} movies, "
-            f"{episodes_processed} episodes processed, {deleted_count} stale removed",
-        )
-
-    except Exception as e:
-        logger.error("Error during Bazarr poll: %s", e, exc_info=True)
-        await write_job_log(db, LogLevel.ERROR, f"Bazarr sync failed: {e}")
-        reporter.set_stage("error")
+        reporter.set_stage("waiting for another sync to finish")
         await reporter.report(force=True)
-        raise
 
-    return movies_processed, episodes_processed
+    async with _full_sync_lock:
+        started_at = datetime.now(timezone.utc)
+        logger.info(
+            "Starting Bazarr poll at %s (item_type=%s)",
+            started_at.isoformat(),
+            item_type,
+        )
+
+        movies_processed = 0
+        episodes_processed = 0
+
+        try:
+            # Determine which types to poll
+            poll_movies = (
+                item_type is None or item_type == "all" or item_type == "movie"
+            )
+            poll_episodes = (
+                item_type is None or item_type == "all" or item_type == "episode"
+            )
+
+            reporter.set_stage("syncing library")
+            await reporter.report(force=True)
+
+            if poll_movies:
+                movies_processed = await _poll_all_movies(
+                    db, client, path_map, started_at, reporter
+                )
+
+            if poll_episodes:
+                episodes_processed = await _poll_all_episodes(
+                    db, client, path_map, started_at, reporter
+                )
+
+            # Delete stale items (no longer present in Bazarr) - only for
+            # types that were actually polled
+            deleted_count = await _delete_stale(
+                db, started_at, poll_movies, poll_episodes
+            )
+            if deleted_count > 0:
+                logger.info("Deleted %d stale items from cache", deleted_count)
+
+            reporter.set_stage("done")
+            await reporter.report(force=True)
+
+            logger.info(
+                "Bazarr poll complete: processed %d movies, %d episodes, "
+                "deleted %d stale",
+                movies_processed,
+                episodes_processed,
+                deleted_count,
+            )
+            await write_job_log(
+                db,
+                LogLevel.INFO,
+                f"Bazarr sync completed: {movies_processed} movies, "
+                f"{episodes_processed} episodes processed, {deleted_count} stale removed",
+            )
+
+        except Exception as e:
+            logger.error("Error during Bazarr poll: %s", e, exc_info=True)
+            await write_job_log(db, LogLevel.ERROR, f"Bazarr sync failed: {e}")
+            reporter.set_stage("error")
+            await reporter.report(force=True)
+            raise
+
+        return movies_processed, episodes_processed
 
 
 def _build_language_list(languages: list[Any] | None) -> list[dict[str, Any]]:
