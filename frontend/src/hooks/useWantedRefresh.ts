@@ -59,6 +59,15 @@ const READY_TIMEOUT_MS = 5_000
 // try to recover via the persisted-state GET endpoint.
 const WATCHDOG_TIMEOUT_MS = 30_000
 
+// A non-terminal recovery snapshot doesn't necessarily mean the connection
+// is dead - a legitimately slow backend stage (e.g. a large library) can go
+// quiet for a watchdog cycle or two without the refresh actually being
+// stuck. The first check only establishes a baseline (nothing to compare
+// against yet), so give up after this many further consecutive checks show
+// zero measurable progress beyond that baseline - a total of
+// WATCHDOG_TIMEOUT_MS * (this + 1) before surfacing an error, e.g. 90s.
+const MAX_STALLED_WATCHDOG_CHECKS = 2
+
 // How long to leave the bar in its terminal state before resetting to idle.
 const FINALIZE_RESET_MS = 3_000
 
@@ -138,6 +147,11 @@ export function useWantedRefresh(): UseWantedRefreshResult {
       let watchdog: ReturnType<typeof setTimeout> | null = null
       let readyTimeout: ReturnType<typeof setTimeout> | null = null
       let finalizeTimeout: ReturnType<typeof setTimeout> | null = null
+      // Tracks consecutive watchdog fires with no measurable progress, so a
+      // legitimately slow (but alive) backend stage isn't mistaken for a
+      // dead connection after a single 30s check.
+      let lastWatchdogProcessed: number | null = null
+      let stalledWatchdogChecks = 0
 
       const clearTimers = () => {
         if (watchdog) {
@@ -221,12 +235,43 @@ export function useWantedRefresh(): UseWantedRefreshResult {
                 snapshot.error,
                 snapshot.movies_processed + snapshot.episodes_processed,
               )
-            } else {
-              // Still running but SSE went silent - connection is probably
-              // dead. Reset so the user can retry rather than hang.
-              toast.error("Refresh status unknown, please retry")
-              resetToIdle()
+              return
             }
+
+            // Still "started": the backend snapshot's own processed count
+            // tells us whether it's genuinely alive (a slow stage, e.g. a
+            // large library's episode sync) or actually stuck. Only the
+            // latter should give up on the user.
+            if (
+              lastWatchdogProcessed === null ||
+              snapshot.processed > lastWatchdogProcessed
+            ) {
+              lastWatchdogProcessed = snapshot.processed
+              stalledWatchdogChecks = 0
+              setProgress({
+                active: true,
+                processed: snapshot.processed,
+                total: snapshot.total,
+                percent: snapshot.percent,
+                stage: snapshot.stage,
+                status: "started",
+                error: null,
+              })
+              armWatchdog()
+              return
+            }
+
+            stalledWatchdogChecks += 1
+            if (stalledWatchdogChecks < MAX_STALLED_WATCHDOG_CHECKS) {
+              armWatchdog()
+              return
+            }
+
+            // No progress across several consecutive checks - the
+            // connection (or the refresh itself) is genuinely dead. Reset
+            // so the user can retry rather than hang forever.
+            toast.error("Refresh status unknown, please retry")
+            resetToIdle()
           } catch {
             if (finalized) return
             toast.error("Refresh status unknown, please retry")

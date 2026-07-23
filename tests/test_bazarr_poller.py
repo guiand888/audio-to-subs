@@ -1248,6 +1248,98 @@ class TestPollAllEpisodes:
         assert cached[0].ext_id == 100
         assert cached[0].has_any_subs is False
 
+    @pytest.mark.asyncio
+    async def test_poll_all_episodes_batches_series_into_few_calls(
+        self, mock_db_session
+    ):
+        """More series than EPISODE_BATCH_SIZE are split across multiple
+        batched calls, not fetched one series at a time - the fix for the
+        N+1-per-series regression that starved the refresh watchdog of
+        progress events on large libraries."""
+        from audio_to_subs.bazarr.schemas import (
+            Episode,
+            EpisodesPage,
+            Series,
+            SeriesPage,
+        )
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        series = [
+            Series(sonarrSeriesId=i, title=f"Series {i}", path=f"/tv/s{i}")
+            for i in range(1, 6)
+        ]
+        mock_client.list_all_series.return_value = SeriesPage(data=series, total=5)
+
+        def list_episodes_side_effect(*, seriesid):
+            return EpisodesPage(
+                data=[
+                    Episode(sonarrEpisodeId=sid * 10, sonarrSeriesId=sid, title="Ep1")
+                    for sid in seriesid
+                ]
+            )
+
+        mock_client.list_episodes.side_effect = list_episodes_side_effect
+
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        with patch("audio_to_subs.bazarr.poller.EPISODE_BATCH_SIZE", 2):
+            processed = await _poll_all_episodes(
+                mock_db_session, mock_client, path_map, started_at
+            )
+
+        # 5 series at a batch size of 2 -> 3 calls (2, 2, 1), not 5.
+        assert mock_client.list_episodes.await_count == 3
+        assert processed == 5
+
+    @pytest.mark.asyncio
+    async def test_poll_all_episodes_reports_heartbeat_per_batch(self, mock_db_session):
+        """A forced progress report fires at the start of the episodes
+        phase and again after every batch, independent of the throttled
+        per-item stepping - so a slow/large library still emits
+        refresh_progress events regularly instead of going silent for the
+        whole phase (the root cause of the Wanted-refresh watchdog firing
+        on large libraries)."""
+        from audio_to_subs.bazarr.schemas import (
+            Episode,
+            EpisodesPage,
+            Series,
+            SeriesPage,
+        )
+
+        mock_client = AsyncMock(spec=BazarrClient)
+        series = [
+            Series(sonarrSeriesId=i, title=f"Series {i}", path=f"/tv/s{i}")
+            for i in range(1, 4)
+        ]
+        mock_client.list_all_series.return_value = SeriesPage(data=series, total=3)
+
+        def list_episodes_side_effect(*, seriesid):
+            return EpisodesPage(
+                data=[Episode(sonarrEpisodeId=1, sonarrSeriesId=1, title="Ep")]
+            )
+
+        mock_client.list_episodes.side_effect = list_episodes_side_effect
+
+        stages: list[str] = []
+
+        async def callback(processed, total, percent, stage):
+            stages.append(stage)
+
+        reporter = ProgressReporter(callback=callback, throttle_seconds=999)
+        path_map = PathMap()
+        started_at = datetime.now(timezone.utc)
+
+        with patch("audio_to_subs.bazarr.poller.EPISODE_BATCH_SIZE", 1):
+            await _poll_all_episodes(
+                mock_db_session, mock_client, path_map, started_at, reporter
+            )
+
+        # One force report entering the phase + one per batch (3 series,
+        # batch size 1 => 3 batches) = 4, even with an effectively-infinite
+        # throttle that would otherwise suppress every non-forced report.
+        assert stages.count("syncing episodes") == 4
+
 
 class TestManualPolling:
     """Test manual polling functionality with type filtering (full sync)."""
@@ -1468,8 +1560,10 @@ class TestManualPolling:
 
     @pytest.mark.asyncio
     async def test_manual_poll_tolerates_one_bad_series(self, mock_db_session):
-        """A failure fetching one series' episodes is logged and skipped,
-        not fatal to the whole episode sync - the other series still land."""
+        """A failure fetching one batch of series' episodes is logged and
+        skipped, not fatal to the whole episode sync - other batches still
+        land. Forces a batch size of 1 so each series gets its own batch/call,
+        preserving per-series fault isolation for this test."""
         from audio_to_subs.bazarr.client import BazarrServerError
         from audio_to_subs.bazarr.schemas import (
             Episode,
@@ -1486,7 +1580,7 @@ class TestManualPolling:
         )
 
         async def list_episodes_side_effect(*, seriesid):
-            if seriesid == 2:
+            if seriesid == [2]:
                 raise BazarrServerError("boom")
             return EpisodesPage(
                 data=[Episode(sonarrEpisodeId=10, sonarrSeriesId=1, title="Ep1")]
@@ -1495,9 +1589,10 @@ class TestManualPolling:
         mock_client.list_episodes.side_effect = list_episodes_side_effect
 
         path_map = PathMap()
-        _, episodes_processed = await poll_bazarr_manually(
-            mock_db_session, mock_client, path_map, "episode"
-        )
+        with patch("audio_to_subs.bazarr.poller.EPISODE_BATCH_SIZE", 1):
+            _, episodes_processed = await poll_bazarr_manually(
+                mock_db_session, mock_client, path_map, "episode"
+            )
 
         assert episodes_processed == 1
         entry = (
@@ -1609,7 +1704,12 @@ class TestFullSyncBounding:
         assert entry_b.audio_language[0]["code2"] == "de"
 
     @pytest.mark.asyncio
-    async def test_episodes_fetched_once_per_distinct_series(self, mock_db_session):
+    async def test_episodes_fetched_in_one_batched_call_per_batch(
+        self, mock_db_session
+    ):
+        """Distinct series are batched into `seriesid[]` lists (up to
+        EPISODE_BATCH_SIZE per call), not fetched one series - or one
+        episode - at a time."""
         from audio_to_subs.bazarr.schemas import (
             Episode,
             EpisodesPage,
@@ -1629,29 +1729,21 @@ class TestFullSyncBounding:
         )
 
         def list_episodes_side_effect(*, seriesid):
-            if seriesid == 10:
-                return EpisodesPage(
-                    data=[
-                        Episode(
-                            sonarrEpisodeId=101,
-                            sonarrSeriesId=10,
-                            title="Ep1",
-                            audio_language=[
-                                SubtitleLanguage(name="English", code2="en")
-                            ],
-                        ),
-                        Episode(
-                            sonarrEpisodeId=102,
-                            sonarrSeriesId=10,
-                            title="Ep2",
-                            audio_language=[
-                                SubtitleLanguage(name="English", code2="en")
-                            ],
-                        ),
-                    ]
-                )
+            assert set(seriesid) == {10, 20}
             return EpisodesPage(
                 data=[
+                    Episode(
+                        sonarrEpisodeId=101,
+                        sonarrSeriesId=10,
+                        title="Ep1",
+                        audio_language=[SubtitleLanguage(name="English", code2="en")],
+                    ),
+                    Episode(
+                        sonarrEpisodeId=102,
+                        sonarrSeriesId=10,
+                        title="Ep2",
+                        audio_language=[SubtitleLanguage(name="English", code2="en")],
+                    ),
                     Episode(
                         sonarrEpisodeId=201,
                         sonarrSeriesId=20,
@@ -1666,8 +1758,9 @@ class TestFullSyncBounding:
         path_map = PathMap()
         await poll_bazarr_manually(mock_db_session, mock_client, path_map, "episode")
 
-        # Bounded by distinct series (2), not by episode count (3).
-        assert mock_client.list_episodes.await_count == 2
+        # Bounded by the number of batches (1, both series fit in the
+        # default EPISODE_BATCH_SIZE), not by series or episode count.
+        assert mock_client.list_episodes.await_count == 1
 
         entry_101 = (
             await mock_db_session.execute(
@@ -1679,7 +1772,9 @@ class TestFullSyncBounding:
                 select(BazarrCache).where(BazarrCache.id == "episode:201")
             )
         ).scalar_one()
+        assert entry_101.title == "Series 1 - Ep1"
         assert entry_101.audio_language[0]["code2"] == "en"
+        assert entry_201.title == "Series 2 - Ep1"
         assert entry_201.audio_language[0]["code2"] == "es"
 
 
