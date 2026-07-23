@@ -77,8 +77,8 @@ test_resources.local.md
 !.env.example
 
 # Project metadata (agent standards)
+# .agents/ is an intentionally tracked git submodule, not ignored.
 AGENTS.md
-.agents/
 CLAUDE.md
 
 # Frontend build artefacts (each also covered by frontend/.gitignore)

@@ -37,19 +37,19 @@ version-check:  ## Verify VERSION is non-empty, (on a tagged commit) equals the 
 	done
 	@echo "Version coherence OK ($(APP_VERSION))"
 
-release:  ## Bump version and create an annotated tag: make release VERSION=v2.0.0-beta.11
+release:  ## Bump version (VERSION file + compose fallbacks): make release VERSION=v2.0.0-beta.11
 	@test -n "$(VERSION)" || { echo "Usage: make release VERSION=vX.Y.Z"; exit 1; }
 	@printf '%s\n' "$(VERSION)" > VERSION
 	@sed -i 's|\$${PAROLESUB_TAG:-[^}]*}|\$${PAROLESUB_TAG:-$(VERSION)}|g' \
 		docker-compose.yml docker-compose.docker.yml
-	@git tag -a "$(VERSION)" -m "$(VERSION)"
 	@echo ""
 	@echo "VERSION is now $(VERSION) (the single source of truth; baked into the"
 	@echo "package at build time from this file)."
-	@echo "Annotated tag $(VERSION) created (so 'git push --follow-tags' pushes it)."
 	@echo "Compose PAROLESUB_TAG fallbacks updated to $(VERSION)."
-	@echo "Next (run manually):"
+	@echo "Next (run manually, IN THIS ORDER — the tag must be created AFTER"
+	@echo "the commit it describes, otherwise it points at the wrong commit):"
 	@echo "  git commit -am 'release: $(VERSION)'"
+	@echo "  git tag -a $(VERSION) -m $(VERSION)"
 	@echo "  git push --follow-tags"
 
 test:  ## Run tests (nix develop)
