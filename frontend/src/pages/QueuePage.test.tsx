@@ -455,6 +455,25 @@ describe("QueuePage", () => {
     })
   })
 
+  describe("Auto-refresh default (M11)", () => {
+    it("defaults to On, and the toggle flips it Off then back On", async () => {
+      render(<QueuePage />, { wrapper })
+
+      const toggle = screen.getByTitle(
+        "Fallback polling when the live stream is unavailable",
+      )
+
+      // Default state on mount, before any interaction.
+      expect(toggle).toHaveTextContent("Auto-refresh: On")
+
+      await userEvent.click(toggle)
+      expect(toggle).toHaveTextContent("Auto-refresh: Off")
+
+      await userEvent.click(toggle)
+      expect(toggle).toHaveTextContent("Auto-refresh: On")
+    })
+  })
+
   describe("Refresh behavior (hard-refresh path replaces live progress)", () => {
     // Regression tests for the bug where the manual "Refresh now" button and
     // the auto-refresh polling toggle showed no visible change: merge()
@@ -510,24 +529,29 @@ describe("QueuePage", () => {
         })
         expect(useJobsStore.getState().jobs["job-1"]).toBeDefined()
 
-        // SSE pushes percent=42.
-        useJobsStore.getState().apply({
-          event: "progress",
-          job_id: "job-1",
-          percent: 42,
-          stage: "transcribe",
-          message: "SSE-fresh",
-          step_index: null,
-          step_total: null,
+        // SSE pushes percent=42. Wrapped in act() so the resulting store
+        // subscription re-render (and its data effect, which sees the
+        // still-old, pre-reassignment `data`) flushes now rather than being
+        // deferred to the next act() boundary below — where it would
+        // otherwise spuriously consume the not-yet-set new server data via
+        // merge() before the interval tick has a chance to flag hardRefresh.
+        act(() => {
+          useJobsStore.getState().apply({
+            event: "progress",
+            job_id: "job-1",
+            percent: 42,
+            stage: "transcribe",
+            message: "SSE-fresh",
+            step_index: null,
+            step_total: null,
+          })
         })
         expect(useJobsStore.getState().jobs["job-1"].percent).toBe(42)
 
-        // Toggle auto-refresh ON, then set the fresh server data that the
-        // interval's refetch will "return".
-        fireEvent.click(
-          screen.getByTitle("Fallback polling when the live stream is unavailable"),
-        )
-        // Same job id as the initial seed; only the progress fields change.
+        // Auto-refresh is On by default (M11), so the interval is already
+        // running. Set the fresh server data that the interval's refetch
+        // will "return" — same job id as the initial seed, only the
+        // progress fields change.
         mockUseJobsReturn.data = {
           jobs: [{ ...MOCK_JOB_QUEUED, status: "running", progress_percent: 50 }],
         }
