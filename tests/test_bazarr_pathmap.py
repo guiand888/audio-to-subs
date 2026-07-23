@@ -130,8 +130,26 @@ class TestPathMapFromSettings:
         path_map = PathMap.from_settings([])
         assert len(path_map.get_mappings()) == 0
 
+    def test_from_settings_with_ui_shape(self):
+        """The Settings UI (PathMappingsForm.tsx) persists mappings as
+        {"from": ..., "to": ...} - this is the real shape stored in the DB
+        and must be the primary shape from_settings() understands. Prior to
+        this fix, from_settings() only read bazarr_prefix/local_prefix, so
+        every mapping the UI ever wrote was silently dropped and translate()
+        became a no-op regardless of what the user configured."""
+        settings = [
+            {"from": "/bazarr/movies", "to": "/local/movies"},
+            {"from": "/bazarr/tv", "to": "/local/tv"},
+        ]
+        path_map = PathMap.from_settings(settings)
+
+        assert len(path_map.get_mappings()) == 2
+        result = path_map.translate("/bazarr/movies/Inception.mkv")
+        assert result == "/local/movies/Inception.mkv"
+
     def test_from_settings_with_mappings(self):
-        """Test from_settings with valid mappings."""
+        """Legacy bazarr_prefix/local_prefix shape is still accepted as a
+        fallback, for any data that predates the UI's from/to shape."""
         settings = [
             {"bazarr_prefix": "/bazarr/movies", "local_prefix": "/local/movies"},
             {"bazarr_prefix": "/bazarr/tv", "local_prefix": "/local/tv"},
@@ -147,11 +165,28 @@ class TestPathMapFromSettings:
         settings = [
             {"bazarr_prefix": "/bazarr/movies"},  # Missing local_prefix
             {"local_prefix": "/local/movies"},  # Missing bazarr_prefix
+            {"from": "/bazarr/tv"},  # Missing to
+            {"to": "/local/tv"},  # Missing from
         ]
         path_map = PathMap.from_settings(settings)
 
         # Only valid pairs should be added
         assert len(path_map.get_mappings()) == 0
+
+    def test_from_settings_ui_shape_takes_priority_over_legacy(self):
+        """If a dict somehow carries both shapes, the from/to values win -
+        they're the shape the UI actually writes today."""
+        settings = [
+            {
+                "from": "/bazarr/movies",
+                "to": "/local/movies",
+                "bazarr_prefix": "/legacy/movies",
+                "local_prefix": "/legacy/local",
+            }
+        ]
+        path_map = PathMap.from_settings(settings)
+
+        assert path_map.get_mappings() == [("/bazarr/movies", "/local/movies")]
 
     def test_to_settings(self):
         """Test conversion to settings format."""
@@ -196,3 +231,32 @@ class TestPathMapWarnings:
         with caplog.at_level(logging.INFO, logger=logger.name):
             result2 = path_map.translate("/unmatched/path/file2.mkv")
             assert result2 == "/unmatched/path/file2.mkv"
+
+        # Exactly one warning across both calls (same top-level prefix,
+        # "/unmatched"), and it must name a real, non-empty prefix - not the
+        # bare "." that path_parts[0] produced for every absolute path
+        # before this fix (POSIX paths split to a leading '' component).
+        records = [r for r in caplog.records if r.name == logger.name]
+        assert len(records) == 1
+        message = records[0].getMessage()
+        assert "prefix: /unmatched." in message
+        assert "prefix: . " not in message
+
+    def test_warn_for_each_distinct_prefix(self, caplog):
+        """Two unmatched paths under different top-level directories must
+        each get their own warning - the pre-fix bug collapsed ALL absolute
+        paths to the same (empty-string) dedup key, so a second, genuinely
+        different unmapped location never warned at all."""
+        import logging
+
+        logger = logging.getLogger("audio_to_subs.bazarr.pathmap")
+        logger.setLevel(logging.INFO)
+
+        path_map = PathMap()
+
+        with caplog.at_level(logging.INFO, logger=logger.name):
+            path_map.translate("/media/movies/file.mkv")
+            path_map.translate("/other/tv/file.mkv")
+
+        records = [r for r in caplog.records if r.name == logger.name]
+        assert len(records) == 2
